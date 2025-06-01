@@ -208,9 +208,9 @@ ________________________________________________
 
 -- Scrabble HMDE Refactor V2 - -- All Words dialog also needs to be movable and clicked words should appear on the board
 
--- When Invalid word detected, provide option to allow anyway?
+-- Scrabble A 31MAY25 Add Phony - When Invalid word detected, provide option to allow anyway?
 
--- Add a feature to save a game in progress for later loading
+-- Scrabble B 31MAY25 Save In Progress - Add a feature to save a game in progress for later loading
 
 -- make Load text box more robust. Maybe open in a text dialog in case user wants to back out?
 
