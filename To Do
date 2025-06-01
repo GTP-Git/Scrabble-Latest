@@ -1,7 +1,7 @@
 To-Do List
 
 
--- Add a Define Word feature where user can type in word and the Xyzzyva definition appears. Very cool idea, IMO.
+-- It seems that in Replay Mode, when double-clicking a move in the Move List, the star next to the player names is indicating whose turn it is is off by one. So if I want to go to move #3, I should be able to click on move #2, which has now been completed, and thus the turn indacator arrow should be on P2 with that player's rack for that move loaded up. If not, then I have to click on move #3, which shows me the move, but what if I want to see if I can find the move first? I need the rack from which the move was made to be displaced, but since the turn indicator is on the previous move and player, it's not yet loaded.
 
 -- In Replay Mode, the console buttons can still override the Options options, requiring a very precise click to get an option to fire.
 
@@ -213,4 +213,7 @@ ________________________________________________
 -- Scrabble B 31MAY25 Save In Progress - Add a feature to save a game in progress for later loading
 
 -- make Load text box more robust. Maybe open in a text dialog in case user wants to back out?
+
+-- Scrabble D 31MAY25 Word Lookup - Add a Define Word feature where user can type in word and the Xyzzyva definition appears.
+
 
