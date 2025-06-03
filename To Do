@@ -12,8 +12,6 @@ To-Do List
 
 -- In Replay mode, like Woogles does, show the best move that was available, the move the human played, the equity difference, and the running and total equity lost/gained.
 
--- Create a separate CONSTANTS.py file
-
 -- add code for more than a 2-ply look-ahead
 
 -- sometimes game is non-responsive upon startup, or temporarily hands during gameplay, once per game. Is there a way to diagnose and fix this?
@@ -41,9 +39,6 @@ To-Do List
 
 
 -- Cursor focus should default to thh first text box in any dialog
-
--- In Simulation return results, both in the console and in the dialog, show board coordinates.
-
 
 
 -- Save Batch statistics to a Google Sheets. I asked Gemini about this and is easily implemented, but requires OAuth flow, etc. I already have account set up so just need to add sheet ID, etc.
@@ -214,5 +209,8 @@ ________________________________________________
 -- make Load text box more robust. Maybe open in a text dialog in case user wants to back out?
 
 -- Scrabble D 31MAY25 Word Lookup - Add a Define Word feature where user can type in word and the Xyzzyva definition appears.
+
+-- In Simulation return results, both in the console and in the dialog, show board coordinates.
+
 
 
