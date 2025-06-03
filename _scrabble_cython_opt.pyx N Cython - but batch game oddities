@@ -8,7 +8,7 @@
 
 
 #python
-#Scrabble M - Cython - but batch game oddities
+#Scrabble N - Cython
 #Stable 03JUN25
 
 
@@ -106,7 +106,7 @@ cpdef _gaddag_traverse(
     cdef tuple next_pos
     cdef str cross_axis
     cdef set allowed_letters_for_cross
-    cdef object new_rack_counts, new_rack_counts_blank # These are Counter objects
+    # cdef object new_rack_counts, new_rack_counts_blank # These are Counter objects - NO LONGER USED FOR COPIES
     cdef list primary_word_tiles # list of tuples
     cdef list word_with_blanks_list
     cdef dict move_details_dict # Python dict
@@ -358,36 +358,32 @@ cpdef _gaddag_traverse(
             allowed_letters_for_cross = cross_check_sets.get(next_pos, {}).get(cross_axis, set())
             
             if rack_counts[letter] > 0 and letter in allowed_letters_for_cross:
-                new_rack_counts = rack_counts.copy()
-                new_rack_counts[letter] -= 1
-                if new_rack_counts[letter] == 0:
-                    del new_rack_counts[letter]
+                rack_counts[letter] -= 1
                 
                 current_word_tiles.append((next_r, next_c, letter, False, True))
                 _gaddag_traverse( # Direct recursion
-                    anchor_pos, new_rack_counts, tiles, board, blanks, cross_check_sets,
+                    anchor_pos, rack_counts, tiles, board, blanks, cross_check_sets, 
                     next_node_child, current_word_tiles,
                     is_reversed, current_axis, all_found_moves, unique_move_signatures,
                     original_tiles_state, is_first_play, full_rack_size, max_len, depth + 1,
                     is_silent_batch_run_param
                 )
                 current_word_tiles.pop() # Backtrack
+                rack_counts[letter] += 1 # Backtrack: Restore tile count
             
             if rack_counts[' '] > 0 and (' ' in allowed_letters_for_cross or letter in allowed_letters_for_cross):
-                new_rack_counts_blank = rack_counts.copy()
-                new_rack_counts_blank[' '] -= 1
-                if new_rack_counts_blank[' '] == 0:
-                    del new_rack_counts_blank[' ']
+                rack_counts[' '] -= 1
                 
                 current_word_tiles.append((next_r, next_c, letter, True, True))
                 _gaddag_traverse( # Direct recursion
-                    anchor_pos, new_rack_counts_blank, tiles, board, blanks, cross_check_sets,
-                    next_node_child, current_word_tiles,
+                    anchor_pos, rack_counts, tiles, board, blanks, cross_check_sets, 
+                    next_node_child, current_word_tiles, 
                     is_reversed, current_axis, all_found_moves, unique_move_signatures,
                     original_tiles_state, is_first_play, full_rack_size, max_len, depth + 1,
                     is_silent_batch_run_param
                 )
                 current_word_tiles.pop() # Backtrack
+                rack_counts[' '] += 1 # Backtrack: Restore blank count
         elif existing_tile_on_board == letter:
             current_word_tiles.append((next_r, next_c, letter, False, False))
             _gaddag_traverse( # Direct recursion
