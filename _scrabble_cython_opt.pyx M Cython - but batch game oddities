@@ -73,7 +73,10 @@ Gaddag = scrabble_game_module.Gaddag # For Gaddag.SEPARATOR
 
 
 
-def _gaddag_traverse( # Changed to cpdef
+# Full, complete function with no code omitted
+# File: _scrabble_cython_opt.pyx
+
+cpdef _gaddag_traverse(
     tuple anchor_pos, object rack_counts, list tiles, list board, set blanks,
     dict cross_check_sets, object gaddag_node, # gaddag_node is a GaddagNode instance
     list current_word_tiles, bint is_reversed, object current_axis, # current_axis is 'H' or 'V'
@@ -86,16 +89,16 @@ def _gaddag_traverse( # Changed to cpdef
     cdef int r_last, c_last, r_place_loop, c_place_loop, next_r, next_c, ref_r, ref_c, wr_loop, wc_loop
     cdef bint is_new_loop, is_blank_loop, is_bingo_from_validation, is_blank_in_word_loop, found_primary, is_along_axis
     cdef str letter_place_loop, letter, existing_tile_on_board, primary_word_str, word_with_blanks, w_letter_loop
-    cdef list current_word_tiles_copy_list 
-    cdef list newly_placed_list_details_list 
-    cdef tuple new_tiles_sig_tuple 
-    cdef list temp_tiles_for_validation_list 
-    cdef set temp_blanks_for_validation_set 
-    cdef set move_blanks_coords_for_this_play_set 
-    cdef set newly_placed_coords_for_this_play_set 
+    cdef list current_word_tiles_copy_list
+    cdef list newly_placed_list_details_list
+    cdef tuple new_tiles_sig_tuple
+    cdef list temp_tiles_for_validation_list
+    cdef set temp_blanks_for_validation_set
+    cdef set move_blanks_coords_for_this_play_set
+    cdef set newly_placed_coords_for_this_play_set
     cdef object validation_code, detail # These come from a Python function
-    cdef list all_words_details_for_score_list 
-    cdef list leave_list 
+    cdef list all_words_details_for_score_list
+    cdef list leave_list
     cdef int score, longest_word_len
     cdef tuple start_pos
     cdef object orientation # Can be str or other if logic changes
@@ -113,6 +116,27 @@ def _gaddag_traverse( # Changed to cpdef
     cdef int r, c # for tuple unpacking in list comprehensions
     cdef str l # for tuple unpacking
     cdef bint is_new # for tuple unpacking
+    # Added for lambda replacement loops
+    cdef tuple min_tile_h_loop, current_tile_h_loop, min_tile_v_loop, current_tile_v_loop
+    cdef int i_h_loop, i_v_loop
+    # Added for any() replacement loop
+    cdef bint any_tile_in_newly_placed_loop
+    # Added for list comprehension replacement loop
+    cdef int r_loop_lc, c_loop_lc
+    cdef str l_loop_lc
+    cdef bint is_new_loop_lc
+    # Added for replacing temp_tiles_for_validation_list comprehension
+    cdef list row_item_tt
+    # Added for replacing primary_word_str generator expression
+    cdef list primary_word_str_parts_list
+    cdef tuple tile_pws_loop
+    # Added for replacing 'positions' list comprehension in move_details_dict
+    cdef list positions_list_md_loop
+    cdef tuple tile_md_pos_loop
+    # Added for replacing set(generator_expr)
+    cdef set temp_set_for_len_check
+    cdef tuple item_for_set_loop # Generic tuple for iterating items like word_detail_item or primary_word_tiles
+
 
     if depth > 20: # Max recursion depth
         return
@@ -128,80 +152,143 @@ def _gaddag_traverse( # Changed to cpdef
     # If this node in GADDAG marks the end of a word AND we are moving forward (not reversed)
     if gaddag_node.is_terminal and not is_reversed:
         current_word_tiles_copy_list = list(current_word_tiles)
-        newly_placed_list_details_list = [(r, c, l) for r, c, l, _, is_new in current_word_tiles_copy_list if is_new]
+        
+        newly_placed_list_details_list = []
+        for r_loop_lc, c_loop_lc, l_loop_lc, _, is_new_loop_lc in current_word_tiles_copy_list:
+            if is_new_loop_lc:
+                newly_placed_list_details_list.append((r_loop_lc, c_loop_lc, l_loop_lc))
         
         if newly_placed_list_details_list: # Only proceed if new tiles were actually placed
             new_tiles_sig_tuple = tuple(sorted(newly_placed_list_details_list))
             if new_tiles_sig_tuple not in unique_move_signatures:
-                temp_tiles_for_validation_list = [row[:] for row in original_tiles_state] 
-                temp_blanks_for_validation_set = set(blanks) 
+                temp_tiles_for_validation_list = []
+                for row_item_tt in original_tiles_state:
+                    temp_tiles_for_validation_list.append(row_item_tt[:])
+                temp_blanks_for_validation_set = set(blanks)
                 
-                move_blanks_coords_for_this_play_set = set() 
+                move_blanks_coords_for_this_play_set = set()
                 newly_placed_coords_for_this_play_set = set()
 
                 for r_place_loop, c_place_loop, letter_place_loop, is_blank_loop, is_new_loop in current_word_tiles_copy_list:
-                    if is_new_loop: 
+                    if is_new_loop:
                         if 0 <= r_place_loop < GRID_SIZE and 0 <= c_place_loop < GRID_SIZE:
                             temp_tiles_for_validation_list[r_place_loop][c_place_loop] = letter_place_loop
                             newly_placed_coords_for_this_play_set.add((r_place_loop, c_place_loop))
-                            if is_blank_loop: 
-                                temp_blanks_for_validation_set.add((r_place_loop, c_place_loop)) 
-                                move_blanks_coords_for_this_play_set.add((r_place_loop, c_place_loop)) 
+                            if is_blank_loop:
+                                temp_blanks_for_validation_set.add((r_place_loop, c_place_loop))
+                                move_blanks_coords_for_this_play_set.add((r_place_loop, c_place_loop))
                 
                 validation_code, is_bingo_from_validation, detail, all_words_details_for_score_list = is_valid_play(
                     newly_placed_list_details_list,
                     temp_tiles_for_validation_list,
                     is_first_play,
                     full_rack_size,
-                    original_tiles_state, 
+                    original_tiles_state,
                     None, # rack_before_play - not strictly needed by is_valid_play's current signature for this call context
-                    is_silent_batch_run_param=True 
+                    is_silent_batch_run_param=True
                 )
 
-                if validation_code == VC_VALID: 
+                if validation_code == VC_VALID:
                     unique_move_signatures.add(new_tiles_sig_tuple)
                     score = calculate_score(newly_placed_list_details_list, board, temp_tiles_for_validation_list, temp_blanks_for_validation_set, all_words_details_for_score_list)
                     all_words_formed_details_for_primary_word = all_words_details_for_score_list
                     primary_word_tiles = []
                     primary_word_str = ""
-                    start_pos = (0, 0) 
-                    orientation = current_axis 
+                    start_pos = (0, 0)
+                    orientation = current_axis
                     
                     if all_words_formed_details_for_primary_word:
                         found_primary = False
                         for word_detail_item in all_words_formed_details_for_primary_word:
                             is_along_axis = False
-                            if current_axis == 'H' and len(set(r for r,c,l in word_detail_item)) == 1:
-                                is_along_axis = True
-                            elif current_axis == 'V' and len(set(c for r,c,l in word_detail_item)) == 1:
-                                is_along_axis = True
+                            if current_axis == 'H':
+                                temp_set_for_len_check = set()
+                                for item_for_set_loop in word_detail_item: # item_for_set_loop will be (r,c,l)
+                                    temp_set_for_len_check.add(item_for_set_loop[0]) # Add r
+                                if len(temp_set_for_len_check) == 1:
+                                    is_along_axis = True
+                            elif current_axis == 'V':
+                                temp_set_for_len_check = set()
+                                for item_for_set_loop in word_detail_item: # item_for_set_loop will be (r,c,l)
+                                    temp_set_for_len_check.add(item_for_set_loop[1]) # Add c
+                                if len(temp_set_for_len_check) == 1:
+                                    is_along_axis = True
                             
-                            if is_along_axis and any((t[0], t[1]) in newly_placed_coords_for_this_play_set for t in word_detail_item):
-                                primary_word_tiles = word_detail_item
-                                found_primary = True
-                                break
-                        if not found_primary: 
+                            if is_along_axis:
+                                any_tile_in_newly_placed_loop = False
+                                for t in word_detail_item: # t is already declared as cdef tuple
+                                    if (t[0], t[1]) in newly_placed_coords_for_this_play_set:
+                                        any_tile_in_newly_placed_loop = True
+                                        break
+                                if any_tile_in_newly_placed_loop:
+                                    primary_word_tiles = word_detail_item
+                                    found_primary = True
+                                    break
+                        if not found_primary:
                             longest_word_len = 0
                             for word_detail_item in all_words_formed_details_for_primary_word:
-                                if any((t[0], t[1]) in newly_placed_coords_for_this_play_set for t in word_detail_item):
+                                any_tile_in_newly_placed_loop = False # Reset for each word_detail_item
+                                for t in word_detail_item:
+                                    if (t[0], t[1]) in newly_placed_coords_for_this_play_set:
+                                        any_tile_in_newly_placed_loop = True
+                                        break
+                                if any_tile_in_newly_placed_loop:
                                     if len(word_detail_item) > longest_word_len:
                                         longest_word_len = len(word_detail_item)
                                         primary_word_tiles = word_detail_item
-                                        if len(set(r for r,c,l in primary_word_tiles)) == 1: orientation = 'H'
-                                        elif len(set(c for r,c,l in primary_word_tiles)) == 1: orientation = 'V'
+                                        temp_set_for_len_check = set()
+                                        for item_for_set_loop in primary_word_tiles:
+                                            temp_set_for_len_check.add(item_for_set_loop[0]) # Add r
+                                        if len(temp_set_for_len_check) == 1:
+                                            orientation = 'H'
+                                        else: # Must be vertical if not horizontal (assuming valid word_detail_item)
+                                            temp_set_for_len_check = set()
+                                            for item_for_set_loop in primary_word_tiles:
+                                                temp_set_for_len_check.add(item_for_set_loop[1]) # Add c
+                                            if len(temp_set_for_len_check) == 1:
+                                                orientation = 'V'
+                                            # else orientation remains what it was or default
 
-                        if not primary_word_tiles and all_words_formed_details_for_primary_word: 
+                        if not primary_word_tiles and all_words_formed_details_for_primary_word:
                              primary_word_tiles = all_words_formed_details_for_primary_word[0]
-                             if len(set(r for r,c,l in primary_word_tiles)) == 1: orientation = 'H'
-                             elif len(set(c for r,c,l in primary_word_tiles)) == 1: orientation = 'V'
+                             temp_set_for_len_check = set()
+                             for item_for_set_loop in primary_word_tiles:
+                                 temp_set_for_len_check.add(item_for_set_loop[0]) # Add r
+                             if len(temp_set_for_len_check) == 1:
+                                 orientation = 'H'
+                             else:
+                                 temp_set_for_len_check = set()
+                                 for item_for_set_loop in primary_word_tiles:
+                                     temp_set_for_len_check.add(item_for_set_loop[1]) # Add c
+                                 if len(temp_set_for_len_check) == 1:
+                                     orientation = 'V'
 
-                    if primary_word_tiles: 
-                        primary_word_str = "".join(t[2] for t in primary_word_tiles)
+                    if primary_word_tiles:
+                        primary_word_str_parts_list = []
+                        for tile_pws_loop in primary_word_tiles:
+                            primary_word_str_parts_list.append(tile_pws_loop[2])
+                        primary_word_str = "".join(primary_word_str_parts_list)
                         if orientation == 'H':
-                            start_pos = min(primary_word_tiles, key=lambda tile_item: tile_item[1])[:2]
+                            if primary_word_tiles: # Ensure list is not empty
+                                min_tile_h_loop = primary_word_tiles[0] # Initialize with the first tile
+                                for i_h_loop in range(1, len(primary_word_tiles)): # Start from the second tile
+                                    current_tile_h_loop = primary_word_tiles[i_h_loop]
+                                    if current_tile_h_loop[1] < min_tile_h_loop[1]: # Compare column index (tile_item[1])
+                                        min_tile_h_loop = current_tile_h_loop
+                                start_pos = min_tile_h_loop[:2]
+                            else: # Should not happen if primary_word_tiles was populated
+                                start_pos = (0,0) # Fallback
                         elif orientation == 'V':
-                            start_pos = min(primary_word_tiles, key=lambda tile_item: tile_item[0])[:2]
-                        else: 
+                            if primary_word_tiles: # Ensure list is not empty
+                                min_tile_v_loop = primary_word_tiles[0] # Initialize with the first tile
+                                for i_v_loop in range(1, len(primary_word_tiles)): # Start from the second tile
+                                    current_tile_v_loop = primary_word_tiles[i_v_loop]
+                                    if current_tile_v_loop[0] < min_tile_v_loop[0]: # Compare row index (tile_item[0])
+                                        min_tile_v_loop = current_tile_v_loop
+                                start_pos = min_tile_v_loop[:2]
+                            else: # Should not happen if primary_word_tiles was populated
+                                start_pos = (0,0) # Fallback
+                        else:
                             start_pos = primary_word_tiles[0][:2] if primary_word_tiles else (0,0)
 
                     word_with_blanks_list = []
@@ -212,29 +299,36 @@ def _gaddag_traverse( # Changed to cpdef
                             word_with_blanks_list.append(w_letter_loop.lower() if is_blank_in_word_loop else w_letter_loop.upper())
                     word_with_blanks = "".join(word_with_blanks_list)
                     
-                    leave_list = list(rack_counts.elements()) 
+                    leave_list = list(rack_counts.elements())
+                    
+                    positions_list_md_loop = []
+                    if primary_word_tiles:
+                        for tile_md_pos_loop in primary_word_tiles:
+                            positions_list_md_loop.append((tile_md_pos_loop[0], tile_md_pos_loop[1], tile_md_pos_loop[2]))
+                    else:
+                        positions_list_md_loop = newly_placed_list_details_list # Fallback if no primary_word_tiles
                     
                     move_details_dict = {
-                        'positions': [(t[0], t[1], t[2]) for t in primary_word_tiles] if primary_word_tiles else newly_placed_list_details_list,
-                        'blanks': move_blanks_coords_for_this_play_set, 
-                        'word': primary_word_str, 
-                        'score': score, 
-                        'start': start_pos, 
+                        'positions': positions_list_md_loop,
+                        'blanks': move_blanks_coords_for_this_play_set,
+                        'word': primary_word_str,
+                        'score': score,
+                        'start': start_pos,
                         'direction': orientation,
-                        'leave': leave_list, 
-                        'is_bingo': is_bingo_from_validation, 
+                        'leave': leave_list,
+                        'is_bingo': is_bingo_from_validation,
                         'word_with_blanks': word_with_blanks,
-                        'newly_placed': newly_placed_list_details_list 
+                        'newly_placed': newly_placed_list_details_list
                     }
                     all_found_moves.append(move_details_dict)
 
     # Iterate through children of the current GADDAG node
     for letter_loop, next_node_child_loop in gaddag_node.children.items():
-        letter = letter_loop 
-        next_node_child = next_node_child_loop 
+        letter = letter_loop
+        next_node_child = next_node_child_loop
 
         if letter == Gaddag.SEPARATOR: # Gaddag is imported via importlib
-            if is_reversed: 
+            if is_reversed:
                 _gaddag_traverse( # Direct recursion
                     anchor_pos, rack_counts, tiles, board, blanks, cross_check_sets,
                     next_node_child, current_word_tiles, False, current_axis, # is_reversed becomes False
@@ -245,11 +339,11 @@ def _gaddag_traverse( # Changed to cpdef
             continue
 
         next_r, next_c = -1, -1
-        if is_reversed: 
+        if is_reversed:
             if current_axis == 'H': next_r, next_c = r_last, c_last - 1
             else:                   next_r, next_c = r_last - 1, c_last
-        else: 
-            ref_r, ref_c = r_last, c_last 
+        else:
+            ref_r, ref_c = r_last, c_last
             if current_axis == 'H': next_r, next_c = ref_r, ref_c + 1
             else:                   next_r, next_c = ref_r + 1, ref_c
             
@@ -259,7 +353,7 @@ def _gaddag_traverse( # Changed to cpdef
         next_pos = (next_r, next_c)
         existing_tile_on_board = tiles[next_r][next_c]
 
-        if not existing_tile_on_board: 
+        if not existing_tile_on_board:
             cross_axis = 'V' if current_axis == 'H' else 'H'
             allowed_letters_for_cross = cross_check_sets.get(next_pos, {}).get(cross_axis, set())
             
@@ -272,7 +366,7 @@ def _gaddag_traverse( # Changed to cpdef
                 current_word_tiles.append((next_r, next_c, letter, False, True))
                 _gaddag_traverse( # Direct recursion
                     anchor_pos, new_rack_counts, tiles, board, blanks, cross_check_sets,
-                    next_node_child, current_word_tiles, 
+                    next_node_child, current_word_tiles,
                     is_reversed, current_axis, all_found_moves, unique_move_signatures,
                     original_tiles_state, is_first_play, full_rack_size, max_len, depth + 1,
                     is_silent_batch_run_param
@@ -288,16 +382,16 @@ def _gaddag_traverse( # Changed to cpdef
                 current_word_tiles.append((next_r, next_c, letter, True, True))
                 _gaddag_traverse( # Direct recursion
                     anchor_pos, new_rack_counts_blank, tiles, board, blanks, cross_check_sets,
-                    next_node_child, current_word_tiles, 
+                    next_node_child, current_word_tiles,
                     is_reversed, current_axis, all_found_moves, unique_move_signatures,
                     original_tiles_state, is_first_play, full_rack_size, max_len, depth + 1,
                     is_silent_batch_run_param
                 )
                 current_word_tiles.pop() # Backtrack
-        elif existing_tile_on_board == letter: 
+        elif existing_tile_on_board == letter:
             current_word_tiles.append((next_r, next_c, letter, False, False))
             _gaddag_traverse( # Direct recursion
-                anchor_pos, rack_counts, tiles, board, blanks, cross_check_sets, 
+                anchor_pos, rack_counts, tiles, board, blanks, cross_check_sets,
                 next_node_child, current_word_tiles,
                 is_reversed, current_axis, all_found_moves, unique_move_signatures,
                 original_tiles_state, is_first_play, full_rack_size, max_len, depth + 1,
