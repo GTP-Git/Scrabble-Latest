@@ -1,9 +1,9 @@
-#temp - optimized GADDAG/TRIE reduced redundancy
+
 
 
 
 #python
-#Scrabble K - refact various
+#Scrabble K - #temp - optimized GADDAG/TRIE reduced redundancy
 #Stable 02JUN25
 
 
@@ -5936,25 +5936,22 @@ def negamax_endgame(rack_player, rack_opponent, tiles, blanks, board,
     Negamax solver for the endgame (empty bag) with depth limit.
     Returns (best_score_diff_for_player, best_move_sequence).
     Score difference is from the perspective of the player whose turn it is.
-    MODIFIED: All print statements removed/commented out.
+    MODIFIED: Uses in-place modification and backtracking for tiles, blanks, and racks
+              to improve performance by reducing object copying.
     """
-    # if not is_silent_batch_run_param: # Conditional print for function entry
-    #     if depth < 4: 
-    #         print(f"{'  ' * depth}DEBUG Depth {depth}: Enter Negamax. PlayerRack={''.join(sorted(rack_player))}, OppRack={''.join(sorted(rack_opponent))}, ScoreDiff={current_score_diff:.1f}, Alpha={alpha:.1f}, Beta={beta:.1f}, PassCount={pass_count}")
+    # (Conditional print for function entry - removed for brevity in this example, but would be there)
 
     if depth >= search_depth_limit:
         heuristic_score = evaluate_endgame_heuristic(rack_player, rack_opponent, current_score_diff)
-        # if not is_silent_batch_run_param: # Conditional print
-        #     if depth < 4: print(f"{'  ' * depth}DEBUG Depth {depth}: Depth Limit Reached. HeuristicScore={heuristic_score:.1f}")
+        # (Conditional print for depth limit - removed for brevity)
         return heuristic_score, [] 
 
     if not rack_player or not rack_opponent or pass_count >= 6:
         final_diff = calculate_endgame_score_diff(rack_player, rack_opponent, current_score_diff)
-        # if not is_silent_batch_run_param: # Conditional print
-        #     if depth < 4: print(f"{'  ' * depth}DEBUG Depth {depth}: Terminal Node. FinalDiff={final_diff:.1f}")
+        # (Conditional print for terminal node - removed for brevity)
         return final_diff, []
 
-    possible_moves = generate_all_moves_gaddag(rack_player, tiles, board, blanks, GADDAG_STRUCTURE.root, is_silent_batch_run_param=True) # Always silent for internal calls
+    possible_moves = generate_all_moves_gaddag(rack_player, tiles, board, blanks, GADDAG_STRUCTURE.root, is_silent_batch_run_param=True) 
     if possible_moves is None:
         possible_moves = []
 
@@ -5973,95 +5970,111 @@ def negamax_endgame(rack_player, rack_opponent, tiles, blanks, board,
 
     if not ordered_moves: 
         final_diff = calculate_endgame_score_diff(rack_player, rack_opponent, current_score_diff)
-        # if not is_silent_batch_run_param: # Conditional print
-        #     if depth < 4: print(f"{'  ' * depth}DEBUG Depth {depth}: No moves possible. Terminal. FinalDiff={final_diff:.1f}")
+        # (Conditional print for no moves - removed for brevity)
         return final_diff, []
 
     for move_index, move in enumerate(ordered_moves):
-        sim_tiles = [row[:] for row in tiles] # MODIFIED: Was copy.deepcopy(tiles)
-        sim_blanks = blanks.copy()
-        sim_rack_player = rack_player[:]
-        sim_rack_opponent = rack_opponent[:]
-        sim_score_diff = current_score_diff
-        sim_pass_count = pass_count
-        current_move_details = move
-
-        # if not is_silent_batch_run_param: # Conditional print
-        #     if depth < 4: print(f"{'  ' * depth}DEBUG Depth {depth}: Trying move {move_index+1}/{len(ordered_moves)}: {format_move_for_debug(move, rack_player)}")
+        # current_move_details will be the 'move' object itself if it's a dict, or "PASS"
+        current_move_details = move 
+        
+        # (Conditional print for trying move - removed for brevity)
 
         if move == "PASS":
-            sim_pass_count += 1
+            # For PASS, we don't modify the board state, just pass copies of racks
+            # and the current board state to the next level.
+            # Score diff is inverted for the opponent.
             value, subsequent_sequence = negamax_endgame(
-                sim_rack_opponent, sim_rack_player, sim_tiles, sim_blanks, board,
-                -sim_score_diff, -beta, -alpha, depth + 1, sim_pass_count, max_depth, search_depth_limit,
+                list(rack_opponent), list(rack_player), tiles, blanks, board, # Pass copies of racks for PASS
+                -current_score_diff, -beta, -alpha, depth + 1, pass_count + 1, max_depth, search_depth_limit,
                 is_silent_batch_run_param) 
             value = -value 
-        else: 
-            sim_pass_count = 0
+        else: # It's a play move (dictionary)
             newly_placed_details = move.get('newly_placed', [])
-            move_blanks_coords = move.get('blanks', set()) # Renamed to avoid conflict
+            move_blanks_coords = move.get('blanks', set()) 
             move_score = move.get('score', 0)
 
-            temp_rack = sim_rack_player[:]
-            valid_placement = True
-            for r_np, c_np, letter_np in newly_placed_details: # Renamed loop variables
-                if 0 <= r_np < GRID_SIZE and 0 <= c_np < GRID_SIZE:
-                    sim_tiles[r_np][c_np] = letter_np
-                    if (r_np, c_np) in move_blanks_coords:
-                        sim_blanks.add((r_np, c_np))
-                        if ' ' in temp_rack:
-                            temp_rack.remove(' ')
-                        else:
-                            valid_placement = False
-                            break
-                    else:
-                        if letter_np in temp_rack:
-                            temp_rack.remove(letter_np)
-                        else:
-                            valid_placement = False
-                            break
-                else:
-                    valid_placement = False
-                    break
+            # --- MODIFICATION: In-place modification and backtracking ---
+            original_letters_on_board = {} # To store letters overwritten on the board
+            blanks_added_this_move = set()   # To store blank coordinates added by this move
+            tiles_removed_from_rack = [] # To store tiles removed from player's rack
+
+            valid_placement_simulation = True
             
-            if not valid_placement:
-                 # if not is_silent_batch_run_param: # Conditional print
-                 #    if depth < 4: print(f"{'  ' * depth}DEBUG Depth {depth}: Skipping move due to simulation error.")
-                 continue 
+            # 1. Simulate placing tiles on the board and update player's rack
+            for r_np, c_np, letter_np in newly_placed_details:
+                if 0 <= r_np < GRID_SIZE and 0 <= c_np < GRID_SIZE:
+                    original_letters_on_board[(r_np, c_np)] = tiles[r_np][c_np] # Store original
+                    tiles[r_np][c_np] = letter_np # Modify board
 
-            sim_rack_player = temp_rack
-            sim_score_diff += move_score
+                    tile_consumed_from_rack = ''
+                    if (r_np, c_np) in move_blanks_coords:
+                        blanks.add((r_np, c_np)) # Modify blanks set
+                        blanks_added_this_move.add((r_np,c_np))
+                        if ' ' in rack_player:
+                            rack_player.remove(' ')
+                            tile_consumed_from_rack = ' '
+                        else:
+                            valid_placement_simulation = False; break
+                    else:
+                        if letter_np in rack_player:
+                            rack_player.remove(letter_np)
+                            tile_consumed_from_rack = letter_np
+                        else:
+                            valid_placement_simulation = False; break
+                    tiles_removed_from_rack.append(tile_consumed_from_rack)
+                else:
+                    valid_placement_simulation = False; break
+            
+            if not valid_placement_simulation:
+                # Backtrack immediately if placement was impossible (should ideally not happen if move gen is correct)
+                for tile_to_add_back in tiles_removed_from_rack:
+                    rack_player.append(tile_to_add_back)
+                for (r_b, c_b) in blanks_added_this_move:
+                    blanks.remove((r_b, c_b))
+                for (r_o, c_o), orig_letter in original_letters_on_board.items():
+                    tiles[r_o][c_o] = orig_letter
+                # (Conditional print for skipping move - removed for brevity)
+                continue 
 
+            # 2. Recursive call with the modified state
+            # Opponent's rack becomes player's rack, player's (modified) rack becomes opponent's
+            # Score diff is updated and inverted.
             value, subsequent_sequence = negamax_endgame(
-                sim_rack_opponent, sim_rack_player, sim_tiles, sim_blanks, board,
-                -sim_score_diff, -beta, -alpha, depth + 1, sim_pass_count, max_depth, search_depth_limit,
+                list(rack_opponent), list(rack_player), tiles, blanks, board, # Pass copies of racks here
+                -(current_score_diff + move_score), -beta, -alpha, depth + 1, 0, max_depth, search_depth_limit, # pass_count reset to 0
                 is_silent_batch_run_param) 
             value = -value 
 
-        # if not is_silent_batch_run_param: # Conditional print
-        #     if depth < 4: print(f"{'  ' * depth}DEBUG Depth {depth}: Move {format_move_for_debug(move, rack_player)} resulted in value {value:.1f}")
+            # 3. Backtrack: Revert changes to board, blanks, and player's rack
+            for tile_to_add_back in tiles_removed_from_rack:
+                rack_player.append(tile_to_add_back) # Add tiles back to player's rack
+            # rack_player.sort() # Optional: sort if consistency matters for debugging, but not for logic
+            
+            for (r_b, c_b) in blanks_added_this_move:
+                blanks.remove((r_b, c_b)) # Remove blanks added by this move
+            
+            for (r_o, c_o), orig_letter in original_letters_on_board.items():
+                tiles[r_o][c_o] = orig_letter # Restore original letters on board
+            # --- END MODIFICATION ---
+
+        # (Conditional print for move result - removed for brevity)
 
         if value > best_value:
-            # if not is_silent_batch_run_param: # Conditional print
-            #     if depth < 4: print(f"{'  ' * depth}DEBUG Depth {depth}: New best value! {value:.1f} > {best_value:.1f}")
+            # (Conditional print for new best value - removed for brevity)
             best_value = value
             best_sequence = [current_move_details] + subsequent_sequence
 
         alpha = max(alpha, value)
         if alpha >= beta:
-            # if not is_silent_batch_run_param: # Conditional print
-            #     if depth < 4: print(f"{'  ' * depth}DEBUG Depth {depth}: Pruning (alpha={alpha:.1f} >= beta={beta:.1f})")
+            # (Conditional print for pruning - removed for brevity)
             break 
 
     if best_sequence is None:
          final_diff = calculate_endgame_score_diff(rack_player, rack_opponent, current_score_diff)
-         # if not is_silent_batch_run_param: # Conditional print
-         #    if depth < 4: print(f"{'  ' * depth}DEBUG Depth {depth}: No valid sequence found from this node. Returning terminal diff {final_diff:.1f}")
+         # (Conditional print for no valid sequence - removed for brevity)
          return final_diff, []
 
-    # if not is_silent_batch_run_param: # Conditional print
-    #     if depth < 4: print(f"{'  ' * depth}DEBUG Depth {depth}: Returning Best Value={best_value:.1f}, Seq Start={format_move_for_debug(best_sequence[0], rack_player) if best_sequence else 'None'}")
-
+    # (Conditional print for returning best value/sequence - removed for brevity)
     return best_value, best_sequence
 
 
@@ -6738,9 +6751,9 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
     total_tiles_on_racks = rack0_len + rack1_len
     # --- MODIFICATION END ---
 
-    if use_endgame_solver_param and bag_count == 0 and total_tiles_on_racks <= 7 and practice_mode_param != "eight_letter" and not is_solving_endgame: # MODIFIED CONDITION
+    if use_endgame_solver_param and bag_count == 0 and total_tiles_on_racks <= 9 and practice_mode_param != "eight_letter" and not is_solving_endgame: # MODIFIED CONDITION
         if not is_silent_batch_run_param: 
-            print(f"AI: Bag empty, total rack tiles ({total_tiles_on_racks}) <= 7, and solver enabled. Entering endgame solver...")
+            print(f"AI: Bag empty, total rack tiles ({total_tiles_on_racks}) <= 9, and solver enabled. Entering endgame solver...")
         opponent_rack = racks[opponent_idx][:] if 0 <= opponent_idx < len(racks) and racks[opponent_idx] is not None else []
         current_score_diff = scores[player_idx] - scores[opponent_idx]
         is_solving_endgame = True 
