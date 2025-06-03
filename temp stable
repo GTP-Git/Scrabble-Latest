@@ -3997,7 +3997,7 @@ def _gaddag_traverse(
     original_tiles_state, is_first_play, full_rack_size, max_len=GRID_SIZE,
     depth=0, is_silent_batch_run_param=False
 ):
-    """ Recursive helper with refined post-separator logic.
+    """ Recursive helper with refined post-separator logic and optimized list handling.
         Print statements (if any were present) would be conditional.
     """
     if depth > 20: # Max recursion depth
@@ -4013,55 +4013,50 @@ def _gaddag_traverse(
 
     # If this node in GADDAG marks the end of a word AND we are moving forward (not reversed)
     if gaddag_node.is_terminal and not is_reversed:
-        newly_placed_list_details = [(r, c, l) for r, c, l, _, is_new in current_word_tiles if is_new]
+        # MODIFIED: Use list(current_word_tiles) to create a copy for processing
+        current_word_tiles_copy = list(current_word_tiles)
+        newly_placed_list_details = [(r, c, l) for r, c, l, _, is_new in current_word_tiles_copy if is_new]
         
         if newly_placed_list_details: # Only proceed if new tiles were actually placed
             new_tiles_sig = tuple(sorted(newly_placed_list_details))
             if new_tiles_sig not in unique_move_signatures:
-                # Create a temporary board state for validation
                 temp_tiles_for_validation = [row[:] for row in original_tiles_state] 
-                temp_blanks_for_validation = set(blanks) # Start with existing board blanks for scoring context
+                temp_blanks_for_validation = set(blanks) 
                 
-                move_blanks_coords_for_this_play = set() # Blanks used *in this specific play*
+                move_blanks_coords_for_this_play = set() 
                 newly_placed_coords_for_this_play = set()
 
-                for r_place, c_place, letter_place, is_blank_in_gaddag_path, is_new_tile_flag in current_word_tiles:
-                    if is_new_tile_flag: # If this tile was placed from the rack for the current move
+                # MODIFIED: Iterate over current_word_tiles_copy
+                for r_place, c_place, letter_place, is_blank_in_gaddag_path, is_new_tile_flag in current_word_tiles_copy:
+                    if is_new_tile_flag: 
                         if 0 <= r_place < GRID_SIZE and 0 <= c_place < GRID_SIZE:
                             temp_tiles_for_validation[r_place][c_place] = letter_place
                             newly_placed_coords_for_this_play.add((r_place, c_place))
                             if is_blank_in_gaddag_path: 
-                                temp_blanks_for_validation.add((r_place, c_place)) # Add to board's blank set for scoring
-                                move_blanks_coords_for_this_play.add((r_place, c_place)) # Track for this move's details
+                                temp_blanks_for_validation.add((r_place, c_place)) 
+                                move_blanks_coords_for_this_play.add((r_place, c_place)) 
                 
-                # Call modified is_valid_play
                 validation_code, is_bingo_from_validation, detail, all_words_details_for_score = is_valid_play(
                     newly_placed_list_details,
                     temp_tiles_for_validation,
                     is_first_play,
                     full_rack_size,
-                    original_tiles_state, # Pass the original board state for connection checks
-                    None, # rack_before_play is not strictly needed by is_valid_play's current logic
-                    is_silent_batch_run_param=True # Internal validation should be silent
+                    original_tiles_state, 
+                    None, 
+                    is_silent_batch_run_param=True 
                 )
 
                 if validation_code == VC_VALID: 
                     unique_move_signatures.add(new_tiles_sig)
-                    
-                    # Call modified calculate_score with all_words_details_for_score
                     score = calculate_score(newly_placed_list_details, board, temp_tiles_for_validation, temp_blanks_for_validation, all_words_details_for_score)
-                    
-                    # Use all_words_details_for_score to determine primary word
                     all_words_formed_details_for_primary_word = all_words_details_for_score
-                    
                     primary_word_tiles = []
                     primary_word_str = ""
-                    start_pos = (0, 0) # Default
-                    orientation = current_axis # Default to GADDAG traversal axis
+                    start_pos = (0, 0) 
+                    orientation = current_axis 
                     
                     if all_words_formed_details_for_primary_word:
                         found_primary = False
-                        # Try to find a word along the current GADDAG axis that uses new tiles
                         for word_detail_item in all_words_formed_details_for_primary_word:
                             is_along_axis = False
                             if current_axis == 'H' and len(set(r for r,c,l in word_detail_item)) == 1:
@@ -4073,18 +4068,17 @@ def _gaddag_traverse(
                                 primary_word_tiles = word_detail_item
                                 found_primary = True
                                 break
-                        if not found_primary: # Fallback: longest word using new tiles
+                        if not found_primary: 
                             longest_word_len = 0
                             for word_detail_item in all_words_formed_details_for_primary_word:
                                 if any((t[0], t[1]) in newly_placed_coords_for_this_play for t in word_detail_item):
                                     if len(word_detail_item) > longest_word_len:
                                         longest_word_len = len(word_detail_item)
                                         primary_word_tiles = word_detail_item
-                                        # Infer orientation from the longest word
                                         if len(set(r for r,c,l in primary_word_tiles)) == 1: orientation = 'H'
                                         elif len(set(c for r,c,l in primary_word_tiles)) == 1: orientation = 'V'
 
-                        if not primary_word_tiles and all_words_formed_details_for_primary_word: # Ultimate fallback
+                        if not primary_word_tiles and all_words_formed_details_for_primary_word: 
                              primary_word_tiles = all_words_formed_details_for_primary_word[0]
                              if len(set(r for r,c,l in primary_word_tiles)) == 1: orientation = 'H'
                              elif len(set(c for r,c,l in primary_word_tiles)) == 1: orientation = 'V'
@@ -4095,22 +4089,21 @@ def _gaddag_traverse(
                             start_pos = min(primary_word_tiles, key=lambda tile_item: tile_item[1])[:2]
                         elif orientation == 'V':
                             start_pos = min(primary_word_tiles, key=lambda tile_item: tile_item[0])[:2]
-                        else: # Should have H or V by now if primary_word_tiles is set
+                        else: 
                             start_pos = primary_word_tiles[0][:2] if primary_word_tiles else (0,0)
 
                     word_with_blanks_list = []
                     if primary_word_tiles:
                         for wr, wc, w_letter in primary_word_tiles:
-                            # A tile is a blank *in this word* if it was newly placed AND it was a blank from the rack
                             is_blank_in_word = (wr, wc) in newly_placed_coords_for_this_play and (wr, wc) in move_blanks_coords_for_this_play
                             word_with_blanks_list.append(w_letter.lower() if is_blank_in_word else w_letter.upper())
                     word_with_blanks = "".join(word_with_blanks_list)
                     
-                    leave = list(rack_counts.elements()) # Tiles remaining on rack
+                    leave = list(rack_counts.elements()) 
                     
                     move_details_dict = {
                         'positions': [(t[0], t[1], t[2]) for t in primary_word_tiles] if primary_word_tiles else newly_placed_list_details,
-                        'blanks': move_blanks_coords_for_this_play, # Blanks used in this specific move
+                        'blanks': move_blanks_coords_for_this_play, 
                         'word': primary_word_str, 
                         'score': score, 
                         'start': start_pos, 
@@ -4118,100 +4111,86 @@ def _gaddag_traverse(
                         'leave': leave, 
                         'is_bingo': is_bingo_from_validation, 
                         'word_with_blanks': word_with_blanks,
-                        'newly_placed': newly_placed_list_details # Actual tiles placed from rack
+                        'newly_placed': newly_placed_list_details 
                     }
                     all_found_moves.append(move_details_dict)
 
     # Iterate through children of the current GADDAG node
-    for letter, next_node in gaddag_node.children.items():
+    for letter, next_node_child in gaddag_node.children.items(): # Renamed next_node to next_node_child
         if letter == Gaddag.SEPARATOR:
-            if is_reversed: # If we were moving backward, SEPARATOR means switch to forward
+            if is_reversed: 
                 _gaddag_traverse(
                     anchor_pos, rack_counts, tiles, board, blanks, cross_check_sets,
-                    next_node, current_word_tiles, False, current_axis, # is_reversed becomes False
+                    next_node_child, current_word_tiles, False, current_axis, # is_reversed becomes False
                     all_found_moves, unique_move_signatures, original_tiles_state,
                     is_first_play, full_rack_size, max_len, depth + 1,
                     is_silent_batch_run_param
                 )
-            # If not is_reversed, encountering SEPARATOR means nothing (already going forward)
-            # Or, if it's the *first* letter from root, it's an error in GADDAG structure.
             continue
 
-        # Determine coordinates for the next letter
         next_r, next_c = -1, -1
-        if is_reversed: # Moving backward from anchor
+        if is_reversed: 
             if current_axis == 'H': next_r, next_c = r_last, c_last - 1
             else:                   next_r, next_c = r_last - 1, c_last
-        else: # Moving forward from anchor (or from last placed tile after separator)
-            anchor_r, anchor_c = anchor_pos
-            # Determine the reference point for placing the next tile
-            # If we *just* crossed the separator, the anchor is the reference.
-            # Otherwise, the last placed tile is the reference.
-            just_crossed_separator = False
-            if len(current_word_tiles) > 0: # Check if any tiles have been placed
-                # This logic needs to correctly identify if the last operation was crossing the separator.
-                # A simple way: if the current_word_tiles contains the anchor and we are not reversed.
-                # This implies we are building the part of the word *after* the anchor.
-                # A more robust check might involve inspecting the GADDAG path or current_word_tiles structure.
-                # For now, assume if not is_reversed, we are building forward from the last tile.
-                # The GADDAG structure ensures this by design after the SEPARATOR.
-                pass # No special logic needed here, ref_r/ref_c below handles it.
-            
-            ref_r, ref_c = (r_last, c_last) # Default to last placed tile
-
+        else: 
+            ref_r, ref_c = (r_last, c_last) 
             if current_axis == 'H': next_r, next_c = ref_r, ref_c + 1
             else:                   next_r, next_c = ref_r + 1, ref_c
             
-        # Boundary check for the board
         if not (0 <= next_r < GRID_SIZE and 0 <= next_c < GRID_SIZE):
             continue
 
         next_pos = (next_r, next_c)
         existing_tile_on_board = tiles[next_r][next_c]
 
-        if not existing_tile_on_board: # Square is empty, try to place from rack
+        if not existing_tile_on_board: 
             cross_axis = 'V' if current_axis == 'H' else 'H'
-            # Get allowed letters for cross-words at this empty square
             allowed_letters_for_cross = cross_check_sets.get(next_pos, {}).get(cross_axis, set())
             
-            # Try placing the required letter
             if rack_counts[letter] > 0 and letter in allowed_letters_for_cross:
                 new_rack_counts = rack_counts.copy()
                 new_rack_counts[letter] -= 1
                 if new_rack_counts[letter] == 0:
                     del new_rack_counts[letter]
+                
+                # MODIFIED: Append and Pop
+                current_word_tiles.append((next_r, next_c, letter, False, True))
                 _gaddag_traverse(
                     anchor_pos, new_rack_counts, tiles, board, blanks, cross_check_sets,
-                    next_node, current_word_tiles + [(next_r, next_c, letter, False, True)], # False for is_blank, True for is_new
+                    next_node_child, current_word_tiles, 
                     is_reversed, current_axis, all_found_moves, unique_move_signatures,
                     original_tiles_state, is_first_play, full_rack_size, max_len, depth + 1,
                     is_silent_batch_run_param
                 )
+                current_word_tiles.pop() # Backtrack
             
-            # Try placing a blank if available and it forms valid cross-words
-            # The 'letter' from GADDAG is what the blank would represent
             if rack_counts[' '] > 0 and (' ' in allowed_letters_for_cross or letter in allowed_letters_for_cross):
-                # If ' ' is in allowed_letters, any blank assignment is fine for cross.
-                # If specific letter is in allowed_letters, blank assigned as that letter is fine.
                 new_rack_counts_blank = rack_counts.copy()
                 new_rack_counts_blank[' '] -= 1
                 if new_rack_counts_blank[' '] == 0:
                     del new_rack_counts_blank[' ']
+                
+                # MODIFIED: Append and Pop
+                current_word_tiles.append((next_r, next_c, letter, True, True))
                 _gaddag_traverse(
                     anchor_pos, new_rack_counts_blank, tiles, board, blanks, cross_check_sets,
-                    next_node, current_word_tiles + [(next_r, next_c, letter, True, True)], # True for is_blank, True for is_new
+                    next_node_child, current_word_tiles, 
                     is_reversed, current_axis, all_found_moves, unique_move_signatures,
                     original_tiles_state, is_first_play, full_rack_size, max_len, depth + 1,
                     is_silent_batch_run_param
                 )
-        elif existing_tile_on_board == letter: # Square has the required letter
+                current_word_tiles.pop() # Backtrack
+        elif existing_tile_on_board == letter: 
+            # MODIFIED: Append and Pop
+            current_word_tiles.append((next_r, next_c, letter, False, False))
             _gaddag_traverse(
-                anchor_pos, rack_counts, tiles, board, blanks, cross_check_sets, # Rack unchanged
-                next_node, current_word_tiles + [(next_r, next_c, letter, False, False)], # False for is_blank, False for is_new
+                anchor_pos, rack_counts, tiles, board, blanks, cross_check_sets, 
+                next_node_child, current_word_tiles,
                 is_reversed, current_axis, all_found_moves, unique_move_signatures,
                 original_tiles_state, is_first_play, full_rack_size, max_len, depth + 1,
                 is_silent_batch_run_param
             )
+            current_word_tiles.pop() # Backtrack
 
 
 
@@ -4224,7 +4203,8 @@ def generate_all_moves_gaddag(rack, tiles, board, blanks, gaddag_root, is_silent
     Print statements are now conditional.
     MODIFIED: is_first_play calculated internally.
               Final deduplication signature now includes the leave.
-    MODIFIED: Optimized cross_check_sets generation using Dawg.get_node and Dawg.search(start_node=...).
+              Optimized cross_check_sets generation.
+    MODIFIED: Passes mutable list to _gaddag_traverse.
     """
     global gaddag_loading_status 
 
@@ -4239,9 +4219,9 @@ def generate_all_moves_gaddag(rack, tiles, board, blanks, gaddag_root, is_silent
         return [] 
 
     all_found_moves = []
-    unique_move_signatures = set() # Used within _gaddag_traverse for early pruning
+    unique_move_signatures = set() 
     rack_counts = Counter(rack)
-    is_first_play = sum(1 for row in tiles for t_tile in row if t_tile) == 0 # Correctly check for any tile
+    is_first_play = sum(1 for row in tiles for t_tile in row if t_tile) == 0 
     anchors = get_anchor_points(tiles, is_first_play) 
     original_tiles_state = [row[:] for row in tiles]
     full_rack_size = len(rack)
@@ -4249,8 +4229,7 @@ def generate_all_moves_gaddag(rack, tiles, board, blanks, gaddag_root, is_silent
     cross_check_sets = {}
     for r in range(GRID_SIZE):
         for c in range(GRID_SIZE):
-            if not tiles[r][c]: # If the square is empty
-                # Vertical cross-check
+            if not tiles[r][c]: 
                 up_word = ""
                 rr = r - 1
                 while rr >= 0 and tiles[rr][c]:
@@ -4263,23 +4242,19 @@ def generate_all_moves_gaddag(rack, tiles, board, blanks, gaddag_root, is_silent
                     rr += 1
                 
                 allowed_letters_v = set()
-                if not up_word and not down_word: # No adjacent vertical tiles
-                    allowed_letters_v = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ ') # Allow any letter or blank
+                if not up_word and not down_word: 
+                    allowed_letters_v = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ ') 
                 else:
-                    # ***** START OF MODIFIED BLOCK for allowed_letters_v *****
                     node_after_up_word = DAWG.get_node(up_word)
                     if node_after_up_word:
                         for letter_char_v in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
                             if letter_char_v in node_after_up_word.children:
                                 node_after_up_word_plus_letter = node_after_up_word.children[letter_char_v]
-                                # Now search for down_word starting from this new node
                                 if DAWG.search(down_word, start_node=node_after_up_word_plus_letter):
                                     allowed_letters_v.add(letter_char_v)
-                    # ***** END OF MODIFIED BLOCK for allowed_letters_v *****
-                    if allowed_letters_v: # If any real letter forms a word, a blank can also be used
+                    if allowed_letters_v: 
                         allowed_letters_v.add(' ')
 
-                # Horizontal cross-check
                 left_word = ""
                 cc = c - 1
                 while cc >= 0 and tiles[r][cc]:
@@ -4292,10 +4267,9 @@ def generate_all_moves_gaddag(rack, tiles, board, blanks, gaddag_root, is_silent
                     cc += 1
 
                 allowed_letters_h = set()
-                if not left_word and not right_word: # No adjacent horizontal tiles
-                    allowed_letters_h = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ ') # Allow any letter or blank
+                if not left_word and not right_word: 
+                    allowed_letters_h = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ ') 
                 else:
-                    # ***** START OF MODIFIED BLOCK for allowed_letters_h *****
                     node_after_left_word = DAWG.get_node(left_word)
                     if node_after_left_word:
                         for letter_char_h in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
@@ -4303,23 +4277,19 @@ def generate_all_moves_gaddag(rack, tiles, board, blanks, gaddag_root, is_silent
                                 node_after_left_word_plus_letter = node_after_left_word.children[letter_char_h]
                                 if DAWG.search(right_word, start_node=node_after_left_word_plus_letter):
                                     allowed_letters_h.add(letter_char_h)
-                    # ***** END OF MODIFIED BLOCK for allowed_letters_h *****
-                    if allowed_letters_h: # If any real letter forms a word, a blank can also be used
+                    if allowed_letters_h: 
                         allowed_letters_h.add(' ')
                 
                 cross_check_sets[(r, c)] = {'V': allowed_letters_v, 'H': allowed_letters_h}
 
-    # Strategy 1: Iterate through anchors
-    processed_adjacent_starts = set() # To avoid redundant Strategy 2 starts from same tile
+    processed_adjacent_starts = set() 
     for r_anchor, c_anchor in anchors:
         anchor_pos = (r_anchor, c_anchor)
-        # Allowed letters for placing ON the anchor itself
         allowed_h_on_anchor = cross_check_sets.get(anchor_pos, {}).get('H', set())
         allowed_v_on_anchor = cross_check_sets.get(anchor_pos, {}).get('V', set())
 
-        # Try placing each tile from the rack onto the anchor
-        for tile_letter, count in list(rack_counts.items()): # Iterate over copy if modifying
-            if count > 0 and tile_letter != ' ': # Regular tile
+        for tile_letter, count in list(rack_counts.items()): 
+            if count > 0 and tile_letter != ' ': 
                 if tile_letter in gaddag_root.children:
                     next_node = gaddag_root.children[tile_letter]
                     new_rack_counts = rack_counts.copy()
@@ -4327,16 +4297,15 @@ def generate_all_moves_gaddag(rack, tiles, board, blanks, gaddag_root, is_silent
                     if new_rack_counts[tile_letter] == 0:
                         del new_rack_counts[tile_letter]
                     
-                    initial_tiles_H = [(r_anchor, c_anchor, tile_letter, False, True)] # For Horizontal GADDAG path
-                    initial_tiles_V = [(r_anchor, c_anchor, tile_letter, False, True)] # For Vertical GADDAG path
+                    # MODIFIED: Create new list for each initial call path
+                    initial_tiles_H_list = [(r_anchor, c_anchor, tile_letter, False, True)] 
+                    initial_tiles_V_list = [(r_anchor, c_anchor, tile_letter, False, True)] 
 
-                    # Check if placing this tile_letter on anchor is valid for cross-sets
-                    if tile_letter in allowed_v_on_anchor: # Valid for vertical cross-set (so use for H GADDAG path)
-                         _gaddag_traverse(anchor_pos, new_rack_counts.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles_H, True, 'H', all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
-                    if tile_letter in allowed_h_on_anchor: # Valid for horizontal cross-set (so use for V GADDAG path)
-                         _gaddag_traverse(anchor_pos, new_rack_counts.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles_V, True, 'V', all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
+                    if tile_letter in allowed_v_on_anchor: 
+                         _gaddag_traverse(anchor_pos, new_rack_counts.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles_H_list, True, 'H', all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
+                    if tile_letter in allowed_h_on_anchor: 
+                         _gaddag_traverse(anchor_pos, new_rack_counts.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles_V_list, True, 'V', all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
 
-        # Try placing a blank from the rack onto the anchor
         if rack_counts[' '] > 0:
             can_place_blank_for_H_gaddag = ' ' in allowed_v_on_anchor 
             can_place_blank_for_V_gaddag = ' ' in allowed_h_on_anchor 
@@ -4350,13 +4319,14 @@ def generate_all_moves_gaddag(rack, tiles, board, blanks, gaddag_root, is_silent
                 for assigned_letter in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ': 
                     if assigned_letter in gaddag_root.children:
                         next_node = gaddag_root.children[assigned_letter]
-                        initial_tiles_blank_H = [(r_anchor, c_anchor, assigned_letter, True, True)]
-                        initial_tiles_blank_V = [(r_anchor, c_anchor, assigned_letter, True, True)]
+                        # MODIFIED: Create new list for each initial call path
+                        initial_tiles_blank_H_list = [(r_anchor, c_anchor, assigned_letter, True, True)]
+                        initial_tiles_blank_V_list = [(r_anchor, c_anchor, assigned_letter, True, True)]
 
                         if can_place_blank_for_H_gaddag and assigned_letter in allowed_v_on_anchor : 
-                            _gaddag_traverse(anchor_pos, new_rack_counts_blank_base.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles_blank_H, True, 'H', all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
+                            _gaddag_traverse(anchor_pos, new_rack_counts_blank_base.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles_blank_H_list, True, 'H', all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
                         if can_place_blank_for_V_gaddag and assigned_letter in allowed_h_on_anchor : 
-                            _gaddag_traverse(anchor_pos, new_rack_counts_blank_base.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles_blank_V, True, 'V', all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
+                            _gaddag_traverse(anchor_pos, new_rack_counts_blank_base.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles_blank_V_list, True, 'V', all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
         
         if not is_first_play: 
             for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]: 
@@ -4369,12 +4339,14 @@ def generate_all_moves_gaddag(rack, tiles, board, blanks, gaddag_root, is_silent
                          processed_adjacent_starts.add(adj_pos) 
                          if existing_tile_letter in gaddag_root.children:
                             next_node = gaddag_root.children[existing_tile_letter]
-                            initial_tiles_adj = [(nr, nc, existing_tile_letter, False, False)] 
+                            # MODIFIED: Create new list for each initial call path
+                            initial_tiles_adj_fwd_list = [(nr, nc, existing_tile_letter, False, False)] 
+                            initial_tiles_adj_bwd_list = [(nr, nc, existing_tile_letter, False, False)]
                             
                             start_axis_adj = 'V' if dr != 0 else 'H' 
                             
-                            _gaddag_traverse(anchor_pos, rack_counts.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles_adj[:], False, start_axis_adj, all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
-                            _gaddag_traverse(anchor_pos, rack_counts.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles_adj[:], True, start_axis_adj, all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
+                            _gaddag_traverse(anchor_pos, rack_counts.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles_adj_fwd_list, False, start_axis_adj, all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
+                            _gaddag_traverse(anchor_pos, rack_counts.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles_adj_bwd_list, True, start_axis_adj, all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
 
     all_found_moves.sort(key=lambda m: m.get('score', 0), reverse=True)
 
