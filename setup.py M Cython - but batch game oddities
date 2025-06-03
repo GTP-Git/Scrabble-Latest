@@ -1,0 +1,60 @@
+#python
+#Scrabble M - Cython - but batch game oddities
+#Stable 03JUN25
+
+
+
+
+print("--- Starting setup.py ---") # ADDED
+import sys # ADDED
+print(f"Python executable: {sys.executable}") # ADDED
+print(f"Python version: {sys.version}") # ADDED
+
+try:
+    from setuptools import setup
+    from setuptools.extension import Extension
+    print("Successfully imported setuptools.") # ADDED
+except ImportError as e:
+    print(f"ERROR: Failed to import setuptools: {e}") # ADDED
+    sys.exit(1)
+
+try:
+    from Cython.Build import cythonize
+    print("Successfully imported Cython.Build.cythonize.") # ADDED
+except ImportError as e:
+    print(f"ERROR: Failed to import Cython.Build.cythonize: {e}") # ADDED
+    print("Make sure Cython is installed: pip3 install Cython") # ADDED
+    sys.exit(1)
+
+try:
+    import numpy
+    print(f"Successfully imported numpy. Version: {numpy.__version__}") # ADDED
+    numpy_include_dir = numpy.get_include()
+    print(f"NumPy include directory: {numpy_include_dir}") # ADDED
+except ImportError as e:
+    print(f"ERROR: Failed to import numpy: {e}") # ADDED
+    print("Make sure NumPy is installed: pip3 install numpy") # ADDED
+    numpy_include_dir = None # Fallback
+    # sys.exit(1) # Decide if numpy is critical enough to stop the build
+
+print("Defining extensions...") # ADDED
+extensions = [
+    Extension(
+        name="sc_cython_opt",
+        sources=["_scrabble_cython_opt.pyx"],
+        include_dirs=[numpy_include_dir] if numpy_include_dir else [],
+    )
+]
+print(f"Extensions defined: {extensions}") # ADDED
+
+print("Calling setup()...") # ADDED
+setup(
+    name="ScrabbleCythonOptimizations",
+    ext_modules=cythonize(
+        extensions,
+        compiler_directives={'language_level': "3"}
+    ),
+    zip_safe=False,
+)
+
+print("--- setup.py finished successfully ---") # MODIFIED for clarity
