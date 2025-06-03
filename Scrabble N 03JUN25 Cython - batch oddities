@@ -2,7 +2,7 @@
 
 
 #python
-#Scrabble M - Cython - but batch game oddities
+#Scrabble N - Cython
 #Stable 03JUN25
 
 
@@ -5184,6 +5184,9 @@ def write_vertical_histogram(file_handle, title, quartile_counts_dict, word_list
 
 
 
+# Full, complete function with no code omitted
+# File: Scrabble Game.py
+
 def save_batch_statistics(batch_results, player_names, batch_summary_filename):
     """
     Calculates aggregate stats and saves batch results to a specified summary file,
@@ -5191,6 +5194,7 @@ def save_batch_statistics(batch_results, player_names, batch_summary_filename):
     luck factor for each game, and bingo probability quartile analysis (vertical histogram).
     Also includes total batch duration and luck.
     Most print statements are now conditional based on DEV_VISUALIZE_BATCH_ENABLED_SESSION.
+    MODIFIED: Added "Seconds Per Game" to the output.
     """
     global DEV_VISUALIZE_BATCH_ENABLED_SESSION # Access global flag
 
@@ -5247,10 +5251,8 @@ def save_batch_statistics(batch_results, player_names, batch_summary_filename):
 
     p1_avg_bingos_per_game = agg_stats['total_p1_bingos'] / num_games if num_games > 0 else 0.0
     p2_avg_bingos_per_game = agg_stats['total_p2_bingos'] / num_games if num_games > 0 else 0.0
-    # --- NEW: Calculate Avg Blanks Per Game ---
     p1_avg_blanks_per_game = agg_stats['total_p1_blanks'] / num_games if num_games > 0 else 0.0
     p2_avg_blanks_per_game = agg_stats['total_p2_blanks'] / num_games if num_games > 0 else 0.0
-    # --- END NEW ---
     p1_avg_luck_per_game = agg_stats['total_p1_luck'] / num_games if num_games > 0 else 0.0
     p2_avg_luck_per_game = agg_stats['total_p2_luck'] / num_games if num_games > 0 else 0.0
     total_batch_duration_seconds = sum(game.get('game_duration_seconds', 0.0) for game in batch_results)
@@ -5328,6 +5330,8 @@ def save_batch_statistics(batch_results, player_names, batch_summary_filename):
             f.write(f"--- Batch Game Results ---\n")
             f.write(f"Total Games: {num_games}\n")
             f.write(f"Total Batch Duration: {format_duration(total_batch_duration_seconds)}\n")
+            seconds_per_game = total_batch_duration_seconds / num_games if num_games > 0 else 0.0
+            f.write(f"Seconds Per Game: {seconds_per_game:.2f}\n") # Added this line
             f.write(f"Players: {player_names[0]} vs {player_names[1]}\n")
             f.write("-" * 25 + "\n")
             f.write("Overall Summary:\n")
@@ -5345,9 +5349,7 @@ def save_batch_statistics(batch_results, player_names, batch_summary_filename):
             f.write(f"Avg Bingos/Game:   {p1_avg_bingos_per_game:>12.2f} {p2_avg_bingos_per_game:>12.2f}\n")
             f.write(f"Avg Bingo Score:   {agg_stats['p1_avg_bingo_score']:>12.2f} {agg_stats['p2_avg_bingo_score']:>12.2f}\n")
             f.write(f"Total Blanks Used: {agg_stats['total_p1_blanks']:>12} {agg_stats['total_p2_blanks']:>12}\n")
-            # --- NEW: Write Avg Blanks Per Game ---
             f.write(f"Avg Blanks/Game:   {p1_avg_blanks_per_game:>12.2f} {p2_avg_blanks_per_game:>12.2f}\n")
-            # --- END NEW ---
             f.write(f"Avg Leave Value:   {agg_stats['p1_avg_leave']:>12.2f} {agg_stats['p2_avg_leave']:>12.2f}\n")
             f.write(f"Total Luck Factor: {agg_stats['total_p1_luck']:>+12.2f} {agg_stats['total_p2_luck']:>+12.2f}\n")
             f.write(f"Avg Luck / Game:   {p1_avg_luck_per_game:>+12.2f} {p2_avg_luck_per_game:>+12.2f}\n")
@@ -5365,16 +5367,13 @@ def save_batch_statistics(batch_results, player_names, batch_summary_filename):
             f.write(f"  Q2 (Top-Left):  {avg_quad_counts['Q2']:>6.2f}    Q1 (Top-Right):   {avg_quad_counts['Q1']:>6.2f}\n")
             f.write(f"  Q3 (Bot-Left):  {avg_quad_counts['Q3']:>6.2f}    Q4 (Bot-Right):  {avg_quad_counts['Q4']:>6.2f}\n")
 
-            # Define constants for histogram drawing
             bar_char_hist = "*"
             quartile_keys_hist = ['Q1', 'Q2', 'Q3', 'Q4']
             target_histogram_max_height_hist = 10
 
-            # Call the standalone function
             write_vertical_histogram(f, "Bingo Probability Quartiles (7-Letter Words)", bingo_quartile_counts_7L, seven_letter_words, "7-Letter Bingos", bar_char_hist, quartile_keys_hist, target_histogram_max_height_hist)
             write_vertical_histogram(f, "Bingo Probability Quartiles (8-Letter Words)", bingo_quartile_counts_8L, eight_letter_words, "8-Letter Bingos", bar_char_hist, quartile_keys_hist, target_histogram_max_height_hist)
             
-            # --- NEW: Combined Bingo Quartile Distribution (Counts) ---
             f.write("-" * 25 + "\n")
             f.write("Combined Bingo Quartile Distribution (Counts of 7L+8L bingos):\n")
             grand_total_indexed_counts = bingo_quartile_counts_7L['total_indexed'] + bingo_quartile_counts_8L['total_indexed']
@@ -5388,11 +5387,10 @@ def save_batch_statistics(batch_results, player_names, batch_summary_filename):
                 f.write(f"  Q3: {combined_q3_count:>6}    Q4: {combined_q4_count:>6}\n")
             else:
                 f.write("  (No indexed bingos to calculate combined counts)\n")
-            # --- END NEW ---
             
-            f.write("-" * 25 + "\n") # Separator before the percentage version
+            f.write("-" * 25 + "\n") 
             f.write("Combined Bingo Quartile Distribution (% of all indexed 7L+8L bingos):\n")
-            grand_total_indexed = bingo_quartile_counts_7L['total_indexed'] + bingo_quartile_counts_8L['total_indexed'] # Recalculate or reuse grand_total_indexed_counts
+            grand_total_indexed = bingo_quartile_counts_7L['total_indexed'] + bingo_quartile_counts_8L['total_indexed'] 
             f.write(f"  Total Indexed Bingos (7L+8L): {grand_total_indexed}\n")
             if grand_total_indexed > 0:
                 combined_q1 = bingo_quartile_counts_7L['Q1'] + bingo_quartile_counts_8L['Q1']
@@ -5467,15 +5465,11 @@ def save_batch_statistics(batch_results, player_names, batch_summary_filename):
                         f.write(line + "\n")
                 f.write("-" * 20 + "\n")
 
-        # This print should always happen, as it's the primary notification of completion.
         print(f"Batch statistics saved to {batch_summary_filename}")
-        # MODIFICATION: Make dialog conditional
         if DEV_VISUALIZE_BATCH_ENABLED_SESSION:
             show_message_dialog(f"Batch complete.\nStats saved to {batch_summary_filename}", "Batch Finished")
     except IOError as e:
-        # Error messages should always print.
         print(f"Error saving batch statistics to {batch_summary_filename}: {e}")
-        # MODIFICATION: Make dialog conditional (though error dialogs are often good to show if possible)
         if DEV_VISUALIZE_BATCH_ENABLED_SESSION:
             show_message_dialog(f"Error saving batch stats: {e}", "Save Error")
     except NameError as e:
@@ -13113,7 +13107,7 @@ if __name__ == "__main__":
     bbb_7l_max_prob_global = 1000 # Default integer value
     bbb_8l_max_prob_global = 1000 # Default integer value
 
-    random.seed(12345)
+    #random.seed(12345)
 
 
     # This flag tracks if the next call to main() is for the very first game
