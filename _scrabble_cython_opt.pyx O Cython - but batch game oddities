@@ -1,14 +1,8 @@
-
-
-
-
-
-
 # START OF _scrabble_cython_opt.pyx
 
 
 #python
-#Scrabble M - Cython - but batch game oddities
+#Scrabble O - Cython
 #Stable 03JUN25
 
 
@@ -62,15 +56,13 @@ VC_VALID = scrabble_game_module.VC_VALID
 # Functions
 is_valid_play = scrabble_game_module.is_valid_play
 calculate_score = scrabble_game_module.calculate_score
+# Counter is not created in Cython, it's passed as an object.
 
 # Classes / Instances
 Gaddag = scrabble_game_module.Gaddag # For Gaddag.SEPARATOR
-# Note: DAWG and Counter are not directly used by _gaddag_traverse itself,
-# they are used by its caller (generate_all_moves_gaddag) or passed as arguments.
-
-
-
-
+# Note: DAWG is not directly used by _gaddag_traverse itself,
+# but find_main_word_cy will need it if we move DAWG.search calls into it.
+# For now, DAWG is used by cross_check_sets generation in Python.
 
 
 # Full, complete function with no code omitted
@@ -106,7 +98,7 @@ cpdef _gaddag_traverse(
     cdef tuple next_pos
     cdef str cross_axis
     cdef set allowed_letters_for_cross
-    cdef object new_rack_counts, new_rack_counts_blank # These are Counter objects
+    # cdef object new_rack_counts_letter, new_rack_counts_blank # No longer creating new Counters here
     cdef list primary_word_tiles # list of tuples
     cdef list word_with_blanks_list
     cdef dict move_details_dict # Python dict
@@ -116,7 +108,7 @@ cpdef _gaddag_traverse(
     cdef int r, c # for tuple unpacking in list comprehensions
     cdef str l # for tuple unpacking
     cdef bint is_new # for tuple unpacking
-    # Added for lambda replacement loops
+    # Added for lambda replacement loops (and other explicit loops)
     cdef tuple min_tile_h_loop, current_tile_h_loop, min_tile_v_loop, current_tile_v_loop
     cdef int i_h_loop, i_v_loop
     # Added for any() replacement loop
@@ -131,11 +123,18 @@ cpdef _gaddag_traverse(
     cdef list primary_word_str_parts_list
     cdef tuple tile_pws_loop
     # Added for replacing 'positions' list comprehension in move_details_dict
-    cdef list positions_list_md_loop
+    cdef list positions_list_md_loop # For primary_word_tiles
+    cdef list newly_placed_pos_list_md_loop # For newly_placed_list_details
     cdef tuple tile_md_pos_loop
     # Added for replacing set(generator_expr)
     cdef set temp_set_for_len_check
     cdef tuple item_for_set_loop # Generic tuple for iterating items like word_detail_item or primary_word_tiles
+    # For unpacking in positions_list_md_loop for primary_word_tiles
+    cdef int r_md_loop, c_md_loop 
+    cdef str l_md_loop
+    # For newly_placed_pos_list_md_loop
+    cdef int r_np_md, c_np_md
+    cdef str l_np_md
 
 
     if depth > 20: # Max recursion depth
@@ -159,7 +158,8 @@ cpdef _gaddag_traverse(
                 newly_placed_list_details_list.append((r_loop_lc, c_loop_lc, l_loop_lc))
         
         if newly_placed_list_details_list: # Only proceed if new tiles were actually placed
-            new_tiles_sig_tuple = tuple(sorted(newly_placed_list_details_list))
+            newly_placed_list_details_list.sort() # Sort in-place
+            new_tiles_sig_tuple = tuple(newly_placed_list_details_list)
             if new_tiles_sig_tuple not in unique_move_signatures:
                 temp_tiles_for_validation_list = []
                 for row_item_tt in original_tiles_state:
@@ -303,10 +303,15 @@ cpdef _gaddag_traverse(
                     
                     positions_list_md_loop = []
                     if primary_word_tiles:
-                        for tile_md_pos_loop in primary_word_tiles:
-                            positions_list_md_loop.append((tile_md_pos_loop[0], tile_md_pos_loop[1], tile_md_pos_loop[2]))
+                        for r_md_loop, c_md_loop, l_md_loop in primary_word_tiles: # Unpack fully
+                            positions_list_md_loop.append((r_md_loop, c_md_loop, l_md_loop))
                     else:
-                        positions_list_md_loop = newly_placed_list_details_list # Fallback if no primary_word_tiles
+                        # Fallback if no primary_word_tiles, use newly_placed_list_details_list
+                        # Ensure newly_placed_list_details_list contains (r,c,l) tuples
+                        newly_placed_pos_list_md_loop = []
+                        for r_np_md, c_np_md, l_np_md in newly_placed_list_details_list:
+                             newly_placed_pos_list_md_loop.append((r_np_md, c_np_md, l_np_md))
+                        positions_list_md_loop = newly_placed_pos_list_md_loop
                     
                     move_details_dict = {
                         'positions': positions_list_md_loop,
@@ -358,43 +363,146 @@ cpdef _gaddag_traverse(
             allowed_letters_for_cross = cross_check_sets.get(next_pos, {}).get(cross_axis, set())
             
             if rack_counts[letter] > 0 and letter in allowed_letters_for_cross:
-                new_rack_counts = rack_counts.copy()
-                new_rack_counts[letter] -= 1
-                if new_rack_counts[letter] == 0:
-                    del new_rack_counts[letter]
+                rack_counts[letter] -= 1 # Direct modification
                 
                 current_word_tiles.append((next_r, next_c, letter, False, True))
                 _gaddag_traverse( # Direct recursion
-                    anchor_pos, new_rack_counts, tiles, board, blanks, cross_check_sets,
+                    anchor_pos, rack_counts, tiles, board, blanks, cross_check_sets, 
                     next_node_child, current_word_tiles,
                     is_reversed, current_axis, all_found_moves, unique_move_signatures,
                     original_tiles_state, is_first_play, full_rack_size, max_len, depth + 1,
                     is_silent_batch_run_param
                 )
                 current_word_tiles.pop() # Backtrack
+                rack_counts[letter] += 1 # Backtrack: Restore tile count
             
             if rack_counts[' '] > 0 and (' ' in allowed_letters_for_cross or letter in allowed_letters_for_cross):
-                new_rack_counts_blank = rack_counts.copy()
-                new_rack_counts_blank[' '] -= 1
-                if new_rack_counts_blank[' '] == 0:
-                    del new_rack_counts_blank[' ']
+                rack_counts[' '] -= 1 # Direct modification
                 
                 current_word_tiles.append((next_r, next_c, letter, True, True))
                 _gaddag_traverse( # Direct recursion
-                    anchor_pos, new_rack_counts_blank, tiles, board, blanks, cross_check_sets,
-                    next_node_child, current_word_tiles,
+                    anchor_pos, rack_counts, tiles, board, blanks, cross_check_sets, 
+                    next_node_child, current_word_tiles, 
                     is_reversed, current_axis, all_found_moves, unique_move_signatures,
                     original_tiles_state, is_first_play, full_rack_size, max_len, depth + 1,
                     is_silent_batch_run_param
                 )
                 current_word_tiles.pop() # Backtrack
+                rack_counts[' '] += 1 # Backtrack: Restore blank count
         elif existing_tile_on_board == letter:
             current_word_tiles.append((next_r, next_c, letter, False, False))
             _gaddag_traverse( # Direct recursion
-                anchor_pos, rack_counts, tiles, board, blanks, cross_check_sets,
+                anchor_pos, rack_counts, tiles, board, blanks, cross_check_sets, # Pass original rack_counts (no copy needed as no consumption)
                 next_node_child, current_word_tiles,
                 is_reversed, current_axis, all_found_moves, unique_move_signatures,
                 original_tiles_state, is_first_play, full_rack_size, max_len, depth + 1,
                 is_silent_batch_run_param
             )
             current_word_tiles.pop() # Backtrack
+
+
+
+
+
+
+
+
+# Full, complete function with no code omitted
+# File: _scrabble_cython_opt.pyx
+
+cpdef tuple find_main_word_cy(list new_tiles_list, list tiles_board_list):
+    # Type declarations
+    cdef set rows_set, cols_set
+    cdef bint is_horizontal, is_vertical
+    cdef str orientation_str
+    cdef int row_val, col_val
+    cdef int min_col_val, max_col_val, min_row_val, max_row_val
+    cdef list main_word_list
+    cdef tuple tile_item_tuple # for iterating new_tiles_list
+    cdef int r_nt, c_nt # for unpacking tile_item_tuple
+    # l_nt (letter) is not directly used for rows/cols sets or min/max logic here
+    cdef int r_loop_var, c_loop_var # for range loops
+    cdef str tile_char_on_board # for tiles_board_list[r][c]
+
+    if not new_tiles_list:
+        return [], None
+
+    rows_set = set()
+    cols_set = set()
+    for tile_item_tuple in new_tiles_list:
+        # Assuming tile_item_tuple is (r, c, letter)
+        r_nt = tile_item_tuple[0]
+        c_nt = tile_item_tuple[1]
+        rows_set.add(r_nt)
+        cols_set.add(c_nt)
+
+    is_horizontal = (len(rows_set) == 1)
+    # is_vertical = (len(cols_set) == 1) # Original Python used if/elif, so check vertical only if not horizontal
+
+    if is_horizontal:
+        orientation_str = "horizontal"
+        # Get the single row value
+        for item in rows_set: 
+            row_val = item
+            break
+        
+        min_col_val = GRID_SIZE 
+        max_col_val = -1
+        for tile_item_tuple in new_tiles_list:
+            r_nt = tile_item_tuple[0]
+            c_nt = tile_item_tuple[1]
+            if r_nt == row_val:
+                if c_nt < min_col_val:
+                    min_col_val = c_nt
+                if c_nt > max_col_val:
+                    max_col_val = c_nt
+        
+        # Extend to existing tiles on board
+        # Ensure tiles_board_list[row_val] is accessible and its elements are strings
+        while min_col_val > 0 and tiles_board_list[row_val][min_col_val - 1]:
+            min_col_val -= 1
+        while max_col_val < GRID_SIZE - 1 and tiles_board_list[row_val][max_col_val + 1]:
+            max_col_val += 1
+            
+        main_word_list = []
+        for c_loop_var in range(min_col_val, max_col_val + 1):
+            tile_char_on_board = tiles_board_list[row_val][c_loop_var]
+            if tile_char_on_board: 
+                main_word_list.append((row_val, c_loop_var, tile_char_on_board))
+        
+        return (main_word_list, orientation_str) if len(main_word_list) > 1 else ([], None)
+
+    elif (len(cols_set) == 1): # Check is_vertical here, as per original Python's elif structure
+        orientation_str = "vertical"
+        # Get the single col value
+        for item in cols_set:
+            col_val = item
+            break
+
+        min_row_val = GRID_SIZE
+        max_row_val = -1
+        for tile_item_tuple in new_tiles_list:
+            r_nt = tile_item_tuple[0]
+            c_nt = tile_item_tuple[1]
+            if c_nt == col_val:
+                if r_nt < min_row_val:
+                    min_row_val = r_nt
+                if r_nt > max_row_val:
+                    max_row_val = r_nt
+
+        # Extend to existing tiles on board
+        # Ensure tiles_board_list elements are accessible
+        while min_row_val > 0 and tiles_board_list[min_row_val - 1][col_val]:
+            min_row_val -= 1
+        while max_row_val < GRID_SIZE - 1 and tiles_board_list[max_row_val + 1][col_val]:
+            max_row_val += 1
+            
+        main_word_list = []
+        for r_loop_var in range(min_row_val, max_row_val + 1):
+            tile_char_on_board = tiles_board_list[r_loop_var][col_val]
+            if tile_char_on_board:
+                main_word_list.append((r_loop_var, col_val, tile_char_on_board))
+        
+        return (main_word_list, orientation_str) if len(main_word_list) > 1 else ([], None)
+    else:
+        return [], None
