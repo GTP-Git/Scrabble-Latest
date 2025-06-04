@@ -2,7 +2,7 @@
 
 
 #python
-#Scrabble M - Cython - but batch game oddities
+#Scrabble O - Cython
 #Stable 03JUN25
 
 
@@ -1877,7 +1877,7 @@ def draw_word_lookup_button_mode_select(screen_surf, button_rect_param):
 
 
 
-# End of Part 1 (Includes basic drawing functions)
+'''
 
 # Part 2 (Includes word finding, scoring, practice setup, mode selection, options menu)
 # find_main_word, find_cross_word, find_all_words_formed (Unchanged from Part 2 provided previously)
@@ -1899,6 +1899,8 @@ def find_main_word(new_tiles, tiles):
         return (main_word, orientation) if len(main_word) > 1 else ([], None)
     else: return [], None
 
+'''
+
 def find_cross_word(tile, tiles, main_orientation):
     """Finds a cross word formed by a single tile perpendicular to the main word."""
     r, c, _ = tile; cross_word = []
@@ -1916,12 +1918,14 @@ def find_cross_word(tile, tiles, main_orientation):
         if max_col > min_col: cross_word = [(r, cc, tiles[r][cc]) for cc in range(min_col, max_col + 1) if tiles[r][cc]]
     return cross_word if len(cross_word) > 1 else []
 
+
+
 def find_all_words_formed(new_tiles, tiles):
     """Finds all words (main and cross) formed by a play."""
     words = [];
     if not new_tiles: return words
     new_positions_set = set((r, c) for r, c, _ in new_tiles)
-    main_word_tiles, orientation = find_main_word(new_tiles, tiles)
+    main_word_tiles, orientation = sc_cython_opt.find_main_word_cy(new_tiles, tiles)
     if main_word_tiles:
         words.append(main_word_tiles)
         for tile in new_tiles:
@@ -4198,6 +4202,9 @@ def _gaddag_traverse(
 
 
 
+# Full, complete function with no code omitted
+# File: Scrabble Game.py
+
 def generate_all_moves_gaddag(rack, tiles, board, blanks, gaddag_root, is_silent_batch_run_param=False):
     """
     Generates ALL valid Scrabble moves using GADDAG traversal.
@@ -4208,8 +4215,8 @@ def generate_all_moves_gaddag(rack, tiles, board, blanks, gaddag_root, is_silent
     MODIFIED: is_first_play calculated internally.
               Final deduplication signature now includes the leave.
               Optimized cross_check_sets generation.
-    MODIFIED: Passes mutable list to _gaddag_traverse.
     MODIFIED: Calls sc_cython_opt._gaddag_traverse
+    MODIFIED: More explicit rack_counts handling for initial calls to Cython.
     """
     global gaddag_loading_status 
     # Assuming sc_cython_opt is imported at the top of Scrabble Game.py
@@ -4227,7 +4234,7 @@ def generate_all_moves_gaddag(rack, tiles, board, blanks, gaddag_root, is_silent
 
     all_found_moves = []
     unique_move_signatures = set() 
-    rack_counts = Counter(rack) # Counter needs to be available in this scope
+    base_rack_counts = Counter(rack) # Initial counter from the rack
     is_first_play = sum(1 for row in tiles for t_tile in row if t_tile) == 0 
     anchors = get_anchor_points(tiles, is_first_play) 
     original_tiles_state = [row[:] for row in tiles]
@@ -4291,44 +4298,49 @@ def generate_all_moves_gaddag(rack, tiles, board, blanks, gaddag_root, is_silent
         allowed_h_on_anchor = cross_check_sets.get(anchor_pos, {}).get('H', set())
         allowed_v_on_anchor = cross_check_sets.get(anchor_pos, {}).get('V', set())
 
-        for tile_letter, count in list(rack_counts.items()): 
-            if count > 0 and tile_letter != ' ': 
-                if tile_letter in gaddag_root.children:
-                    next_node = gaddag_root.children[tile_letter]
-                    new_rack_counts = rack_counts.copy()
-                    new_rack_counts[tile_letter] -= 1
-                    if new_rack_counts[tile_letter] == 0:
-                        del new_rack_counts[tile_letter]
-                    
-                    initial_tiles_H_list = [(r_anchor, c_anchor, tile_letter, False, True)] 
-                    initial_tiles_V_list = [(r_anchor, c_anchor, tile_letter, False, True)] 
+        # Strategy 1: Play from rack onto anchor_pos
+        for tile_letter, count in list(base_rack_counts.items()): # Iterate over original rack counts
+            if count > 0: # If the tile is available on the rack
+                if tile_letter != ' ': # Regular tile
+                    if tile_letter in gaddag_root.children:
+                        next_node = gaddag_root.children[tile_letter]
+                        
+                        # Create a new rack_counts for this specific tile_letter start
+                        rack_counts_for_this_start = base_rack_counts.copy()
+                        rack_counts_for_this_start[tile_letter] -= 1
+                        if rack_counts_for_this_start[tile_letter] == 0:
+                            del rack_counts_for_this_start[tile_letter]
+                        
+                        initial_tiles_H_list = [(r_anchor, c_anchor, tile_letter, False, True)] 
+                        initial_tiles_V_list = [(r_anchor, c_anchor, tile_letter, False, True)] 
 
-                    if tile_letter in allowed_v_on_anchor: 
-                         sc_cython_opt._gaddag_traverse(anchor_pos, new_rack_counts.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles_H_list, True, 'H', all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
-                    if tile_letter in allowed_h_on_anchor: 
-                         sc_cython_opt._gaddag_traverse(anchor_pos, new_rack_counts.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles_V_list, True, 'V', all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
-
-        if rack_counts[' '] > 0:
-            can_place_blank_for_H_gaddag = ' ' in allowed_v_on_anchor 
-            can_place_blank_for_V_gaddag = ' ' in allowed_h_on_anchor 
-
-            if can_place_blank_for_H_gaddag or can_place_blank_for_V_gaddag:
-                new_rack_counts_blank_base = rack_counts.copy()
-                new_rack_counts_blank_base[' '] -= 1
-                if new_rack_counts_blank_base[' '] == 0:
-                    del new_rack_counts_blank_base[' ']
+                        if tile_letter in allowed_v_on_anchor: 
+                             sc_cython_opt._gaddag_traverse(anchor_pos, rack_counts_for_this_start, tiles, board, blanks, cross_check_sets, next_node, initial_tiles_H_list, True, 'H', all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
+                        if tile_letter in allowed_h_on_anchor: 
+                             sc_cython_opt._gaddag_traverse(anchor_pos, rack_counts_for_this_start, tiles, board, blanks, cross_check_sets, next_node, initial_tiles_V_list, True, 'V', all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
                 
-                for assigned_letter in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ': 
-                    if assigned_letter in gaddag_root.children:
-                        next_node = gaddag_root.children[assigned_letter]
-                        initial_tiles_blank_H_list = [(r_anchor, c_anchor, assigned_letter, True, True)]
-                        initial_tiles_blank_V_list = [(r_anchor, c_anchor, assigned_letter, True, True)]
+                elif tile_letter == ' ': # Blank tile
+                    can_place_blank_for_H_gaddag = ' ' in allowed_v_on_anchor 
+                    can_place_blank_for_V_gaddag = ' ' in allowed_h_on_anchor 
 
-                        if can_place_blank_for_H_gaddag and assigned_letter in allowed_v_on_anchor : 
-                            sc_cython_opt._gaddag_traverse(anchor_pos, new_rack_counts_blank_base.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles_blank_H_list, True, 'H', all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
-                        if can_place_blank_for_V_gaddag and assigned_letter in allowed_h_on_anchor : 
-                            sc_cython_opt._gaddag_traverse(anchor_pos, new_rack_counts_blank_base.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles_blank_V_list, True, 'V', all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
+                    if can_place_blank_for_H_gaddag or can_place_blank_for_V_gaddag:
+                        rack_counts_for_this_blank_start = base_rack_counts.copy()
+                        rack_counts_for_this_blank_start[' '] -= 1
+                        if rack_counts_for_this_blank_start[' '] == 0:
+                            del rack_counts_for_this_blank_start[' ']
+                        
+                        for assigned_letter in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ': 
+                            if assigned_letter in gaddag_root.children:
+                                next_node = gaddag_root.children[assigned_letter]
+                                initial_tiles_blank_H_list = [(r_anchor, c_anchor, assigned_letter, True, True)]
+                                initial_tiles_blank_V_list = [(r_anchor, c_anchor, assigned_letter, True, True)]
+
+                                if can_place_blank_for_H_gaddag and assigned_letter in allowed_v_on_anchor : 
+                                    sc_cython_opt._gaddag_traverse(anchor_pos, rack_counts_for_this_blank_start, tiles, board, blanks, cross_check_sets, next_node, initial_tiles_blank_H_list, True, 'H', all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
+                                if can_place_blank_for_V_gaddag and assigned_letter in allowed_h_on_anchor : 
+                                    sc_cython_opt._gaddag_traverse(anchor_pos, rack_counts_for_this_blank_start, tiles, board, blanks, cross_check_sets, next_node, initial_tiles_blank_V_list, True, 'V', all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
         
+        # Strategy 2: Extend from existing tiles adjacent to anchor_pos
         if not is_first_play: 
             for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]: 
                 nr, nc = r_anchor + dr, c_anchor + dc 
@@ -4345,15 +4357,18 @@ def generate_all_moves_gaddag(rack, tiles, board, blanks, gaddag_root, is_silent
                             
                             start_axis_adj = 'V' if dr != 0 else 'H' 
                             
-                            sc_cython_opt._gaddag_traverse(anchor_pos, rack_counts.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles_adj_fwd_list, False, start_axis_adj, all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
-                            sc_cython_opt._gaddag_traverse(anchor_pos, rack_counts.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles_adj_bwd_list, True, start_axis_adj, all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
+                            # For Strategy 2, the first tile is already on the board, so pass the original base_rack_counts (or a copy of it)
+                            # as no tile from the rack is consumed for this first letter.
+                            sc_cython_opt._gaddag_traverse(anchor_pos, base_rack_counts.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles_adj_fwd_list, False, start_axis_adj, all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
+                            sc_cython_opt._gaddag_traverse(anchor_pos, base_rack_counts.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles_adj_bwd_list, True, start_axis_adj, all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
 
     all_found_moves.sort(key=lambda m: m.get('score', 0), reverse=True)
 
     final_unique_moves = []
     seen_final_signatures = set()
     for move in all_found_moves:
-        newly_placed_tuples = tuple(sorted(tuple(item) for item in move.get('newly_placed', [])))
+        newly_placed_raw = move.get('newly_placed', [])
+        newly_placed_tuples = tuple(sorted(newly_placed_raw))
         leave_tuple = tuple(sorted(move.get('leave', [])))
         sig_tuple = (newly_placed_tuples, move.get('score', 0), leave_tuple)
         
@@ -5184,6 +5199,9 @@ def write_vertical_histogram(file_handle, title, quartile_counts_dict, word_list
 
 
 
+# Full, complete function with no code omitted
+# File: Scrabble Game.py
+
 def save_batch_statistics(batch_results, player_names, batch_summary_filename):
     """
     Calculates aggregate stats and saves batch results to a specified summary file,
@@ -5191,6 +5209,7 @@ def save_batch_statistics(batch_results, player_names, batch_summary_filename):
     luck factor for each game, and bingo probability quartile analysis (vertical histogram).
     Also includes total batch duration and luck.
     Most print statements are now conditional based on DEV_VISUALIZE_BATCH_ENABLED_SESSION.
+    MODIFIED: Added "Seconds Per Game" to the output.
     """
     global DEV_VISUALIZE_BATCH_ENABLED_SESSION # Access global flag
 
@@ -5247,10 +5266,8 @@ def save_batch_statistics(batch_results, player_names, batch_summary_filename):
 
     p1_avg_bingos_per_game = agg_stats['total_p1_bingos'] / num_games if num_games > 0 else 0.0
     p2_avg_bingos_per_game = agg_stats['total_p2_bingos'] / num_games if num_games > 0 else 0.0
-    # --- NEW: Calculate Avg Blanks Per Game ---
     p1_avg_blanks_per_game = agg_stats['total_p1_blanks'] / num_games if num_games > 0 else 0.0
     p2_avg_blanks_per_game = agg_stats['total_p2_blanks'] / num_games if num_games > 0 else 0.0
-    # --- END NEW ---
     p1_avg_luck_per_game = agg_stats['total_p1_luck'] / num_games if num_games > 0 else 0.0
     p2_avg_luck_per_game = agg_stats['total_p2_luck'] / num_games if num_games > 0 else 0.0
     total_batch_duration_seconds = sum(game.get('game_duration_seconds', 0.0) for game in batch_results)
@@ -5328,6 +5345,8 @@ def save_batch_statistics(batch_results, player_names, batch_summary_filename):
             f.write(f"--- Batch Game Results ---\n")
             f.write(f"Total Games: {num_games}\n")
             f.write(f"Total Batch Duration: {format_duration(total_batch_duration_seconds)}\n")
+            seconds_per_game = total_batch_duration_seconds / num_games if num_games > 0 else 0.0
+            f.write(f"Seconds Per Game: {seconds_per_game:.2f}\n") # Added this line
             f.write(f"Players: {player_names[0]} vs {player_names[1]}\n")
             f.write("-" * 25 + "\n")
             f.write("Overall Summary:\n")
@@ -5345,9 +5364,7 @@ def save_batch_statistics(batch_results, player_names, batch_summary_filename):
             f.write(f"Avg Bingos/Game:   {p1_avg_bingos_per_game:>12.2f} {p2_avg_bingos_per_game:>12.2f}\n")
             f.write(f"Avg Bingo Score:   {agg_stats['p1_avg_bingo_score']:>12.2f} {agg_stats['p2_avg_bingo_score']:>12.2f}\n")
             f.write(f"Total Blanks Used: {agg_stats['total_p1_blanks']:>12} {agg_stats['total_p2_blanks']:>12}\n")
-            # --- NEW: Write Avg Blanks Per Game ---
             f.write(f"Avg Blanks/Game:   {p1_avg_blanks_per_game:>12.2f} {p2_avg_blanks_per_game:>12.2f}\n")
-            # --- END NEW ---
             f.write(f"Avg Leave Value:   {agg_stats['p1_avg_leave']:>12.2f} {agg_stats['p2_avg_leave']:>12.2f}\n")
             f.write(f"Total Luck Factor: {agg_stats['total_p1_luck']:>+12.2f} {agg_stats['total_p2_luck']:>+12.2f}\n")
             f.write(f"Avg Luck / Game:   {p1_avg_luck_per_game:>+12.2f} {p2_avg_luck_per_game:>+12.2f}\n")
@@ -5365,16 +5382,13 @@ def save_batch_statistics(batch_results, player_names, batch_summary_filename):
             f.write(f"  Q2 (Top-Left):  {avg_quad_counts['Q2']:>6.2f}    Q1 (Top-Right):   {avg_quad_counts['Q1']:>6.2f}\n")
             f.write(f"  Q3 (Bot-Left):  {avg_quad_counts['Q3']:>6.2f}    Q4 (Bot-Right):  {avg_quad_counts['Q4']:>6.2f}\n")
 
-            # Define constants for histogram drawing
             bar_char_hist = "*"
             quartile_keys_hist = ['Q1', 'Q2', 'Q3', 'Q4']
             target_histogram_max_height_hist = 10
 
-            # Call the standalone function
             write_vertical_histogram(f, "Bingo Probability Quartiles (7-Letter Words)", bingo_quartile_counts_7L, seven_letter_words, "7-Letter Bingos", bar_char_hist, quartile_keys_hist, target_histogram_max_height_hist)
             write_vertical_histogram(f, "Bingo Probability Quartiles (8-Letter Words)", bingo_quartile_counts_8L, eight_letter_words, "8-Letter Bingos", bar_char_hist, quartile_keys_hist, target_histogram_max_height_hist)
             
-            # --- NEW: Combined Bingo Quartile Distribution (Counts) ---
             f.write("-" * 25 + "\n")
             f.write("Combined Bingo Quartile Distribution (Counts of 7L+8L bingos):\n")
             grand_total_indexed_counts = bingo_quartile_counts_7L['total_indexed'] + bingo_quartile_counts_8L['total_indexed']
@@ -5388,11 +5402,10 @@ def save_batch_statistics(batch_results, player_names, batch_summary_filename):
                 f.write(f"  Q3: {combined_q3_count:>6}    Q4: {combined_q4_count:>6}\n")
             else:
                 f.write("  (No indexed bingos to calculate combined counts)\n")
-            # --- END NEW ---
             
-            f.write("-" * 25 + "\n") # Separator before the percentage version
+            f.write("-" * 25 + "\n") 
             f.write("Combined Bingo Quartile Distribution (% of all indexed 7L+8L bingos):\n")
-            grand_total_indexed = bingo_quartile_counts_7L['total_indexed'] + bingo_quartile_counts_8L['total_indexed'] # Recalculate or reuse grand_total_indexed_counts
+            grand_total_indexed = bingo_quartile_counts_7L['total_indexed'] + bingo_quartile_counts_8L['total_indexed'] 
             f.write(f"  Total Indexed Bingos (7L+8L): {grand_total_indexed}\n")
             if grand_total_indexed > 0:
                 combined_q1 = bingo_quartile_counts_7L['Q1'] + bingo_quartile_counts_8L['Q1']
@@ -5467,15 +5480,11 @@ def save_batch_statistics(batch_results, player_names, batch_summary_filename):
                         f.write(line + "\n")
                 f.write("-" * 20 + "\n")
 
-        # This print should always happen, as it's the primary notification of completion.
         print(f"Batch statistics saved to {batch_summary_filename}")
-        # MODIFICATION: Make dialog conditional
         if DEV_VISUALIZE_BATCH_ENABLED_SESSION:
             show_message_dialog(f"Batch complete.\nStats saved to {batch_summary_filename}", "Batch Finished")
     except IOError as e:
-        # Error messages should always print.
         print(f"Error saving batch statistics to {batch_summary_filename}: {e}")
-        # MODIFICATION: Make dialog conditional (though error dialogs are often good to show if possible)
         if DEV_VISUALIZE_BATCH_ENABLED_SESSION:
             show_message_dialog(f"Error saving batch stats: {e}", "Save Error")
     except NameError as e:
@@ -9773,6 +9782,9 @@ def _typing_handle_backspace_key(event, state):
 
 
 
+# Full, complete function with no code omitted
+# File: Scrabble Game.py
+
 def _typing_handle_enter_key(event, state):
     """
     Handles an Enter/Return key press to submit a typed word.
@@ -9951,40 +9963,66 @@ def _typing_handle_enter_key(event, state):
                 elif orientation_final_str == "down": orientation_final_for_history = 'V'
 
                 if newly_placed_details: 
-                    main_word_from_play, main_orientation_from_play_str = find_main_word(newly_placed_details, temp_tiles_for_validation)
+                    main_word_from_play, main_orientation_from_play_str = sc_cython_opt.find_main_word_cy(newly_placed_details, temp_tiles_for_validation)
                     if main_word_from_play:
                         primary_word_tiles_final = main_word_from_play
                         primary_word_str_final = "".join(t[2] for t in primary_word_tiles_final)
-                        start_pos_final = (primary_word_tiles_final[0][0], primary_word_tiles_final[0][1]) 
-                        if main_orientation_from_play_str == "horizontal": orientation_final_for_history = 'H'
-                        elif main_orientation_from_play_str == "vertical": orientation_final_for_history = 'V'
+                        # Correctly determine start_pos based on orientation
+                        if main_orientation_from_play_str == "horizontal":
+                            start_pos_final = min(primary_word_tiles_final, key=lambda tile_item: tile_item[1])[:2] if primary_word_tiles_final else (0,0)
+                            orientation_final_for_history = 'H'
+                        elif main_orientation_from_play_str == "vertical":
+                            start_pos_final = min(primary_word_tiles_final, key=lambda tile_item: tile_item[0])[:2] if primary_word_tiles_final else (0,0)
+                            orientation_final_for_history = 'V'
+                        else: # Fallback if orientation string is unexpected
+                            start_pos_final = primary_word_tiles_final[0][:2] if primary_word_tiles_final else (0,0)
                     elif all_words_formed_details_final: 
+                        # Fallback to the first word found if find_main_word_cy didn't identify a clear primary
                         primary_word_tiles_final = all_words_formed_details_final[0] 
                         primary_word_str_final = "".join(t[2] for t in primary_word_tiles_final)
-                        start_pos_final = (primary_word_tiles_final[0][0], primary_word_tiles_final[0][1])
-                        if len(set(r for r,c,l in primary_word_tiles_final)) == 1: orientation_final_for_history = 'H'
-                        elif len(set(c for r,c,l in primary_word_tiles_final)) == 1: orientation_final_for_history = 'V'
+                        # Determine orientation and start_pos for this fallback
+                        if len(set(r for r,c,l in primary_word_tiles_final)) == 1: # Horizontal
+                            orientation_final_for_history = 'H'
+                            start_pos_final = min(primary_word_tiles_final, key=lambda tile_item: tile_item[1])[:2] if primary_word_tiles_final else (0,0)
+                        elif len(set(c for r,c,l in primary_word_tiles_final)) == 1: # Vertical
+                            orientation_final_for_history = 'V'
+                            start_pos_final = min(primary_word_tiles_final, key=lambda tile_item: tile_item[0])[:2] if primary_word_tiles_final else (0,0)
+                        else: # Default if unclear (e.g. single tile forming two words)
+                             start_pos_final = primary_word_tiles_final[0][:2] if primary_word_tiles_final else (0,0)
+                             # orientation_final_for_history remains '?' or what typing_direction was
                 
                 word_with_blanks_final = ""
                 if primary_word_tiles_final:
                     word_with_blanks_list_hist = []
                     newly_placed_coords = set((r_npc,c_npc) for r_npc,c_npc,_ in newly_placed_details)
+                    # Ensure state['blanks'] is the set of (r,c) tuples of blanks currently on the board *after* the play
+                    current_blanks_on_board_after_play = state['blanks'].copy() 
+
                     for wr_hist, wc_hist, w_letter_hist in primary_word_tiles_final:
-                        is_blank_in_word_hist = (wr_hist, wc_hist) in state['blanks'] and (wr_hist, wc_hist) in newly_placed_coords
+                        # A tile in the primary word is a blank *for this play* if it's in newly_placed_coords
+                        # AND it's registered as a blank on the board after the play.
+                        is_blank_in_word_hist = (wr_hist, wc_hist) in newly_placed_coords and \
+                                                (wr_hist, wc_hist) in current_blanks_on_board_after_play
                         word_with_blanks_list_hist.append(w_letter_hist.lower() if is_blank_in_word_hist else w_letter_hist.upper())
                     word_with_blanks_final = "".join(word_with_blanks_list_hist)
-                else: 
+                else: # Fallback if no primary_word_tiles_final (e.g. single tile play not forming a primary word)
                     temp_wbl_final = []
                     newly_placed_coords_final = set((r_npc,c_npc) for r_npc,c_npc,_ in newly_placed_details)
+                    current_blanks_on_board_after_play = state['blanks'].copy()
                     for r_npd, c_npd, l_npd in newly_placed_details:
-                        is_b_final = (r_npd, c_npd) in state['blanks'] and (r_npd, c_npd) in newly_placed_coords_final
+                        is_b_final = (r_npd, c_npd) in newly_placed_coords_final and \
+                                     (r_npd, c_npd) in current_blanks_on_board_after_play
                         temp_wbl_final.append(l_npd.lower() if is_b_final else l_npd.upper())
                     word_with_blanks_final = "".join(temp_wbl_final)
-                    if newly_placed_details: 
-                        primary_word_str_final = "".join(l_npd for _,_,l_npd in newly_placed_details)
+                    
+                    if newly_placed_details: # If there were newly placed tiles
+                        primary_word_str_final = "".join(l_npd for _,_,l_npd in newly_placed_details) # Use the typed letters as the word
+                        # Try to infer orientation from newly_placed_details
                         if len(set(r for r,c,l in newly_placed_details)) == 1: orientation_final_for_history = 'H'
                         elif len(set(c for r,c,l in newly_placed_details)) == 1: orientation_final_for_history = 'V'
+                        # start_pos_final would be the first tile in newly_placed_details
                         if newly_placed_details: start_pos_final = (newly_placed_details[0][0], newly_placed_details[0][1])
+
 
                 current_leave_for_typed_play = state['racks'][state['turn']-1][:] 
                 num_to_draw = len(newly_placed_details)
@@ -10004,6 +10042,19 @@ def _typing_handle_enter_key(event, state):
                         drawn_tiles_str = "".join(sorted(t if t != ' ' else '?' for t in drawn_tiles))
                         print(f"  Drew: {drawn_tiles_str}, ActualLeaveVal: {drawn_leave_value:.2f}, ExpectedSingleDrawVal: {state['current_turn_pool_quality_score']:.2f}, TotalExpectedForDraw: {expected_draw_value_simple:.2f}, LuckFactor: {luck_factor:+.2f}")
                 
+                # Determine tiles_played_from_rack for history
+                # This needs to be what was actually on the original_rack before typing
+                tiles_consumed_from_rack_for_history = []
+                temp_original_rack_counter = Counter(state['original_rack'])
+                for r_hist, c_hist, letter_hist in newly_placed_details:
+                    if (r_hist, c_hist) in state['blanks']: # If it ended up as a blank on the board
+                        tiles_consumed_from_rack_for_history.append(' ')
+                        temp_original_rack_counter[' '] -=1
+                    else:
+                        tiles_consumed_from_rack_for_history.append(letter_hist)
+                        temp_original_rack_counter[letter_hist] -= 1
+
+
                 move_data = {
                     'player': state['turn'], 'move_type': 'place', 'rack': state['original_rack'], 
                     'score': score_val_play, 'word': primary_word_str_final, 
@@ -10014,8 +10065,8 @@ def _typing_handle_enter_key(event, state):
                     'newly_placed': newly_placed_details, 
                     'start': start_pos_final, 'direction': orientation_final_for_history, 'turn_duration': 0.0, 
                     'pool_quality_before_draw': state['current_turn_pool_quality_score'], 'luck_factor': luck_factor,
-                    'tiles_played_from_rack': newly_placed_details, 
-                    'leave': current_leave_for_typed_play
+                    'tiles_played_from_rack': tiles_consumed_from_rack_for_history, 
+                    'leave': current_leave_for_typed_play # Rack content *before* drawing new tiles
                 }
                 state['move_history'].append(move_data)
                 state['current_replay_turn'] = len(state['move_history'])
@@ -12951,6 +13002,9 @@ def execute_game_session(game_state_param, is_initialized_from_outer_loop_param)
 
 
 
+# Full, complete function with no code omitted
+# File: Scrabble Game.py
+
 def main(current_game_state_from_caller, is_first_session_call_param):
     """
     Main game orchestrator. Handles mode selection, game initialization,
@@ -12960,134 +13014,103 @@ def main(current_game_state_from_caller, is_first_session_call_param):
               Manages game state dictionary. Calls modified initialize_game and reset_for_play_again.
               Passes state to execute_game_session and receives updated state.
               Returns a tuple: (updated_game_state_dictionary, control_flags_dict).
+    MODIFIED: cProfile stats print unconditionally if profiling is enabled.
     """
-    # These globals are for application-wide settings or structures, not per-game state
-    # that is managed by the game_state_dict.
-    # initialize_game and reset_for_play_again might read some of these
-    # to set initial values in the game_state_dict.
     global GADDAG_STRUCTURE, gaddag_loading_status, gaddag_load_thread
     global DEV_CPROFILE_ENABLED_SESSION, DEV_VISUALIZE_BATCH_ENABLED_SESSION
     global ai_sim_num_candidates_global, ai_sim_num_opponent_sims_global, ai_sim_num_post_sim_candidates_global
     global bbb_7l_max_prob_global, bbb_8l_max_prob_global
 
     game_state_dict_for_this_session = None
-    session_control_flags = {} # To store flags like 'batch_stop_requested', etc.
+    session_control_flags = {} 
 
-    # Determine if this run is part of a silent batch for print control
     is_batch_run_for_print_main = False
     if current_game_state_from_caller and isinstance(current_game_state_from_caller, dict) and \
        current_game_state_from_caller.get('is_batch_running'):
-        # If DEV_VISUALIZE_BATCH_ENABLED_SESSION is False, then it's a silent batch run
         is_batch_run_for_print_main = not DEV_VISUALIZE_BATCH_ENABLED_SESSION
 
 
     if is_first_session_call_param or current_game_state_from_caller is None:
-        # This is the first game of a new session (either program start or after returning to mode select)
-        if not is_batch_run_for_print_main: # Avoid print if silent batch (though unlikely on first call)
+        if not is_batch_run_for_print_main: 
             print("--- main(): First session call or after mode selection. Initializing... ---")
         selected_mode_result, return_data_mode_sel = mode_selection_screen()
-        # initialize_game now returns the full game_state dictionary
-        game_state_dict_for_this_session = initialize_game(selected_mode_result, return_data_mode_sel, False) # False for main_called_flag
+        game_state_dict_for_this_session = initialize_game(selected_mode_result, return_data_mode_sel, False) 
         
         if game_state_dict_for_this_session is None:
-            # This error should always be visible
             print("--- main(): Initialization failed. Exiting. ---")
-            # Return None for state, and flags indicating program should stop
             return None, {'continue_program': False, 'play_again_same_mode': False}
         
-        # After initialize_game, update global AI/BBB parameters from the game_state
-        # These globals are used by mode_selection_screen for defaults on subsequent calls
-        # and by initialize_game/reset_for_play_again if specific settings aren't found in loaded/practice state.
         ai_sim_num_candidates_global = game_state_dict_for_this_session.get('ai_sim_num_candidates_cfg', ai_sim_num_candidates_global)
         ai_sim_num_opponent_sims_global = game_state_dict_for_this_session.get('ai_sim_num_opponent_sims_cfg', ai_sim_num_opponent_sims_global)
         ai_sim_num_post_sim_candidates_global = game_state_dict_for_this_session.get('ai_sim_num_post_sim_candidates_cfg', ai_sim_num_post_sim_candidates_global)
         bbb_7l_max_prob_global = game_state_dict_for_this_session.get('bbb_7l_max_prob_global', bbb_7l_max_prob_global)
         bbb_8l_max_prob_global = game_state_dict_for_this_session.get('bbb_8l_max_prob_global', bbb_8l_max_prob_global)
 
-    else: # "Play Again" scenario (is_first_session_call_param is False and current_game_state_from_caller is not None)
-        if not is_batch_run_for_print_main: # is_batch_running should be False for "Play Again"
+    else: 
+        if not is_batch_run_for_print_main: 
             print("--- main(): 'Play Again' selected. Resetting game state... ---")
         
-        # reset_for_play_again now accepts the previous state and returns a new one
         game_state_dict_for_this_session = reset_for_play_again(current_game_state_from_caller)
         if game_state_dict_for_this_session is None:
-            # This error should always be visible
             print("--- main(): Reset for Play Again failed. Returning to mode selection. ---")
-            # Return the previous state (or None if it was bad), and flags to go to mode selection
             return current_game_state_from_caller, {'continue_program': True, 'play_again_same_mode': False}
         
-        # Ensure global AI/BBB params reflect the settings of the game we are "playing again" from,
-        # as reset_for_play_again copies them into the new state.
         ai_sim_num_candidates_global = game_state_dict_for_this_session.get('ai_sim_num_candidates_cfg', ai_sim_num_candidates_global)
         ai_sim_num_opponent_sims_global = game_state_dict_for_this_session.get('ai_sim_num_opponent_sims_cfg', ai_sim_num_opponent_sims_global)
         ai_sim_num_post_sim_candidates_global = game_state_dict_for_this_session.get('ai_sim_num_post_sim_candidates_cfg', ai_sim_num_post_sim_candidates_global)
         bbb_7l_max_prob_global = game_state_dict_for_this_session.get('bbb_7l_max_prob_global', bbb_7l_max_prob_global)
         bbb_8l_max_prob_global = game_state_dict_for_this_session.get('bbb_8l_max_prob_global', bbb_8l_max_prob_global)
 
-    # Profiling block - DEV_CPROFILE_ENABLED_SESSION is global
-    # Determine if this specific call to execute_game_session is the one to profile
-    # Profile if DEV_CPROFILE_ENABLED_SESSION is true AND this is the first game after a full mode selection
     should_profile_this_run = DEV_CPROFILE_ENABLED_SESSION and is_first_session_call_param
 
     if should_profile_this_run:
-        is_batch_for_profile_print = game_state_dict_for_this_session.get('is_batch_running', False)
-        visualize_for_profile_print = DEV_VISUALIZE_BATCH_ENABLED_SESSION # Global
-        if not (is_batch_for_profile_print and not visualize_for_profile_print):
-            print("--- Profiling game session ---")
+        print("--- Profiling game session (cProfile stats will be printed below) ---")
         import cProfile, pstats, io
         profiler = cProfile.Profile()
         
         temp_namespace = {}
-        # The second param to execute_game_session (is_initialized_from_outer_loop_param)
-        # should be True if we are in a "Play Again" loop (i.e., !is_first_session_call_param).
         profiler.runctx('temp_namespace["result"] = execute_game_session(game_state_dict_for_this_session, not is_first_session_call_param)',
-                        globals(), # Pass globals for execute_game_session to find its own globals
+                        globals(), 
                         {'execute_game_session': execute_game_session,
                          'game_state_dict_for_this_session': game_state_dict_for_this_session,
-                         'is_first_session_call_param': is_first_session_call_param, # For the lambda context
+                         'is_first_session_call_param': is_first_session_call_param, 
                          'temp_namespace': temp_namespace})
         
         returned_tuple_from_exec = temp_namespace.get("result", (game_state_dict_for_this_session, {}))
-        game_state_dict_for_this_session = returned_tuple_from_exec[0] # Updated state
-        session_control_flags = returned_tuple_from_exec[1] # Control flags
+        game_state_dict_for_this_session = returned_tuple_from_exec[0] 
+        session_control_flags = returned_tuple_from_exec[1] 
 
-        if not (is_batch_for_profile_print and not visualize_for_profile_print):
-            print("\n--- cProfile Stats ---")
-            stats_obj = pstats.Stats(profiler, stream=sys.stdout).sort_stats('cumulative')
-            stats_obj.print_stats(30)
+        print("\n--- cProfile Stats ---")
+        stats_obj = pstats.Stats(profiler, stream=sys.stdout).sort_stats('cumulative')
+        stats_obj.print_stats(30)
     else:
-        # Call execute_game_session directly
         game_state_dict_for_this_session, session_control_flags = execute_game_session(game_state_dict_for_this_session, not is_first_session_call_param)
 
-    # Extract control flags from what execute_game_session returned
     _batch_stop_requested_from_exec = session_control_flags.get('batch_stop_requested', False)
     _start_new_game_same_mode_from_exec = session_control_flags.get('start_new_game_same_mode', False)
     _return_to_mode_selection_from_exec = session_control_flags.get('return_to_mode_selection', False)
 
-    # Determine if the main program loop should continue and if it's for "Play Again"
-    # This logic is now based on the flags returned by execute_game_session
     final_control_flags = {
-        'continue_program': True, # Default to continue unless explicitly stopped
+        'continue_program': True, 
         'play_again_same_mode': False
     }
 
     if _return_to_mode_selection_from_exec:
         final_control_flags['continue_program'] = True
-        final_control_flags['play_again_same_mode'] = False # Go to mode selection
+        final_control_flags['play_again_same_mode'] = False 
     elif _start_new_game_same_mode_from_exec:
         final_control_flags['continue_program'] = True
-        final_control_flags['play_again_same_mode'] = True # Play again same mode
-    elif _batch_stop_requested_from_exec: # Batch stopped or quit from game
-        final_control_flags['continue_program'] = False # Stop program or go to mode select if batch finished
-        # If a batch finished naturally (not stopped by user), we might want to go to mode select
+        final_control_flags['play_again_same_mode'] = True 
+    elif _batch_stop_requested_from_exec: 
+        final_control_flags['continue_program'] = False 
         if game_state_dict_for_this_session.get('is_batch_running', False) and \
            game_state_dict_for_this_session.get('current_batch_game_num', 0) >= game_state_dict_for_this_session.get('total_batch_games', 0) and \
-           not _batch_stop_requested_from_exec: # Natural end of batch
+           not _batch_stop_requested_from_exec: 
             final_control_flags['continue_program'] = True
-            final_control_flags['play_again_same_mode'] = False # Go to mode selection
-        else: # User quit or batch aborted
+            final_control_flags['play_again_same_mode'] = False 
+        else: 
              final_control_flags['continue_program'] = False
-    else: # Natural end of a single game without "Play Again" or "Main Menu" (e.g., user quit via window close)
+    else: 
         final_control_flags['continue_program'] = False
 
 
@@ -13113,7 +13136,7 @@ if __name__ == "__main__":
     bbb_7l_max_prob_global = 1000 # Default integer value
     bbb_8l_max_prob_global = 1000 # Default integer value
 
-    random.seed(12345)
+    #random.seed(12345)
 
 
     # This flag tracks if the next call to main() is for the very first game
