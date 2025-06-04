@@ -1921,28 +1921,66 @@ def find_cross_word(tile, tiles, main_orientation):
 
 
 def find_all_words_formed(new_tiles, tiles):
-    """Finds all words (main and cross) formed by a play."""
-    words = [];
-    if not new_tiles: return words
-    new_positions_set = set((r, c) for r, c, _ in new_tiles)
-    main_word_tiles, orientation = sc_cython_opt.find_main_word_cy(new_tiles, tiles)
-    if main_word_tiles:
-        words.append(main_word_tiles)
-        for tile in new_tiles:
-            if (tile[0], tile[1]) in new_positions_set:
-                cross_word = find_cross_word(tile, tiles, orientation)
-                if cross_word: words.append(cross_word)
-    elif len(new_tiles) == 1: # Single tile placement check
-        tile = new_tiles[0]
-        cross_h = find_cross_word(tile, tiles, "vertical");   # Check H
-        if cross_h: words.append(cross_h)
-        cross_v = find_cross_word(tile, tiles, "horizontal"); # Check V
-        if cross_v: words.append(cross_v)
-    unique_word_tile_lists = []; seen_signatures = set()
-    for word_tile_list in words:
-        signature = tuple(sorted((r, c, l) for r, c, l in word_tile_list))
-        if signature not in seen_signatures: unique_word_tile_lists.append(word_tile_list); seen_signatures.add(signature)
+    """
+    Finds all words (main and cross) formed by a play.
+    MODIFIED: Ensures all words connected to any new tile are found, even if
+              find_main_word_cy doesn't identify a single "main" word from the new_tiles.
+    """
+    all_found_word_details = [] # Stores lists of (r,c,l) tuples for each word
+    if not new_tiles: # new_tiles is a list of (r,c,l) for newly placed tiles
+        return []
+
+    # tiles argument is the board state *after* new_tiles are placed.
+
+    # Attempt to find a primary word using the existing cython function
+    main_word_from_cython, orientation_from_cython = sc_cython_opt.find_main_word_cy(new_tiles, tiles)
+    
+    if main_word_from_cython:
+        all_found_word_details.append(main_word_from_cython)
+        # If a main word is found, use its orientation to find orthogonal cross words
+        # for each newly placed tile.
+        if orientation_from_cython: # Should be set if main_word_from_cython is found
+            for nt_coord_r, nt_coord_c, nt_letter in new_tiles:
+                # The tile object for find_cross_word is (r, c, letter)
+                cross_word = find_cross_word((nt_coord_r, nt_coord_c, nt_letter), tiles, orientation_from_cython)
+                if cross_word:
+                    all_found_word_details.append(cross_word)
+    else:
+        # If find_main_word_cy did not find a single main line from the new_tiles
+        # (e.g., disjoint new tiles, or a single new tile not forming a line of 2+ with other new_tiles),
+        # we must still check words formed by each new tile independently.
+        for nt_coord_r, nt_coord_c, nt_letter in new_tiles:
+            tile_for_cross_check = (nt_coord_r, nt_coord_c, nt_letter)
+            
+            # Check for a horizontal word this new tile is part of
+            # To do this, tell find_cross_word the "main orientation" was vertical, so it checks horizontally.
+            h_word = find_cross_word(tile_for_cross_check, tiles, "vertical")
+            if h_word:
+                all_found_word_details.append(h_word)
+            
+            # Check for a vertical word this new tile is part of
+            # To do this, tell find_cross_word the "main orientation" was horizontal, so it checks vertically.
+            v_word = find_cross_word(tile_for_cross_check, tiles, "horizontal")
+            if v_word:
+                all_found_word_details.append(v_word)
+
+    # Deduplicate the collected word details
+    # A word is defined by its specific tiles at specific positions.
+    unique_word_tile_lists = []
+    seen_signatures = set()
+    for word_tile_list_item in all_found_word_details:
+        if not word_tile_list_item: # Should not happen if find_cross_word and find_main_word_cy return [] for no word
+            continue
+        # Create a canonical signature for the word based on its tiles (r, c, l)
+        # Sorting ensures that the same set of tiles, regardless of discovery order, has the same signature.
+        signature = tuple(sorted((r, c, l) for r, c, l in word_tile_list_item))
+        if signature not in seen_signatures:
+            unique_word_tile_lists.append(word_tile_list_item)
+            seen_signatures.add(signature)
+            
     return unique_word_tile_lists
+
+
 
 def calculate_score(new_tiles, board, tiles, blanks, words_formed_details_param):
     """
