@@ -1,8 +1,9 @@
 To-Do List
 
--- Create a constants.py file, can be used by my Batch Analysis program and Scrabble Game.py.
 
--- In Replay Mode, the console buttons can still override the Options options, requiring a very precise click to get an option to fire.
+-- Move History double-click is off by one, and manual scrolling still does not work
+
+-- Create a constants.py file, can be used by my Batch Analysis program and Scrabble Game.py.
 
 -- In All Words, have a search/filter function so you can look up a word from the list, which is updated and sorted in realtime based on text string search (how important is this, really? Not sure I'd use it much).
 
@@ -211,6 +212,9 @@ ________________________________________________
 -- Scrabble D 31MAY25 Word Lookup - Add a Define Word feature where user can type in word and the Xyzzyva definition appears.
 
 -- In Simulation return results, both in the console and in the dialog, show board coordinates.
+
+-- Scrabble P 04JUN24 Make move controls under Move History a perma feature (at least during live games and Replay Mode)
+
 
 
 
