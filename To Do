@@ -1,5 +1,7 @@
 To-Do List
 
+-- In 8LB mode, offer the option to adjust probability based on puzzle success. For example, user wants to start at max prob of 1000. If he can't solve the puzzle, max prob drops to 500. If he solves, back up to 1000, then to 1500, etc. It'd be nice to keep a separate file that tracks highest ever solve max prob setting.
+
 -- Create a constants.py file, can be used by my Batch Analysis program and Scrabble Game.py.
 
 -- In Replay Mode, the console buttons can still override the Options options, requiring a very precise click to get an option to fire.
