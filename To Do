@@ -1,5 +1,11 @@
 To-Do List
 
+-- Add Simulate (Sim) button in Insights window
+
+-- Lookup button should be available in Replay Mode
+
+-- Allow what-if scenarios, where the main_branch_game_state is saved, but players can make different plays, choose different racks, explore endgames, etc., Have a reset button that backs the main_branch_game_state to continue play. 
+
 -- Create a constants.py file, can be used by my Batch Analysis program and Scrabble Game.py.
 
 -- In Replay Mode, the console buttons can still override the Options options, requiring a very precise click to get an option to fire.
@@ -7,10 +13,6 @@ To-Do List
 -- In All Words, have a search/filter function so you can look up a word from the list, which is updated and sorted in realtime based on text string search (how important is this, really? Not sure I'd use it much).
 
 -- Need a way to gracefully stop endgame analysis, retaining the current best sequence.
-
--- MAJOR CHANGE: reduce move list window by 1/2 vertically. Below it put arrow controls like we have for replay mode. Allow what-if scenarios, where the main_branch_game_state is saved, but players can make different plays, choose different racks, explore endgames, etc., Have a reset button that backs the main_branch_game_state to continue play. Under that window, when in Replay Mode, show 5-15 best moves, like on Woogles, showing score, equity, leave eval, simulate button, the whole shebang.
-
--- In Replay mode, like Woogles does, show the best move that was available, the move the human played, the equity difference, and the running and total equity lost/gained.
 
 -- add code for more than a 2-ply look-ahead
 
@@ -211,6 +213,9 @@ ________________________________________________
 -- Scrabble D 31MAY25 Word Lookup - Add a Define Word feature where user can type in word and the Xyzzyva definition appears.
 
 -- In Simulation return results, both in the console and in the dialog, show board coordinates.
+
+-- MAJOR CHANGE: reduce move list window by 1/2 vertically. Below it put arrow controls like we have for replay mode. Under that window, when in Replay Mode, show 5-15 best moves, like on Woogles, showing score, equity, leave eval, simulate button, the whole shebang.
+
 
 
 
