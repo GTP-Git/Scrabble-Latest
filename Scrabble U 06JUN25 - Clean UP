@@ -1,7 +1,8 @@
 
 #python
-#Scrabble T
-# Insights window now working! Clicks work, board state is correct, word preview works
+#Scrabble U
+#Added back save dialog
+#reduced debug
 #06JUN25
 
 
@@ -9827,11 +9828,15 @@ def _handle_mouse_down_game_over_dialog(event, state, drawn_rects):
     MODIFIED: Calls generate_turn_insights_data when entering replay mode.
     MODIFIED: Defined is_silent_run locally.
     MODIFIED: Displays "Generating Insights..." message.
+    MODIFIED: Ensures save_game_sgs is called with show_success_dialog=True.
     NO CODE OMITTED.
     """
     global DEV_VISUALIZE_BATCH_ENABLED_SESSION 
-    global insights_data_for_replay # Use the correct global for real data
+    global insights_data_for_replay 
     global screen, ui_font, RED, WHITE, BLUE # For loading message
+    # Constants for default AI sim params if not found in loaded SGS
+    global DEFAULT_AI_CANDIDATES, DEFAULT_OPPONENT_SIMULATIONS, DEFAULT_POST_SIM_CANDIDATES
+
 
     is_silent_run = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
 
@@ -9843,7 +9848,7 @@ def _handle_mouse_down_game_over_dialog(event, state, drawn_rects):
     dialog_x = state['dialog_x']
     dialog_y = state['dialog_y']
     move_history = state['move_history'] 
-    sgs_loaded_game_data_local = state.get('sgs_loaded_game_data') # Get potentially loaded SGS data
+    sgs_loaded_game_data_local = state.get('sgs_loaded_game_data') 
 
     save_rect = drawn_rects.get('save_rect')
     quit_rect = drawn_rects.get('quit_rect')
@@ -9911,9 +9916,11 @@ def _handle_mouse_down_game_over_dialog(event, state, drawn_rects):
                 except OSError as e_os_err:
                     print(f"Warning: Error listing directory for SGS save sequence number: {e_os_err}")
                 save_filename_sgs = f"{date_str}-{time_str}-SGSGAME-{seq_num}.sgs"
+                # --- MODIFICATION: Ensure show_success_dialog is True ---
                 save_game_sgs(save_filename_sgs, game_data_for_sgs,
-                                  show_success_dialog=False, # Usually True, but from game over might be quick
+                                  show_success_dialog=True, 
                                   is_silent_batch_run_param=is_silent_run)
+                # --- END MODIFICATION ---
             else:
                 print("Error: Missing data required for SGS saving.")
                 missing_parts = []
@@ -9931,23 +9938,19 @@ def _handle_mouse_down_game_over_dialog(event, state, drawn_rects):
                 if not is_silent_run:
                     print("Entering Replay Mode (from Game Over Dialog)...")
                 
-                # --- MODIFICATION: Generate real insights data ---
                 game_data_for_insights = None
-                if sgs_loaded_game_data_local: # If the game that just ended was loaded
+                if sgs_loaded_game_data_local: 
                     game_data_for_insights = sgs_loaded_game_data_local
-                else: # If it was a fresh game
+                else: 
                     game_data_for_insights = {
                         'sgs_initial_bag': state.get('sgs_initial_bag', []),
                         'initial_racks_sgs': state.get('initial_racks', [[],[]]),
                         'full_move_history': state.get('move_history', []),
-                        # Add other necessary fields if generate_turn_insights_data needs them
-                        # For now, assuming these are the primary ones.
                     }
 
                 if gaddag_loading_status == 'loaded' and GADDAG_STRUCTURE is not None:
                     if not is_silent_run:
-                        # Display a temporary loading message on screen
-                        screen.fill(WHITE) # Or current background
+                        screen.fill(WHITE) 
                         loading_text_surf = ui_font.render("Generating Insights...", True, BLUE)
                         screen.blit(loading_text_surf, ( (WINDOW_WIDTH - loading_text_surf.get_width()) // 2, (WINDOW_HEIGHT - loading_text_surf.get_height()) // 2))
                         pygame.display.flip()
@@ -9957,25 +9960,24 @@ def _handle_mouse_down_game_over_dialog(event, state, drawn_rects):
                     if not is_silent_run:
                         print(f"DEBUG _handle_mouse_down_game_over_dialog: Populated REAL insights data. Turns in history: {len(state['move_history'])}, Turns in insights_data: {len(insights_data_for_replay)}.")
                         if insights_data_for_replay and len(insights_data_for_replay) > 0:
-                             if insights_data_for_replay[0] : # Check if first turn has data
-                                print(f"    Sample insight data for first turn: {insights_data_for_replay[0][:1]}") # Print first insight for first turn
+                             if insights_data_for_replay[0] : 
+                                print(f"    Sample insight data for first turn: {insights_data_for_replay[0][:1]}") 
                              else:
                                 print(f"    No insights generated for the first turn.")
 
                 else:
-                    insights_data_for_replay = [] # Cannot generate if GADDAG not ready
+                    insights_data_for_replay = [] 
                     if not is_silent_run:
                         print("Insights generation skipped for replay from game over: GADDAG not ready.")
-                # --- END MODIFICATION ---
 
                 state['replay_mode'] = True
                 state['current_replay_turn'] = 0
-                state['game_over_state'] = False # Exit game over state to enter replay
+                state['game_over_state'] = False 
                 state['showing_stats'] = False
                 state['last_played_highlight_coords'] = set()
                 state['last_scoreboard_click_time'] = 0
                 state['last_scoreboard_click_idx'] = -1
-                state['analyzer_selected_move_index'] = None # Reset analyzer selection
+                state['analyzer_selected_move_index'] = None 
             elif not is_silent_run:
                 print("Cannot enter replay: No move history found.")
         elif play_again_rect and play_again_rect.collidepoint(x, y):
