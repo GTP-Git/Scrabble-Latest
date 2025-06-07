@@ -2,8 +2,10 @@
 #python
 #Scrabble U
 #Added back save dialog
-#reduced debug
-#06JUN25
+#Fixed incorrect internal board/bad state after exchange
+#Reduced debug
+#Hopefully brought back Options button in Replay Mode once and for all
+#07JUN25
 
 
 
@@ -1266,11 +1268,11 @@ def show_save_success_dialog(message, title, filename_to_copy):
 
 
 
-def get_sgs_replay_state(sgs_full_data, target_turn_idx_from_main, is_silent_batch_run_param=False): # Added is_silent_batch_run_param
+def get_sgs_replay_state(sgs_full_data, target_turn_idx_from_main, is_silent_batch_run_param=False):
     """
     Reconstructs the game state up to a specific turn using SGS data.
     target_turn_idx_from_main is 1-based (like current_replay_turn).
-    Debug print statements (currently commented out) are now conditional.
+    Debug print statements are now conditional and further refined for verbosity.
     """
     if not sgs_full_data or not isinstance(sgs_full_data, dict):
         empty_tiles = [['' for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
@@ -1279,40 +1281,19 @@ def get_sgs_replay_state(sgs_full_data, target_turn_idx_from_main, is_silent_bat
     sgs_initial_bag = sgs_full_data.get('sgs_initial_bag', [])
     initial_racks_sgs = sgs_full_data.get('initial_racks_sgs', [[], []])
     full_move_history = sgs_full_data.get('full_move_history', [])
-
-    # --- REMOVED DEBUG PRINTS (now conditional if uncommented) ---
-    # if not is_silent_batch_run_param:
-    #     print(f"\n--- get_sgs_replay_state called for target_turn_idx_from_main: {target_turn_idx_from_main} ---")
-    #     print(f"  Initial sgs_initial_bag size: {len(sgs_initial_bag)}")
-    #     if len(sgs_initial_bag) < 20: print(f"  sgs_initial_bag sample: {sgs_initial_bag}")
-    #     print(f"  Initial racks SGS: P1={initial_racks_sgs[0]}, P2={initial_racks_sgs[1]}")
-    # --- END REMOVED DEBUG PRINTS ---
-
+    
     tiles_state = [['' for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
     blanks_on_board_state = set()
     scores_state = [0, 0]
     
     current_bag_snapshot = sgs_initial_bag[:]
-    # --- REMOVED DEBUG PRINT (now conditional if uncommented) ---
-    # if not is_silent_batch_run_param:
-    #     print(f"  Bag snapshot after copy: {len(current_bag_snapshot)} tiles")
-    # --- END REMOVED DEBUG PRINT ---
 
     for i_player, p_rack in enumerate(initial_racks_sgs):
-        # --- REMOVED DEBUG PRINT (now conditional if uncommented) ---
-        # if not is_silent_batch_run_param:
-        #     print(f"  Removing P{i_player+1}'s initial rack from bag snapshot: {p_rack}")
-        # --- END REMOVED DEBUG PRINT ---
         for tile_val in p_rack:
             if tile_val in current_bag_snapshot:
                 current_bag_snapshot.remove(tile_val)
             else: 
-                # This is a data integrity warning, should probably always show or log
-                print(f"  SGS Replay Warning: Tile '{tile_val}' from initial_racks_sgs (P{i_player+1}) not in sgs_initial_bag copy.")
-        # --- REMOVED DEBUG PRINT (now conditional if uncommented) ---
-        # if not is_silent_batch_run_param:
-        #     print(f"  Bag snapshot after P{i_player+1} initial rack removal: {len(current_bag_snapshot)} tiles")
-        # --- END REMOVED DEBUG PRINT ---
+                print(f"  SGS Replay CRITICAL WARNING: Tile '{tile_val}' from initial_racks_sgs (P{i_player+1}) not in sgs_initial_bag copy during initial rack processing.")
 
     racks_for_display = [[], []] 
     turn_number_for_display = 1 
@@ -1320,38 +1301,28 @@ def get_sgs_replay_state(sgs_full_data, target_turn_idx_from_main, is_silent_bat
     if target_turn_idx_from_main == 0: 
         racks_for_display = [initial_racks_sgs[0][:], initial_racks_sgs[1][:]]
         turn_number_for_display = 1
-        # --- REMOVED DEBUG PRINT (now conditional if uncommented) ---
-        # if not is_silent_batch_run_param:
-        #     print(f"  Target turn 0: Displaying initial racks. Bag size: {len(current_bag_snapshot)}")
-        # --- END REMOVED DEBUG PRINT ---
     else:
-        moves_to_process_for_bag = min(target_turn_idx_from_main -1, len(full_move_history))
-        # --- REMOVED DEBUG PRINT (now conditional if uncommented) ---
-        # if not is_silent_batch_run_param:
-        #     print(f"  Processing draws for {moves_to_process_for_bag} moves (0 to {moves_to_process_for_bag-1}) for bag state.")
-        # --- END REMOVED DEBUG PRINT ---
+        moves_to_process_for_bag = min(target_turn_idx_from_main - 1, len(full_move_history))
+        
         for i in range(moves_to_process_for_bag):
             move = full_move_history[i]
+            
+            if move.get('move_type') == 'exchange':
+                exchanged_tiles_hist = move.get('exchanged_tiles', [])
+                if exchanged_tiles_hist:
+                    current_bag_snapshot.extend(exchanged_tiles_hist)
+            
             drawn_this_past_move = move.get('drawn', [])
-            # --- REMOVED DEBUG PRINT (now conditional if uncommented) ---
-            # if not is_silent_batch_run_param:
-            #     print(f"  Move {i} (Player {move['player']}): Drawn {len(drawn_this_past_move)} tiles: {drawn_this_past_move}")
-            # --- END REMOVED DEBUG PRINT ---
-            for tile_val in drawn_this_past_move:
-                if tile_val in current_bag_snapshot: current_bag_snapshot.remove(tile_val)
+            for tile_val_draw in drawn_this_past_move:
+                if tile_val_draw in current_bag_snapshot: 
+                    current_bag_snapshot.remove(tile_val_draw)
                 else: 
-                    # Data integrity warning
-                    print(f"  SGS Replay Warning: Drawn tile '{tile_val}' for past move {i} not in bag snapshot.")
-            # --- REMOVED DEBUG PRINT (now conditional if uncommented) ---
-            # if not is_silent_batch_run_param:
-            #     print(f"  Bag snapshot after move {i} draws: {len(current_bag_snapshot)} tiles")
-            # --- END REMOVED DEBUG PRINT ---
-
+                    print(f"  >>> SGS Replay WARNING: Drawn tile '{tile_val_draw}' for past move {i} (Player {move['player']}) NOT IN BAG SNAPSHOT.")
+                    if not is_silent_batch_run_param:
+                        print(f"      Bag snapshot at time of error (len {len(current_bag_snapshot)}). First 30: {current_bag_snapshot[:30]}")
+                        print(f"      Full move data for move {i}: {move}")
+        
         moves_to_process_for_board_scores = min(target_turn_idx_from_main, len(full_move_history))
-        # --- REMOVED DEBUG PRINT (now conditional if uncommented) ---
-        # if not is_silent_batch_run_param:
-        #     print(f"  Processing {moves_to_process_for_board_scores} moves (0 to {moves_to_process_for_board_scores-1}) for board/score state.")
-        # --- END REMOVED DEBUG PRINT ---
         for i in range(moves_to_process_for_board_scores): 
             move = full_move_history[i]
             player_idx = move['player'] - 1
@@ -1427,19 +1398,7 @@ def get_sgs_replay_state(sgs_full_data, target_turn_idx_from_main, is_silent_bat
     racks_for_display[0].sort()
     racks_for_display[1].sort()
 
-    # --- REMOVED DEBUG PRINTS (now conditional if uncommented) ---
-    # if not is_silent_batch_run_param:
-    #     print(f"  Returning from get_sgs_replay_state for target_turn_idx_from_main {target_turn_idx_from_main}:")
-    #     print(f"    Racks for display: P1={racks_for_display[0]}, P2={racks_for_display[1]}")
-    #     print(f"    Bag snapshot size for display: {len(current_bag_snapshot)}") 
-    #     if len(current_bag_snapshot) < 20 and len(current_bag_snapshot) > 0 : print(f"    Bag snapshot sample: {current_bag_snapshot[:10]}")
-    #     elif len(current_bag_snapshot) == 0: print(f"    Bag snapshot is EMPTY.")
-    #     print(f"    Turn number for display: {turn_number_for_display}")
-    #     print(f"--- get_sgs_replay_state finished ---\n")
-    # --- END REMOVED DEBUG PRINTS ---
-
     return tiles_state, blanks_on_board_state, scores_state, racks_for_display, current_bag_snapshot, turn_number_for_display
-
 
 
 
@@ -1914,8 +1873,8 @@ def draw_insights_window(screen_surf, state): # Renamed from draw_analyzer_windo
         else:
             if not is_silent_run_local:
                 print("Warning (draw_insights_window): Cannot determine Y position for Insights window.")
-            return None, insights_item_rects_for_click # MODIFIED: Return tuple
-
+            return None, insights_item_rects_for_click 
+        
         if scoreboard_rect:
             insights_window_x = scoreboard_rect.left
             insights_window_width = scoreboard_rect.width
@@ -1940,7 +1899,7 @@ def draw_insights_window(screen_surf, state): # Renamed from draw_analyzer_windo
         if insights_window_height <= 0:
             if not is_silent_run_local:
                 print("Warning (draw_insights_window): Not enough vertical space for Insights window.")
-            return None, insights_item_rects_for_click # MODIFIED: Return tuple
+            return None, insights_item_rects_for_click 
 
         insights_window_rect = pygame.Rect(insights_window_x, insights_window_y_start, insights_window_width, insights_window_height)
         state['analyzer_window_rect_store'] = insights_window_rect 
@@ -1980,18 +1939,12 @@ def draw_insights_window(screen_surf, state): # Renamed from draw_analyzer_windo
             
             insights_selected_move_index_key = state.get('analyzer_selected_move_index') 
 
-            if not is_silent_run_local:
-                print(f"DEBUG draw_insights_window: analyzer_show=True. current_replay_turn (UI): {current_turn_for_insights_ui}, actual_insights_turn_index (for data): {actual_insights_turn_index}, len(all_turns_insights_data): {len(all_turns_insights_data)}, selected_move_key: {insights_selected_move_index_key}")
-
             moves_for_this_turn_display = []
             if 0 <= actual_insights_turn_index < len(all_turns_insights_data):
                 moves_for_this_turn_display = all_turns_insights_data[actual_insights_turn_index]
-                if not is_silent_run_local:
-                    print(f"  Found {len(moves_for_this_turn_display)} insights for this turn index.")
-                    if moves_for_this_turn_display:
-                        print(f"    Sample insight: {moves_for_this_turn_display[0]}")
-            elif not is_silent_run_local:
-                 print(f"  No insights found for actual_insights_turn_index {actual_insights_turn_index} (len all_turns_insights_data: {len(all_turns_insights_data)})")
+                # The "Found X insights..." print block that was here has been removed.
+            # The "No insights found for actual_insights_turn_index..." print block that was here has been removed.
+
 
             content_padding_inner = 5
             content_display_x = insights_window_rect.left + content_padding_inner
@@ -2058,10 +2011,8 @@ def draw_insights_window(screen_surf, state): # Renamed from draw_analyzer_windo
 
                     current_move_unique_key = actual_insights_turn_index * 1000 + i_move_item
                     
-                    # --- NEW: Store clickable rect for this item ---
                     item_screen_rect = pygame.Rect(content_display_x, current_item_top_y_abs, content_display_width, item_height)
                     insights_item_rects_for_click.append((item_screen_rect, current_move_unique_key))
-                    # --- END NEW ---
 
                     if insights_selected_move_index_key is not None and insights_selected_move_index_key == current_move_unique_key:
                         highlight_rect = pygame.Rect(content_display_x, current_item_top_y_abs, content_display_width, item_height)
@@ -2093,9 +2044,7 @@ def draw_insights_window(screen_surf, state): # Renamed from draw_analyzer_windo
                              screen_surf.blit(text_surf_col, (current_col_start_x_abs, current_item_top_y_abs + (item_height - text_surf_col.get_height()) // 2))
                     y_offset_content += item_height
             
-    return (insights_checkbox_rect if insights_checkbox_rect else None, insights_item_rects_for_click) # MODIFIED: Return tuple
-
-
+    return (insights_checkbox_rect if insights_checkbox_rect else None, insights_item_rects_for_click)
 
 
 
@@ -7056,7 +7005,7 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
             elif gaddag_loading_status == 'error':
                 print(f"AI {turn}: GADDAG failed to load, passing turn.")
             else:
-                print(f"AI {turn}: GADDAG status unknown ('{gaddag_loading_status}'), passing turn.")
+                 print(f"AI {turn}: GADDAG status unknown ('{gaddag_loading_status}'), passing turn.")
 
         move_rack_before = racks[player_idx][:] if 0 <= player_idx < len(racks) and racks[player_idx] is not None else []
         exchanged_tiles_for_history = []
@@ -7500,8 +7449,21 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
                     exchange_counts[tile_val_ex] -= 1
                 else:
                     temp_rack_after_exchange.append(tile_val_ex)
+            
+            leave_for_history = temp_rack_after_exchange[:]
+
+            # --- MODIFICATION START: Corrected exchange order of operations ---
+            bag.extend(exchanged_tiles_for_history)
+            random.shuffle(bag)
+            
             num_to_draw = len(exchanged_tiles_for_history)
-            drawn_tiles = [bag.pop() for _ in range(num_to_draw) if bag]
+            drawn_tiles = []
+            for _ in range(num_to_draw):
+                if bag:
+                    drawn_tiles.append(bag.pop())
+                else:
+                    break # Stop drawing if bag runs out mid-exchange
+            
             temp_rack_after_exchange.extend(drawn_tiles)
             
             should_sort_rack_ai_exchange = not is_silent_batch_run_param
@@ -7510,9 +7472,7 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
                     temp_rack_after_exchange.sort()
             
             racks[player_idx] = temp_rack_after_exchange
-            leave_for_history = racks[player_idx][:] if 0 <= player_idx < len(racks) and racks[player_idx] is not None else []
-            bag.extend(exchanged_tiles_for_history)
-            random.shuffle(bag)
+            # --- MODIFICATION END ---
             move_type = 'exchange'
             score_val = 0
             consecutive_zero_point_turns += 1
@@ -7576,6 +7536,12 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
         move_data_for_turn['exchanged_tiles'] = exchanged_tiles_for_history
 
     return next_turn_val, first_play, pass_count, exchange_count, consecutive_zero_point_turns, [], dropdown_open, hinting, showing_all_words, paused_for_power_tile_local_flag, current_power_tile_local_val, paused_for_bingo_practice_local_flag, set(), move_data_for_turn
+
+
+
+
+
+
 
 
 
@@ -8487,7 +8453,7 @@ def _handle_mouse_down_scoreboard_replay_nav(event, state, drawn_rects):
                     state['last_played_highlight_coords'] = set()
                     state['analyzer_selected_move_index'] = None 
 
-                    # Fetch and set the board state for the new current_replay_turn
+                    # --- MODIFICATION START: Calculate and store replay state ONCE ---
                     sgs_data_for_nav = state.get('sgs_loaded_game_data')
                     if not sgs_data_for_nav:
                         sgs_data_for_nav = {
@@ -8495,15 +8461,24 @@ def _handle_mouse_down_scoreboard_replay_nav(event, state, drawn_rects):
                             'initial_racks_sgs': state.get('initial_racks', [[],[]]),
                             'full_move_history': state.get('move_history', [])
                         }
-                    new_hist_tiles, new_hist_blanks, _, _, _, _ = get_sgs_replay_state(
+                    sgs_tiles, sgs_blanks, sgs_scores, sgs_racks, sgs_bag, sgs_turn = get_sgs_replay_state(
                         sgs_data_for_nav,
                         state['current_replay_turn'],
                         is_silent_batch_run_param=is_silent_run
                     )
-                    state['tiles'] = copy.deepcopy(new_hist_tiles)
-                    state['blanks'] = new_hist_blanks.copy()
-                    if not is_silent_run:
-                        print(f"DEBUG Scoreboard DblClick: Set state['tiles'] for turn {state['current_replay_turn']}")
+                    state['tiles'] = sgs_tiles
+                    state['blanks'] = sgs_blanks
+                    state['replay_scores_for_display'] = sgs_scores
+                    state['replay_racks_for_display'] = sgs_racks
+                    state['replay_turn_for_display'] = sgs_turn
+                    
+                    combined_unseen = sgs_bag[:]
+                    if sgs_turn == 1 and len(sgs_racks) > 1 and sgs_racks[1] is not None:
+                        combined_unseen.extend(sgs_racks[1])
+                    elif sgs_turn == 2 and len(sgs_racks) > 0 and sgs_racks[0] is not None:
+                        combined_unseen.extend(sgs_racks[0])
+                    state['replay_unseen_tiles_for_display'] = Counter(combined_unseen)
+                    # --- MODIFICATION END ---
                 
                 state['last_scoreboard_click_time'] = 0
                 state['last_scoreboard_click_idx'] = -1
@@ -8516,14 +8491,9 @@ def _handle_mouse_down_scoreboard_replay_nav(event, state, drawn_rects):
                 
                 clicked_turn_index_0based = clicked_move_zero_based_index
                 
-                # If the single click is for a *different* turn than the IW is currently showing for its selected item,
-                # clear the IW selection and preview.
                 current_analyzer_selection_key = state.get('analyzer_selected_move_index')
                 if current_analyzer_selection_key is not None:
                     analyzer_turn_idx = current_analyzer_selection_key // 1000
-                    # insights are for current_replay_turn - 1
-                    # if current_replay_turn is 0, insights are for index 0
-                    # if current_replay_turn is N, insights are for index N-1
                     insights_context_turn_idx = state['current_replay_turn'] -1 if state['current_replay_turn'] > 0 else 0
 
                     if insights_context_turn_idx != analyzer_turn_idx:
@@ -8535,27 +8505,6 @@ def _handle_mouse_down_scoreboard_replay_nav(event, state, drawn_rects):
                    clicked_turn_index_0based < len(insights_data_for_replay) and \
                    insights_data_for_replay[clicked_turn_index_0based]:
                     
-                    # Check if this click actually changes the IW context turn
-                    # The IW shows data for state['current_replay_turn'] (or current_replay_turn-1 index)
-                    # The scoreboard click is on history_index = clicked_move_zero_based_index
-                    # The insights relevant to the *options before* this clicked move were made are at insights_data_for_replay[clicked_move_zero_based_index]
-                    
-                    # If we are already viewing the turn whose options are in IW, select the first.
-                    # Otherwise, this single click doesn't change the IW selection yet, only a dbl-click jump does.
-                    # This logic might need refinement based on desired single-click behavior on scoreboard vs IW.
-                    # For now, let's assume single click on scoreboard *selects the turn for IW context* if IW is open.
-                    
-                    # If the scoreboard click corresponds to the turn the IW *would* show if current_replay_turn was set to this,
-                    # then select the first item in IW.
-                    # The IW shows options for the (current_replay_turn)-th move in history (index current_replay_turn-1)
-                    # If we clicked on the Nth move in scoreboard (index N-1), the IW should show options for that Nth move.
-                    # So, the data is at insights_data_for_replay[N-1]
-                    
-                    # If the current_replay_turn (which dictates IW content) is already set such that
-                    # its insights (index current_replay_turn-1) match the clicked_move_zero_based_index,
-                    # then we can select the first item.
-                    # This is complex. Let's simplify: a single click on scoreboard *does not* change IW selection directly.
-                    # IW selection is only changed by clicking *within* the IW, or cleared when turn context changes.
                     pass # Single click on scoreboard doesn't auto-select in IW for now.
 
                 action_taken = True
@@ -8838,6 +8787,7 @@ def _handle_mouse_down_replay_buttons(event, state, drawn_rects):
 
     action_taken = False
     turn_changed_by_button = False
+    original_replay_turn = state['current_replay_turn']
 
     if replay_start_rect_local and replay_start_rect_local.collidepoint(x, y):
         if state['current_replay_turn'] != 0:
@@ -8865,7 +8815,7 @@ def _handle_mouse_down_replay_buttons(event, state, drawn_rects):
         state['last_scoreboard_click_idx'] = -1
         state['analyzer_selected_move_index'] = None # Clear IW selection
 
-        # Fetch and set the board state for the new current_replay_turn
+        # --- MODIFICATION START: Calculate and store replay state ONCE ---
         sgs_data_for_nav = state.get('sgs_loaded_game_data')
         if not sgs_data_for_nav:
              sgs_data_for_nav = {
@@ -8874,15 +8824,24 @@ def _handle_mouse_down_replay_buttons(event, state, drawn_rects):
                 'full_move_history': state.get('move_history', [])
             }
         
-        new_hist_tiles, new_hist_blanks, _, _, _, _ = get_sgs_replay_state(
+        sgs_tiles, sgs_blanks, sgs_scores, sgs_racks, sgs_bag, sgs_turn = get_sgs_replay_state(
             sgs_data_for_nav,
             state['current_replay_turn'],
             is_silent_batch_run_param=is_silent_run_local
         )
-        state['tiles'] = copy.deepcopy(new_hist_tiles)
-        state['blanks'] = new_hist_blanks.copy()
-        if not is_silent_run_local:
-            print(f"DEBUG Replay Button: Set state['tiles'] for turn {state['current_replay_turn']}")
+        state['tiles'] = sgs_tiles
+        state['blanks'] = sgs_blanks
+        state['replay_scores_for_display'] = sgs_scores
+        state['replay_racks_for_display'] = sgs_racks
+        state['replay_turn_for_display'] = sgs_turn
+        
+        combined_unseen = sgs_bag[:]
+        if sgs_turn == 1 and len(sgs_racks) > 1 and sgs_racks[1] is not None:
+            combined_unseen.extend(sgs_racks[1])
+        elif sgs_turn == 2 and len(sgs_racks) > 0 and sgs_racks[0] is not None:
+            combined_unseen.extend(sgs_racks[0])
+        state['replay_unseen_tiles_for_display'] = Counter(combined_unseen)
+        # --- MODIFICATION END ---
 
     return action_taken
 
@@ -8929,12 +8888,7 @@ def _handle_general_mouse_down(event, state, drawn_rects):
         if _handle_mouse_down_replay_buttons(event, state, drawn_rects):
             return updated_state_flags
         if event.button == 1 and _handle_mouse_down_scoreboard_replay_nav(event, state, drawn_rects):
-            # If scoreboard navigation occurred, we might want to clear any IW preview
-            # or let the IW draw logic handle it based on the new current_replay_turn.
-            # For now, scoreboard nav might implicitly change the IW content, so preview might become stale.
-            # Let's clear preview if a jump happens.
-            # _handle_mouse_down_scoreboard_replay_nav already clears analyzer_selected_move_index on double-click.
-            if state.get('last_scoreboard_click_idx') == -1: # Indicates a jump occurred
+            if state.get('last_scoreboard_click_idx') == -1: 
                  state = clear_current_preview(state)
             return updated_state_flags
 
@@ -8942,93 +8896,60 @@ def _handle_general_mouse_down(event, state, drawn_rects):
         if analyzer_checkbox_rect_local and analyzer_checkbox_rect_local.collidepoint(x,y):
             current_analyzer_show_state = state.get('analyzer_show', False)
             state['analyzer_show'] = not current_analyzer_show_state
-            if not is_silent_run_local: 
-                print(f"DEBUG _handle_general_mouse_down: Analyzer checkbox clicked. New 'analyzer_show' state: {state['analyzer_show']}")
+            # The "DEBUG _handle_general_mouse_down: Analyzer checkbox clicked..." print block that was here has been removed.
             if not state.get('analyzer_show', False):
                 state['analyzer_selected_move_index'] = None
                 state = clear_current_preview(state)
             return updated_state_flags
         
-        if state.get('analyzer_show', False) and event.button == 1: # Ensure left click for item interaction
+        if state.get('analyzer_show', False) and event.button == 1: 
             insights_item_rects = drawn_rects.get('insights_item_rects', [])
             for item_rect, unique_key in insights_item_rects:
                 if item_rect.collidepoint(x, y):
-                    if not is_silent_run_local:
-                        print(f"DEBUG: Clicked on Insights item with key: {unique_key}")
+                    # The "DEBUG: Clicked on Insights item with key: ..." print line that was here has been removed.
 
-                    # 1. Clear any existing preview first
                     state = clear_current_preview(state)
                     
-                    # 2. Determine the turn index for the clicked IW item
-                    # The unique_key was actual_insights_turn_index * 1000 + i_move_item
-                    # actual_insights_turn_index was current_replay_turn - 1 (or 0 if current_replay_turn is 0)
-                    # So, the turn_index_for_data is the turn for which these insights were generated.
-                    # This corresponds to the state *before* the (turn_index_for_data + 1)-th move in history.
                     turn_index_for_data = unique_key // 1000 
                     move_idx_in_turn_list = unique_key % 1000
-
-                    # 3. Get the historical board state for *this specific turn*
-                    # We need to pass the correct target_turn_idx_from_main to get_sgs_replay_state.
-                    # If insights are for turn_index_for_data (0-indexed in history),
-                    # it means they are options for the (turn_index_for_data + 1)-th move.
-                    # get_sgs_replay_state with target_turn_idx_from_main = 0 gives state before 1st move.
-                    # get_sgs_replay_state with target_turn_idx_from_main = N gives state *after* Nth move.
-                    # We need the state *before* the move for which insights are shown.
-                    # If insights are for turn_index_for_data (e.g., 0, meaning options for move 1),
-                    # we need the board state *before* move 1, which is target_turn_idx_from_main = 0.
-                    # So, target_turn_idx_for_get_sgs = turn_index_for_data.
                     
-                    # Let's re-verify: insights_data_for_replay[N] contains options for the (N+1)th move in history.
-                    # The board state for these options is the state *after* the Nth move (if N>0) or initial state (if N=0).
-                    # get_sgs_replay_state(sgs_data, target_turn_idx_from_main)
-                    # target_turn_idx_from_main = 0 -> initial state (for move 1, history[0])
-                    # target_turn_idx_from_main = 1 -> state after move 1 (for move 2, history[1])
-                    # So, if insights are for turn_index_for_data (0-indexed into insights_data_for_replay),
-                    # the corresponding target_turn_idx_from_main for get_sgs_replay_state is turn_index_for_data.
-                    
-                    sgs_data_for_preview_base = state.get('sgs_loaded_game_data') # This should be the full game data
-                    if not sgs_data_for_preview_base: # Fallback if not directly in state (e.g. fresh game just ended)
+                    sgs_data_for_preview_base = state.get('sgs_loaded_game_data') 
+                    if not sgs_data_for_preview_base: 
                          sgs_data_for_preview_base = {
                             'sgs_initial_bag': state.get('sgs_initial_bag', []),
-                            'initial_racks_sgs': state.get('initial_racks', [[],[]]), # initial_racks at game start
+                            'initial_racks_sgs': state.get('initial_racks', [[],[]]), 
                             'full_move_history': state.get('move_history', [])
                         }
 
                     historical_tiles_N, historical_blanks_N, _, _, _, _ = get_sgs_replay_state(
                         sgs_data_for_preview_base,
-                        turn_index_for_data, # target_turn_idx_from_main: state *after* this many moves
-                                             # So, if turn_index_for_data is 0, this gives initial board.
-                                             # If turn_index_for_data is 1, state after 1st move.
+                        turn_index_for_data, 
                         is_silent_batch_run_param=True
                     )
                     
-                    # 4. Set main game state to this historical base
                     state['tiles'] = copy.deepcopy(historical_tiles_N)
                     state['blanks'] = historical_blanks_N.copy()
                     if not is_silent_run_local:
                         print(f"  Set state['tiles'] and state['blanks'] to historical state of turn index {turn_index_for_data} for preview.")
 
-                    # 5. Retrieve the specific move data and apply preview
                     if insights_data_for_replay and \
                        0 <= turn_index_for_data < len(insights_data_for_replay) and \
                        0 <= move_idx_in_turn_list < len(insights_data_for_replay[turn_index_for_data]):
                         
                         move_data_from_insights = insights_data_for_replay[turn_index_for_data][move_idx_in_turn_list]
                         
-                        # apply_move_as_preview expects 'newly_placed' and 'blanks' (for the blanks *in the move*)
                         move_for_preview_func = {
-                            'newly_placed': move_data_from_insights.get('newly_placed', []), # This should be pre-calculated correctly
-                            'blanks': move_data_from_insights.get('blanks_in_move', set())  # Blanks *placed by this move*
+                            'newly_placed': move_data_from_insights.get('newly_placed', []), 
+                            'blanks': move_data_from_insights.get('blanks_in_move', set())  
                         }
                         state = apply_move_as_preview(state, move_for_preview_func)
                         state['analyzer_selected_move_index'] = unique_key
-                        if not is_silent_run_local:
-                            print(f"  Applied preview for IW item: {move_data_from_insights.get('word', 'N/A')}")
+                        # The "Applied preview for IW item: ..." print line that was here has been removed.
                     else:
                         if not is_silent_run_local:
                             print(f"Warning: Could not retrieve insights move for key {unique_key} to apply preview.")
-                        state['analyzer_selected_move_index'] = None # Clear selection if data not found
-                    return updated_state_flags # Click handled
+                        state['analyzer_selected_move_index'] = None 
+                    return updated_state_flags 
         return updated_state_flags
 
 
@@ -9105,7 +9026,20 @@ def _handle_mouse_down_exchange_dialog(event, state, drawn_rects):
                     
                     new_rack_after_exchange = [tile_val_nr for i_nr, tile_val_nr in enumerate(racks[turn-1]) if i_nr not in selected_tiles]
                     num_to_draw_exchange = len(tiles_to_exchange_list)
-                    drawn_tiles_exchange = [bag.pop() for _ in range(num_to_draw_exchange) if bag]
+                    
+                    leave_for_history = new_rack_after_exchange[:]
+                    
+                    # --- MODIFICATION START: Corrected exchange order of operations ---
+                    bag.extend(tiles_to_exchange_list)
+                    random.shuffle(bag)
+
+                    drawn_tiles_exchange = []
+                    for _ in range(num_to_draw_exchange):
+                        if bag:
+                            drawn_tiles_exchange.append(bag.pop())
+                        else:
+                            break # Stop drawing if bag runs out mid-exchange
+                    
                     new_rack_after_exchange.extend(drawn_tiles_exchange)
                     
                     should_sort_racks_exchange_dialog = not is_silent_run_local
@@ -9114,8 +9048,7 @@ def _handle_mouse_down_exchange_dialog(event, state, drawn_rects):
                             new_rack_after_exchange.sort()
                     
                     racks[turn-1] = new_rack_after_exchange
-                    bag.extend(tiles_to_exchange_list)
-                    random.shuffle(bag)
+                    # --- MODIFICATION END ---
                     
                     luck_factor_exchange = 0.0
                     if drawn_tiles_exchange:
@@ -9131,12 +9064,13 @@ def _handle_mouse_down_exchange_dialog(event, state, drawn_rects):
                         'rack': move_rack_before_exchange, 
                         'exchanged_tiles': tiles_to_exchange_list, 
                         'drawn': drawn_tiles_exchange, 'score': 0, 'word': '', 'coord': '', 
-                        'blanks': set(), 'positions': [], 'is_bingo': False, 
+                        'blanks': set(), 
+                        'positions': [], 'is_bingo': False, 
                         'word_with_blanks': '', 'turn_duration': 0.0, # Can be refined
                         'pool_quality_before_draw': state.get('current_turn_pool_quality_score', 0.0),
                         'luck_factor': luck_factor_exchange,
                         'tiles_played_from_rack': [], # No tiles played on board
-                        'leave': racks[turn-1][:] # Rack after exchange and draw
+                        'leave': leave_for_history # Use the correctly captured leave
                     })
                     state['current_replay_turn'] = len(state['move_history'])
                     
@@ -9957,13 +9891,7 @@ def _handle_mouse_down_game_over_dialog(event, state, drawn_rects):
                     
                     insights_data_for_replay = generate_turn_insights_data(game_data_for_insights, is_silent_run_param=is_silent_run)
                     
-                    if not is_silent_run:
-                        print(f"DEBUG _handle_mouse_down_game_over_dialog: Populated REAL insights data. Turns in history: {len(state['move_history'])}, Turns in insights_data: {len(insights_data_for_replay)}.")
-                        if insights_data_for_replay and len(insights_data_for_replay) > 0:
-                             if insights_data_for_replay[0] : 
-                                print(f"    Sample insight data for first turn: {insights_data_for_replay[0][:1]}") 
-                             else:
-                                print(f"    No insights generated for the first turn.")
+                    # The "DEBUG _handle_mouse_down_game_over_dialog..." print block that was here has been removed.
 
                 else:
                     insights_data_for_replay = [] 
@@ -10712,6 +10640,14 @@ def _handle_keydown_typing_on_board(event, state):
 
 
                     current_leave_for_typed_play = state['racks'][state['turn']-1][:] # Rack after playing, before drawing
+                    
+                    # --- MODIFICATION START: Correctly calculate tiles consumed from rack ---
+                    original_rack_counter = Counter(state['original_rack'])
+                    rack_after_play_counter = Counter(current_leave_for_typed_play)
+                    consumed_counter = original_rack_counter - rack_after_play_counter
+                    tiles_consumed_from_rack_for_history = list(consumed_counter.elements())
+                    # --- MODIFICATION END ---
+                    
                     num_to_draw = len(newly_placed_details)
                     drawn_tiles = [state['bag'].pop() for _ in range(num_to_draw) if state['bag']]
                     state['racks'][state['turn']-1].extend(drawn_tiles)
@@ -10739,7 +10675,7 @@ def _handle_keydown_typing_on_board(event, state):
                         'newly_placed': newly_placed_details, # Store the actual tiles placed from rack
                         'start': start_pos_final, 'direction': orientation_final_for_history, 'turn_duration': 0.0, # Placeholder
                         'pool_quality_before_draw': state['current_turn_pool_quality_score'], 'luck_factor': luck_factor,
-                        'tiles_played_from_rack': newly_placed_details, # For typed plays, newly_placed is what came from rack
+                        'tiles_played_from_rack': tiles_consumed_from_rack_for_history,
                         'leave': current_leave_for_typed_play
                     }
                     state['move_history'].append(move_data)
@@ -11660,9 +11596,6 @@ def draw_game_screen(screen, state):
     game_over_state = state['game_over_state']
     replay_mode = state['replay_mode']
     current_replay_turn = state['current_replay_turn']
-    initial_racks_main = state['initial_racks']
-    sgs_initial_bag_main = state.get('sgs_initial_bag')
-    sgs_loaded_game_data = state.get('sgs_loaded_game_data')
     last_played_highlight_coords = state['last_played_highlight_coords']
     selected_square = state['selected_square']
     typing = state['typing']
@@ -11715,81 +11648,16 @@ def draw_game_screen(screen, state):
     drawn_rects = {}
     screen.fill(WHITE)
 
-    # Variables for UI elements that depend on replay state
-    racks_to_display_for_draw_rack_func = racks_main
-    scores_to_display_func = scores_main
-    turn_to_display_for_ui_func = turn
-    unseen_tiles_for_display_dict_func = {}
-    history_to_draw_func = move_history
-    is_final_turn_in_replay_func = False
-
-    if replay_mode:
-        data_for_sgs_replay = None
-        if sgs_loaded_game_data: data_for_sgs_replay = sgs_loaded_game_data
-        elif sgs_initial_bag_main and initial_racks_main: # Fallback for games ended without explicit load
-            data_for_sgs_replay = {'sgs_initial_bag': sgs_initial_bag_main, 'initial_racks_sgs': initial_racks_main, 'full_move_history': move_history}
-        
-        if data_for_sgs_replay:
-            # Get historical context for scores, racks, turn indicator, unseen tiles
-            # The board visuals (current_tiles_on_board, current_blanks_on_board) are from the main state,
-            # which _handle_general_mouse_down will set to the historical base before preview.
-            _, _, sgs_scores, sgs_racks, sgs_bag_list, sgs_turn_num = get_sgs_replay_state(
-                data_for_sgs_replay, current_replay_turn, is_silent_batch_run_param=is_silent_run
-            )
-            scores_to_display_func = sgs_scores
-            racks_to_display_for_draw_rack_func = sgs_racks
-            turn_to_display_for_ui_func = sgs_turn_num
-            
-            combined_unseen_for_replay = sgs_bag_list[:]
-            if turn_to_display_for_ui_func == 1 and len(sgs_racks) > 1 and sgs_racks[1] is not None:
-                combined_unseen_for_replay.extend(sgs_racks[1])
-            elif turn_to_display_for_ui_func == 2 and len(sgs_racks) > 0 and sgs_racks[0] is not None:
-                combined_unseen_for_replay.extend(sgs_racks[0])
-            unseen_tiles_for_display_dict_func = Counter(combined_unseen_for_replay)
-            history_to_draw_func = move_history[:current_replay_turn]
-            is_final_turn_in_replay_func = (current_replay_turn == len(move_history))
-
-            # If no preview is active, ensure state['tiles'] and state['blanks'] reflect the historical turn
-            if not state.get('previewed_move_details'):
-                sgs_tiles_base, sgs_blanks_base, _, _, _, _ = get_sgs_replay_state(
-                    data_for_sgs_replay, current_replay_turn, is_silent_batch_run_param=is_silent_run
-                )
-                # Only update if different to avoid unnecessary deepcopies if already correct
-                # This check might be too complex; simpler to just assign if replay turn changed.
-                # The event handlers for replay navigation should handle this update.
-                # For now, we assume state['tiles'] is either historical or historical+preview.
-                pass
-
-
-        else: # Fallback if replay data is missing
-            print("Replay Warning: Missing data. Displaying current live state or empty.")
-            scores_to_display_func = scores_main if not game_over_state else final_scores_state
-            racks_to_display_for_draw_rack_func = racks_main
-            turn_to_display_for_ui_func = turn
-            active_player_idx_fb = turn_to_display_for_ui_func - 1
-            opponent_idx_fb = 1 - active_player_idx_fb
-            unseen_calc_fb = bag[:]
-            if 0 <= opponent_idx_fb < len(racks_main) and racks_main[opponent_idx_fb] is not None:
-                unseen_calc_fb.extend(racks_main[opponent_idx_fb])
-            unseen_tiles_for_display_dict_func = Counter(unseen_calc_fb)
-            history_to_draw_func = move_history # Show full history if replay data is bad
-            is_final_turn_in_replay_func = game_over_state
-    else: # Not in replay mode (live play)
-        scores_to_display_func = final_scores_state if game_over_state else scores_main
-        racks_to_display_for_draw_rack_func = racks_main
-        turn_to_display_for_ui_func = turn
-        active_player_idx_live = turn_to_display_for_ui_func - 1
-        opponent_idx_live = 1 - active_player_idx_live
-        combined_unseen_live = bag[:]
-        if 0 <= opponent_idx_live < len(racks_main) and racks_main[opponent_idx_live] is not None:
-            combined_unseen_live.extend(racks_main[opponent_idx_live])
-        unseen_tiles_for_display_dict_func = Counter(combined_unseen_live)
-        history_to_draw_func = move_history
-        is_final_turn_in_replay_func = game_over_state # Treat game over in live play like final turn for scoreboard
+    # --- MODIFICATION START: Read pre-calculated replay state ---
+    racks_to_display_for_draw_rack_func = state.get('replay_racks_for_display', racks_main) if replay_mode else racks_main
+    scores_to_display_func = state.get('replay_scores_for_display', scores_main) if replay_mode else (final_scores_state if game_over_state else scores_main)
+    turn_to_display_for_ui_func = state.get('replay_turn_for_display', turn) if replay_mode else turn
+    unseen_tiles_for_display_dict_func = state.get('replay_unseen_tiles_for_display', {}) if replay_mode else Counter(bag + (racks_main[1- (turn-1)] if len(racks_main) > 1 else []))
+    history_to_draw_func = move_history[:current_replay_turn] if replay_mode else move_history
+    is_final_turn_in_replay_func = (current_replay_turn == len(move_history)) if replay_mode else game_over_state
+    # --- MODIFICATION END ---
 
     # --- Board Drawing Loop ---
-    # Uses current_tiles_on_board and current_blanks_on_board from the main state dict,
-    # which are modified by apply_move_as_preview.
     for r_draw_board in range(GRID_SIZE):
         for c_draw_board in range(GRID_SIZE):
             pygame.draw.rect(screen, board_layout_multipliers[r_draw_board][c_draw_board], (40 + c_draw_board * SQUARE_SIZE, 40 + r_draw_board * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE))
@@ -11831,16 +11699,14 @@ def draw_game_screen(screen, state):
                     text_rect = text_surf.get_rect(center=tile_rect.center)
                     screen.blit(text_surf, text_rect)
 
-    # Highlight for last actual move in replay (distinct from preview)
     if replay_mode and current_replay_turn > 0 and current_replay_turn <= len(move_history):
         last_move_data_replay = move_history[current_replay_turn - 1]
         if last_move_data_replay['move_type'] == 'place':
-            # Only highlight if not currently previewing something else
             if not state.get('previewed_move_details'):
                 newly_placed_coords_replay_hist = last_move_data_replay.get('newly_placed', [])
                 for r_hl, c_hl, _ in newly_placed_coords_replay_hist:
                     if 0 <= r_hl < GRID_SIZE and 0 <= c_hl < GRID_SIZE:
-                        pygame.draw.rect(screen, PALE_YELLOW, (40 + c_hl * SQUARE_SIZE, 40 + r_hl * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE), 3) # Use a distinct color/thickness
+                        pygame.draw.rect(screen, PALE_YELLOW, (40 + c_hl * SQUARE_SIZE, 40 + r_hl * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE), 3)
 
     draw_board_labels(screen, ui_font)
     p1_alpha_rect, p1_rand_rect, p2_alpha_rect, p2_rand_rect = draw_player_racks(screen, racks_to_display_for_draw_rack_func, scores_to_display_func, turn_to_display_for_ui_func, player_names, dragged_tile, drag_pos, practice_mode)
@@ -11892,7 +11758,7 @@ def draw_game_screen(screen, state):
                 if int(time.time() * 2) % 2 == 0: pygame.draw.line(screen, BLACK, (cursor_x_draw - 5, cursor_y_draw), (cursor_x_draw + 5, cursor_y_draw), 2)
 
     suggest_rect_base = None; simulate_button_rect = None; preview_checkbox_rect = None; word_lookup_button_in_game_rect = None
-    if not replay_mode and not game_over_state and not is_batch_running_local_draw:
+    if not is_batch_running_local_draw:
         suggest_rect_base = draw_suggest_button()
         if suggest_rect_base:
             simulate_button_rect = pygame.Rect(suggest_rect_base.x, suggest_rect_base.bottom + BUTTON_GAP, OPTIONS_WIDTH, BUTTON_HEIGHT)
@@ -11940,7 +11806,8 @@ def draw_game_screen(screen, state):
         'all_words_rects': [], 'all_words_play_rect': None, 'all_words_ok_rect': None, 'practice_play_again_rect': None, 'practice_main_menu_rect': None,
         'practice_quit_rect': None, 'save_rect': None, 'quit_rect': None, 'replay_rect_game_over_dialog': None, 'play_again_rect': None, 'stats_rect': None,
         'main_menu_rect': None, 'stats_ok_button_rect': None, 'stats_total_content_height': 0
-    
+
+
     })
     if showing_practice_end_dialog:
         practice_play_again_rect_draw, practice_main_menu_rect_draw, practice_quit_rect_draw = draw_practice_end_dialog(practice_end_message)
@@ -11978,10 +11845,11 @@ def draw_game_screen(screen, state):
             stats_ok_button_rect_stats, stats_total_content_height_stats = draw_stats_dialog(stats_dialog_x, stats_dialog_y, player_names, final_scores_state, current_tiles_on_board, stats_scroll_offset, move_history) # Pass current_tiles_on_board
             drawn_rects['stats_ok_button_rect'] = stats_ok_button_rect_stats; drawn_rects['stats_total_content_height'] = stats_total_content_height_stats
 
-    if not showing_practice_end_dialog:
-        if not replay_mode and not is_batch_running_local_draw:
-            options_rect_base_draw, dropdown_rects_base_draw = draw_options_menu(turn_to_display_for_ui_func, dropdown_open, bag_count_live, is_batch_running_local_draw, replay_mode, game_over_state)
-            drawn_rects['options_rect_base'] = options_rect_base_draw; drawn_rects['dropdown_rects_base'] = dropdown_rects_base_draw
+    # --- MODIFICATION START: Always draw options menu unless it's a silent batch run ---
+    if not showing_practice_end_dialog and not is_batch_running_local_draw:
+        options_rect_base_draw, dropdown_rects_base_draw = draw_options_menu(turn_to_display_for_ui_func, dropdown_open, bag_count_live, is_batch_running_local_draw, replay_mode, game_over_state)
+        drawn_rects['options_rect_base'] = options_rect_base_draw; drawn_rects['dropdown_rects_base'] = dropdown_rects_base_draw
+    # --- MODIFICATION END ---
 
     if dragged_tile and drag_pos:
         player_idx_drag = dragged_tile[0]-1; tile_val = None
@@ -13250,7 +13118,9 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                     current_state_dict['running_inner'] = False
 
 
-                current_state_dict = check_and_handle_game_over(current_state_dict)
+                # Only check for game over if not in the middle of a turn action
+                if not current_state_dict.get('typing', False):
+                    current_state_dict = check_and_handle_game_over(current_state_dict)
                 if current_state_dict['game_over_state'] and _local_start_new_game_same_mode_internal:
                      current_state_dict['running_inner'] = False # End current game to allow "Play Again"
 
