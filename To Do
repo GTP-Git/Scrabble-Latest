@@ -1,5 +1,7 @@
 To-Do List
 
+-- Add a feature to be able to hide the opponents tiles from view. Maybe just an eye icon next to the racks.
+
 -- Add Simulate (Sim) button in Insights window
 
 -- Lookup button should be available in Replay Mode
@@ -7,8 +9,6 @@ To-Do List
 -- Allow what-if scenarios, where the main_branch_game_state is saved, but players can make different plays, choose different racks, explore endgames, etc., Have a reset button that backs the main_branch_game_state to continue play. 
 
 -- Create a constants.py file, can be used by my Batch Analysis program and Scrabble Game.py.
-
--- In Replay Mode, the console buttons can still override the Options options, requiring a very precise click to get an option to fire.
 
 -- In All Words, have a search/filter function so you can look up a word from the list, which is updated and sorted in realtime based on text string search (how important is this, really? Not sure I'd use it much).
 
@@ -23,10 +23,6 @@ To-Do List
 -- Best Move Guess practice game, like in Woogles. But how practical? Have a separate file for saved games that have a "great" move in them? How much utility here? In Batch Mode flag any non-bingo move that is, say, 30% or more higher-scoring than the next best move and then note that in the batch .txt file (which game, which move (including full board state so it can be recreated)).
 
 -- create a separate program that iterates through the saved batch game files and uses machine learning to determine which quadrant will end up with the most tiles after the first few turns. How many are required before this can be accurately assessed? Note horiz/vert first plays are mirror images, so no need to do separate analyses.
-
-
-
-
 
 
 
@@ -76,6 +72,8 @@ TOOLTIP_TEXTS = {
 -- use cProfile (and snakeviz to visualize) where my program is slow and inefficient
 
 -- Get Endgame Solver working more efficiently. Will likely need to compile this function down to C. "C" below for details.
+
+--Could I use CFFI (see below) to call Woogles code? C? Go?
 
 
 +__________+
@@ -215,6 +213,10 @@ ________________________________________________
 -- In Simulation return results, both in the console and in the dialog, show board coordinates.
 
 -- MAJOR CHANGE: reduce move list window by 1/2 vertically. Below it put arrow controls like we have for replay mode. Under that window, when in Replay Mode, show 5-15 best moves, like on Woogles, showing score, equity, leave eval, simulate button, the whole shebang.
+
+-- Scrabble U - 07JUN25 - Game save seemed to truncate the last few moves....investigate
+
+-- Scrabble U - 07JUN25 - Options button in Replay Mode keeps disappearing - bring back
 
 
 
