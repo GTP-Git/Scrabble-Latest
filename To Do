@@ -1,11 +1,5 @@
 To-Do List
 
--- Add a feature to be able to hide the opponents tiles from view. Maybe just an eye icon next to the racks.
-
--- Add Simulate (Sim) button in Insights window
-
--- Lookup button should be available in Replay Mode
-
 -- Allow what-if scenarios, where the main_branch_game_state is saved, but players can make different plays, choose different racks, explore endgames, etc., Have a reset button that backs the main_branch_game_state to continue play. 
 
 -- Create a constants.py file, can be used by my Batch Analysis program and Scrabble Game.py.
@@ -218,6 +212,11 @@ ________________________________________________
 
 -- Scrabble U - 07JUN25 - Options button in Replay Mode keeps disappearing - bring back
 
+-- Scrabble V - 07JUN25 - Add a feature to be able to hide the opponents tiles from view. Maybe just an eye icon next to the racks.
+
+-- Scrabble V - 07JUN25 - Add Simulate (Sim) button in Insights window (just used the existing Simulate button and position
+
+-- Scrabble V - 07JUN25 - Lookup button should be available in Replay Mode
 
 
 
