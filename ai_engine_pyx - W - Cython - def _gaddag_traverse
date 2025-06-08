@@ -1,0 +1,223 @@
+# ai_engine.pyx
+
+#ai_engine_pyx - W - Cython - def _gaddag_traverse
+
+import cython
+from collections import Counter
+import importlib
+
+# Use importlib to import the main script with a space in its name.
+# This is the key change to support "Scrabble Game.py".
+sg = importlib.import_module("Scrabble Game")
+
+# Decorators for performance. These turn off Python safety checks inside this function.
+#@cython.boundscheck(False)
+#@cython.wraparound(False)
+@cython.cdivision(True)
+def _gaddag_traverse(
+    object anchor_pos, object rack_counts, list tiles, list board, set blanks, dict cross_check_sets, object gaddag_node,
+    list current_word_tiles, bint is_reversed, str current_axis, list all_found_moves, set unique_move_signatures,
+    list original_tiles_state, bint is_first_play, int full_rack_size, int max_len,
+    int depth=0, bint is_silent_batch_run_param=False
+):
+    """ Recursive helper with refined post-separator logic.
+        This is the Cython version of the function.
+    """
+    # Cython type declarations for performance
+    cdef int r_last, c_last, next_r, next_c, r_place, c_place, anchor_r, anchor_c, ref_r, ref_c, longest_word_len
+    cdef str letter, primary_word_str, orientation, word_with_blanks, cross_axis, existing_tile
+    cdef object next_node, new_rack_counts, validation_code, detail, word_detail_item, t
+    cdef bint is_bingo_from_validation, is_blank_in_gaddag_path, is_new_tile, found_primary, is_along_axis, is_blank_in_word, just_crossed_separator
+    cdef list newly_placed_list_details, all_words_formed_details, primary_word_tiles, word_with_blanks_list, leave
+    cdef set temp_blanks_for_validation, move_blanks_coords_for_this_play, newly_placed_coords_for_this_play, allowed_letters
+    cdef tuple next_pos, start_pos, new_tiles_sig, tile_on_anchor, last_tile_tuple
+    cdef float score
+
+    if depth > 20:
+        return
+
+    if not current_word_tiles:
+        return
+    if len(current_word_tiles) > max_len:
+        return
+
+    # MODIFICATION: Unpack more explicitly for debugging and stability
+    last_tile_tuple = current_word_tiles[-1]
+    r_last = last_tile_tuple[0]
+    c_last = last_tile_tuple[1]
+
+    if gaddag_node.is_terminal and not is_reversed:
+        newly_placed_list_details = [(r, c, l) for r, c, l, _, is_new in current_word_tiles if is_new]
+        if newly_placed_list_details:
+            new_tiles_sig = tuple(sorted(newly_placed_list_details))
+            if new_tiles_sig not in unique_move_signatures:
+                temp_tiles_for_validation = [row[:] for row in original_tiles_state]
+                temp_blanks_for_validation = set(blanks)
+                
+                move_blanks_coords_for_this_play = set()
+                newly_placed_coords_for_this_play = set()
+
+                for r_place, c_place, letter, is_blank_in_gaddag_path, is_new_tile in current_word_tiles:
+                    if is_new_tile:
+                        if 0 <= r_place < sg.GRID_SIZE and 0 <= c_place < sg.GRID_SIZE:
+                            temp_tiles_for_validation[r_place][c_place] = letter
+                            newly_placed_coords_for_this_play.add((r_place, c_place))
+                            if is_blank_in_gaddag_path:
+                                temp_blanks_for_validation.add((r_place, c_place))
+                                move_blanks_coords_for_this_play.add((r_place, c_place))
+                
+                validation_code, is_bingo_from_validation, detail = sg.is_valid_play(
+                    newly_placed_list_details,
+                    temp_tiles_for_validation,
+                    is_first_play,
+                    full_rack_size,
+                    original_tiles_state,
+                    None, # Passing None for rack_before_play
+                    is_silent_batch_run_param=True
+                )
+
+                if validation_code == sg.VC_VALID:
+                    unique_move_signatures.add(new_tiles_sig)
+                    score = sg.calculate_score(newly_placed_list_details, board, temp_tiles_for_validation, temp_blanks_for_validation)
+                    all_words_formed_details = sg.find_all_words_formed(newly_placed_list_details, temp_tiles_for_validation)
+                    
+                    primary_word_tiles = []
+                    primary_word_str = ""
+                    start_pos = (0, 0)
+                    orientation = current_axis
+                    
+                    if all_words_formed_details:
+                        found_primary = False
+                        for word_detail_item in all_words_formed_details:
+                            is_along_axis = False
+                            if current_axis == 'H' and len(set(r for r,c,l in word_detail_item)) == 1:
+                                is_along_axis = True
+                            elif current_axis == 'V' and len(set(c for r,c,l in word_detail_item)) == 1:
+                                is_along_axis = True
+                            
+                            if is_along_axis and any((t[0], t[1]) in newly_placed_coords_for_this_play for t in word_detail_item):
+                                primary_word_tiles = word_detail_item
+                                found_primary = True
+                                break
+                        if not found_primary:
+                            longest_word_len = 0
+                            for word_detail_item in all_words_formed_details:
+                                if any((t[0], t[1]) in newly_placed_coords_for_this_play for t in word_detail_item):
+                                    if len(word_detail_item) > longest_word_len:
+                                        longest_word_len = len(word_detail_item)
+                                        primary_word_tiles = word_detail_item
+                                        if len(set(r for r,c,l in primary_word_tiles)) == 1: orientation = 'H'
+                                        elif len(set(c for r,c,l in primary_word_tiles)) == 1: orientation = 'V'
+
+                        if not primary_word_tiles and all_words_formed_details:
+                             primary_word_tiles = all_words_formed_details[0]
+                             if len(set(r for r,c,l in primary_word_tiles)) == 1: orientation = 'H'
+                             elif len(set(c for r,c,l in primary_word_tiles)) == 1: orientation = 'V'
+
+                    if primary_word_tiles:
+                        primary_word_str = "".join(t[2] for t in primary_word_tiles)
+                        if orientation == 'H':
+                            start_pos = min(primary_word_tiles, key=lambda tile: tile[1])[:2]
+                        elif orientation == 'V':
+                            start_pos = min(primary_word_tiles, key=lambda tile: tile[0])[:2]
+                        else:
+                            start_pos = primary_word_tiles[0][:2] if primary_word_tiles else (0,0)
+
+                    word_with_blanks_list = []
+                    if primary_word_tiles:
+                        for wr, wc, w_letter in primary_word_tiles:
+                            is_blank_in_word = (wr, wc) in newly_placed_coords_for_this_play and (wr, wc) in move_blanks_coords_for_this_play
+                            word_with_blanks_list.append(w_letter.lower() if is_blank_in_word else w_letter.upper())
+                    word_with_blanks = "".join(word_with_blanks_list)
+                    
+                    leave = list(rack_counts.elements())
+                    
+                    move_details_dict = {
+                        'positions': [(t[0], t[1], t[2]) for t in primary_word_tiles] if primary_word_tiles else newly_placed_list_details,
+                        'blanks': move_blanks_coords_for_this_play,
+                        'word': primary_word_str,
+                        'score': score,
+                        'start': start_pos,
+                        'direction': orientation,
+                        'leave': leave,
+                        'is_bingo': is_bingo_from_validation,
+                        'word_with_blanks': word_with_blanks,
+                        'newly_placed': newly_placed_list_details
+                    }
+                    all_found_moves.append(move_details_dict)
+
+    for letter, next_node in gaddag_node.children.items():
+        if letter == sg.Gaddag.SEPARATOR:
+            if is_reversed:
+                _gaddag_traverse(
+                    anchor_pos, rack_counts, tiles, board, blanks, cross_check_sets,
+                    next_node, current_word_tiles, False, current_axis,
+                    all_found_moves, unique_move_signatures, original_tiles_state,
+                    is_first_play, full_rack_size, max_len, depth + 1,
+                    is_silent_batch_run_param
+                )
+            continue
+
+        next_r, next_c = -1, -1
+        if is_reversed:
+            if current_axis == 'H': next_r, next_c = r_last, c_last - 1
+            else:                   next_r, next_c = r_last - 1, c_last
+        else:
+            anchor_r, anchor_c = anchor_pos
+            tile_on_anchor = None
+            for t_r, t_c, t_l, t_b, t_n in current_word_tiles:
+                 if t_r == anchor_r and t_c == anchor_c:
+                      tile_on_anchor = (t_r, t_c)
+                      break
+            just_crossed_separator = False
+            if len(current_word_tiles) > 0:
+                if current_axis == 'H':
+                    if c_last <= anchor_c: just_crossed_separator = True
+                else:
+                    if r_last <= anchor_r: just_crossed_separator = True
+            
+            ref_r, ref_c = (anchor_r, anchor_c) if just_crossed_separator else (r_last, c_last)
+
+            if current_axis == 'H': next_r, next_c = ref_r, ref_c + 1
+            else:                   next_r, next_c = ref_r + 1, ref_c
+            
+        if not (0 <= next_r < sg.GRID_SIZE and 0 <= next_c < sg.GRID_SIZE):
+            continue
+
+        next_pos = (next_r, next_c)
+        existing_tile = tiles[next_r][next_c]
+
+        if not existing_tile:
+            cross_axis = 'V' if current_axis == 'H' else 'H'
+            allowed_letters = cross_check_sets.get(next_pos, {}).get(cross_axis, set())
+            
+            if rack_counts[letter] > 0 and letter in allowed_letters:
+                new_rack_counts = rack_counts.copy(); new_rack_counts[letter] -= 1
+                if new_rack_counts[letter] == 0: del new_rack_counts[letter]
+                _gaddag_traverse(
+                    anchor_pos, new_rack_counts, tiles, board, blanks, cross_check_sets,
+                    next_node, current_word_tiles + [(next_r, next_c, letter, False, True)],
+                    is_reversed, current_axis, all_found_moves, unique_move_signatures,
+                    original_tiles_state, is_first_play, full_rack_size, max_len, depth + 1,
+                    is_silent_batch_run_param
+                )
+            
+            if rack_counts[' '] > 0 and ' ' in allowed_letters:
+                if letter in allowed_letters or ' ' in allowed_letters:
+                    new_rack_counts = rack_counts.copy(); new_rack_counts[' '] -= 1
+                    if new_rack_counts[' '] == 0: del new_rack_counts[' ']
+                    _gaddag_traverse(
+                        anchor_pos, new_rack_counts, tiles, board, blanks, cross_check_sets,
+                        next_node, current_word_tiles + [(next_r, next_c, letter, True, True)],
+                        is_reversed, current_axis, all_found_moves, unique_move_signatures,
+                        original_tiles_state, is_first_play, full_rack_size, max_len, depth + 1,
+                        is_silent_batch_run_param
+                    )
+        elif existing_tile == letter:
+            _gaddag_traverse(
+                anchor_pos, rack_counts, tiles, board, blanks, cross_check_sets,
+                next_node, current_word_tiles + [(next_r, next_c, letter, False, False)],
+                is_reversed, current_axis, all_found_moves, unique_move_signatures,
+                original_tiles_state, is_first_play, full_rack_size, max_len, depth + 1,
+                is_silent_batch_run_param
+            )
