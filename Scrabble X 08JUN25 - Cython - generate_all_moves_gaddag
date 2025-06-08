@@ -1,15 +1,14 @@
 
 #python
-#Scrabble U
-#Added back save dialog
-#Fixed incorrect internal board/bad state after exchange
-#Reduced debug
-#Hopefully brought back Options button in Replay Mode once and for all
-#07JUN25
+#Scrabble X
+#Cython - def generate_all_moves_gaddag
+#08JUN25
 
 
 
-
+import pyximport
+pyximport.install()
+import ai_engine
 import pygame
 import random
 import math
@@ -123,11 +122,9 @@ DIALOG_WIDTH = 480
 DIALOG_HEIGHT = 250
 LETTERS = "ABCDEFGHIJKLMNO"  # For column labels
 
-# Get screen resolution
-display_info = pygame.display.Info()
-# Set window size to fit within screen resolution (with padding for borders)
-WINDOW_WIDTH = min(1400, display_info.current_w - 50)  # 50 pixels padding
-WINDOW_HEIGHT = min(900, display_info.current_h - 50)  # 50 pixels padding
+# Set fixed window size for consistency across environments
+WINDOW_WIDTH = 1400
+WINDOW_HEIGHT = 850
 
 # Colors
 WHITE = (255, 255, 255)
@@ -659,6 +656,7 @@ def trigger_save_game_in_progress(current_game_state_dict):
                 'current_exchange_count': current_game_state_dict.get('exchange_count', 0),
                 'current_consecutive_zero_point_turns': current_game_state_dict.get('consecutive_zero_point_turns', 0),
                 'current_last_played_highlight_coords': current_game_state_dict.get('last_played_highlight_coords', set()),
+                'rack_visibility': current_game_state_dict.get('rack_visibility', [True, True]), # Save visibility state
                 'previous_turn_state_for_luck_calc': current_game_state_dict.get('current_turn_pool_quality_score', 0.0) # Save for luck on load
             },
             
@@ -1637,18 +1635,19 @@ def draw_scoreboard(screen, move_history, scroll_offset, scores, is_ai, player_n
         player_label = f"P{player_idx + 1}"
         if player_names and 0 <= player_idx < len(player_names) and player_names[player_idx]:
             player_label = player_names[player_idx]
-        display_score = running_scores[player_idx]
+        
+        display_score_int = int(running_scores[player_idx])
         move_score = move.get('score', 0)
         score_sign = "+" if move_score >= 0 else ""
         if move.get('move_type') == 'place':
             word = move.get('word_with_blanks', move.get('word', 'N/A'))
             coord = move.get('coord', 'N/A')
-            text = f"{i+1}: {player_label} - {word} at {coord} ({score_sign}{move_score}) Total: {display_score}"
+            text = f"{i+1}: {player_label} - {word} at {coord} ({score_sign}{move_score}) Total: {display_score_int}"
         elif move.get('move_type') == 'pass':
-            text = f"{i+1}: {player_label} - Pass ({score_sign}{move_score}) Total: {display_score}"
+            text = f"{i+1}: {player_label} - Pass ({score_sign}{move_score}) Total: {display_score_int}"
         elif move.get('move_type') == 'exchange':
             exchanged_count = len(move.get('exchanged_tiles', []))
-            text = f"{i+1}: {player_label} - Exch. {exchanged_count} ({score_sign}{move_score}) Total: {display_score}"
+            text = f"{i+1}: {player_label} - Exch. {exchanged_count} ({score_sign}{move_score}) Total: {display_score_int}"
         else:
             text = f"{i+1}: {player_label} - Unknown Move Type"
         text_surface = ui_font.render(text, True, BLACK)
@@ -1664,7 +1663,7 @@ def draw_scoreboard(screen, move_history, scroll_offset, scores, is_ai, player_n
         final_score_line_y = y_pos + (line_height // 2)
         p1_final_name = player_names[0] if player_names and player_names[0] else "P1"
         p2_final_name = player_names[1] if player_names and player_names[1] else "P2"
-        final_text_str = f"Final: {p1_final_name}: {final_scores[0]}, {p2_final_name}: {final_scores[1]}"
+        final_text_str = f"Final: {p1_final_name}: {int(final_scores[0])}, {p2_final_name}: {int(final_scores[1])}"
         final_surface = ui_font.render(final_text_str, True, BLACK)
         if final_score_line_y >=0 and final_score_line_y + line_height <= scoreboard_height: # Check against full scoreboard_height
             if final_score_line_y < content_render_height and (final_score_line_y + line_height) <= content_render_height:
@@ -1689,42 +1688,44 @@ def draw_scoreboard(screen, move_history, scroll_offset, scores, is_ai, player_n
 
 
 
-def draw_rack(player, rack, scores, turn, player_names, dragged_tile=None, drag_pos=None, display_scores=None):
+def draw_rack(player, rack, scores, turn, player_names, dragged_tile=None, drag_pos=None, display_scores=None, is_visible=True, is_human_game=False):
     """Draw a player's rack with tiles, scores, and buttons."""
     global practice_mode # Access global practice_mode
-    if not rack: return None, None
+    if not rack: return None, None, None
     if display_scores is None: display_scores = scores
-    if practice_mode == "eight_letter" and player == 2: return None, None # Don't draw P2 rack
+    if practice_mode == "eight_letter" and player == 2: return None, None, None
 
     rack_width = 7 * (TILE_WIDTH + TILE_GAP) - TILE_GAP
-    # Calculate the rightmost extent of the replay buttons area
-    # Replay buttons start at x=10, width=50, gap=10. 4 buttons total.
-    replay_area_end_x = 10 + 4 * (REPLAY_BUTTON_WIDTH + REPLAY_BUTTON_GAP) # 10 + 4*(50+10) = 250
-    # Minimum start x for the rack, considering replay buttons and star indicator offset (star is at start_x - 20)
-    min_rack_start_x = replay_area_end_x + BUTTON_GAP + 20 # 250 + 10 + 20 = 280
-    # Try to center the rack, but ensure it starts after the minimum x to avoid overlap
+    replay_area_end_x = 10 + 4 * (REPLAY_BUTTON_WIDTH + REPLAY_BUTTON_GAP)
+    min_rack_start_x = replay_area_end_x + BUTTON_GAP + 20
     start_x = max(min_rack_start_x, (BOARD_SIZE - rack_width) // 2)
 
     rack_y = BOARD_SIZE + 80 if player == 1 else BOARD_SIZE + 150
 
-    if turn == player and (practice_mode != "eight_letter" or player == 1): # Draw turn indicator
-        # Star indicator position depends on the calculated start_x
+    if turn == player and (practice_mode != "eight_letter" or player == 1):
         center_x = start_x - 20; center_y = rack_y + TILE_HEIGHT // 2; radius = 10; points = []
         for i in range(10): angle = i * math.pi / 5; r = radius if i % 2 == 0 else radius / 2; x = center_x + r * math.cos(angle); y = center_y + r * math.sin(angle); points.append((x, y))
         pygame.draw.polygon(screen, TURN_INDICATOR_COLOR, points)
 
-    for i, tile in enumerate(rack): # Draw tiles
+    # Draw tiles (visible or hidden)
+    for i, tile in enumerate(rack):
         tile_x = start_x + i * (TILE_WIDTH + TILE_GAP)
         if dragged_tile == (player, i) and drag_pos: continue
-        if tile == ' ':
-            center = (tile_x + TILE_WIDTH // 2, rack_y + TILE_HEIGHT // 2); radius = TILE_WIDTH // 2 - 2
-            pygame.draw.circle(screen, BLACK, center, radius); text = font.render('?', True, WHITE)
-            text_rect = text.get_rect(center=center); screen.blit(text, text_rect)
-        else:
-            pygame.draw.rect(screen, GREEN, (tile_x, rack_y, TILE_WIDTH, TILE_HEIGHT)); text = font.render(tile, True, BLACK)
-            screen.blit(text, (tile_x + 5, rack_y + 5))
+        
+        if is_visible:
+            if tile == ' ':
+                center = (tile_x + TILE_WIDTH // 2, rack_y + TILE_HEIGHT // 2); radius = TILE_WIDTH // 2 - 2
+                pygame.draw.circle(screen, BLACK, center, radius); text = font.render('?', True, WHITE)
+                text_rect = text.get_rect(center=center); screen.blit(text, text_rect)
+            else:
+                pygame.draw.rect(screen, GREEN, (tile_x, rack_y, TILE_WIDTH, TILE_HEIGHT)); text = font.render(tile, True, BLACK)
+                screen.blit(text, (tile_x + 5, rack_y + 5))
+        else: # Rack is hidden, draw placeholders
+            pygame.draw.rect(screen, DARK_GREEN, (tile_x, rack_y, TILE_WIDTH, TILE_HEIGHT))
+            pygame.draw.rect(screen, BLACK, (tile_x, rack_y, TILE_WIDTH, TILE_HEIGHT), 1)
 
-    if dragged_tile and dragged_tile[0] == player and drag_pos: # Draw dragged tile
+
+    if dragged_tile and dragged_tile[0] == player and drag_pos:
         tile_x, tile_y = drag_pos
         if 0 <= dragged_tile[1] < len(rack):
             tile = rack[dragged_tile[1]]
@@ -1735,24 +1736,35 @@ def draw_rack(player, rack, scores, turn, player_names, dragged_tile=None, drag_
                 pygame.draw.rect(screen, GREEN, (tile_x - TILE_WIDTH // 2, tile_y - TILE_HEIGHT // 2, TILE_WIDTH, TILE_HEIGHT))
                 text = font.render(tile, True, BLACK); screen.blit(text, (tile_x - TILE_WIDTH // 2 + 5, tile_y - TILE_HEIGHT // 2 + 5))
 
-    button_x = start_x + rack_width + BUTTON_GAP # Draw buttons
-    alpha_button_rect = pygame.draw.rect(screen, BUTTON_COLOR, (button_x, rack_y, BUTTON_WIDTH, BUTTON_HEIGHT))
-    rand_button_rect = pygame.draw.rect(screen, BUTTON_COLOR, (button_x + BUTTON_WIDTH + BUTTON_GAP, rack_y, BUTTON_WIDTH, BUTTON_HEIGHT))
+    # --- Button and Icon Drawing ---
+    eye_icon_rect = None
+    button_start_x = start_x + rack_width + BUTTON_GAP
+
+    if is_human_game:
+        eye_icon_width = 30 # Square icon
+        eye_icon_rect = pygame.Rect(button_start_x, rack_y, eye_icon_width, BUTTON_HEIGHT)
+        hover_eye = eye_icon_rect.collidepoint(pygame.mouse.get_pos())
+        color_eye = BUTTON_HOVER if hover_eye else BUTTON_COLOR
+        pygame.draw.rect(screen, color_eye, eye_icon_rect)
+        draw_visibility_icon(screen, eye_icon_rect, is_visible)
+        button_start_x += eye_icon_width + BUTTON_GAP
+
+    alpha_button_rect = pygame.draw.rect(screen, BUTTON_COLOR, (button_start_x, rack_y, BUTTON_WIDTH, BUTTON_HEIGHT))
+    rand_button_rect = pygame.draw.rect(screen, BUTTON_COLOR, (button_start_x + BUTTON_WIDTH + BUTTON_GAP, rack_y, BUTTON_WIDTH, BUTTON_HEIGHT))
     alpha_text = button_font.render("Alphabetize", True, BLACK); alpha_rect = alpha_text.get_rect(center=alpha_button_rect.center); screen.blit(alpha_text, alpha_rect)
     rand_text = button_font.render("Randomize", True, BLACK); rand_rect = rand_text.get_rect(center=rand_button_rect.center); screen.blit(rand_text, rand_rect)
 
-    player_idx = player - 1 # Draw score
+    player_idx = player - 1
     if 0 <= player_idx < len(player_names) and 0 <= player_idx < len(display_scores):
         player_name_display = player_names[player_idx] if player_names[player_idx] else f"Player {player}"
-        score_text_content = f"{player_name_display} Score: {display_scores[player_idx]}"
+        score_text_content = f"{player_name_display} Score: {int(display_scores[player_idx])}"
         score_text_surface = ui_font.render(score_text_content, True, BLACK)
-        # MODIFICATION: Adjust the Y position of the score text
-        # Original was rack_y - 20. We'll make it rack_y - 24 to move it up 4 pixels.
         score_text_y_position = rack_y - 24 
         screen.blit(score_text_surface, (start_x, score_text_y_position))
     else: 
         print(f"Warning: Invalid player index {player} for score display.")
-    return alpha_button_rect, rand_button_rect
+        
+    return alpha_button_rect, rand_button_rect, eye_icon_rect
 
 
 
@@ -1887,19 +1899,15 @@ def draw_insights_window(screen_surf, state): # Renamed from draw_analyzer_windo
                 insights_window_x = WINDOW_WIDTH - 160
                 insights_window_width = 150
 
-        insights_window_height = WINDOW_HEIGHT - insights_window_y_start - bottom_padding 
-        insights_window_height = max(150, insights_window_height)
-        max_bottom_y = WINDOW_HEIGHT - bottom_padding
-        calculated_bottom_y = insights_window_y_start + insights_window_height
+        # --- MODIFICATION START: Corrected height calculation ---
+        insights_window_height = WINDOW_HEIGHT - insights_window_y_start - bottom_padding
 
-        if calculated_bottom_y > max_bottom_y:
-             insights_window_height = max_bottom_y - insights_window_y_start
-             insights_window_height = max(50, insights_window_height)
-
-        if insights_window_height <= 0:
+        if insights_window_height <= 50: # Use a minimum threshold
             if not is_silent_run_local:
-                print("Warning (draw_insights_window): Not enough vertical space for Insights window.")
-            return None, insights_item_rects_for_click 
+                # This warning is now correctly suppressed if there's no space
+                pass
+            return None, insights_item_rects_for_click
+        # --- MODIFICATION END ---
 
         insights_window_rect = pygame.Rect(insights_window_x, insights_window_y_start, insights_window_width, insights_window_height)
         state['analyzer_window_rect_store'] = insights_window_rect 
@@ -3210,6 +3218,23 @@ def draw_blanks_row(screen, dialog_x, y_pos, blanks_p1, blanks_p2):
 
 
 
+def draw_visibility_icon(screen, rect, is_visible):
+    """Draws an eye icon (open or closed) on a button."""
+    center_x, center_y = rect.center
+    if is_visible:
+        # Draw an open eye using an ellipse for the eye shape and a circle for the pupil
+        pygame.draw.ellipse(screen, BLACK, rect.inflate(-8, -18), 2)
+        pygame.draw.circle(screen, BLACK, (center_x, center_y), 5)
+    else:
+        # Draw a closed eye (line) with a slash through it
+        # Horizontal line for the closed eyelid
+        pygame.draw.line(screen, BLACK, (rect.left + 5, center_y), (rect.right - 5, center_y), 2)
+        # Diagonal line for the "slash"
+        pygame.draw.line(screen, RED, (rect.left + 5, rect.top + 5), (rect.right - 5, rect.bottom - 5), 2)
+
+
+
+
 def calculate_moves_per_player(move_history):
     """Calculate the number of moves made by each player from move_history."""
     moves_count = {1: 0, 2: 0}
@@ -4181,7 +4206,7 @@ def get_anchor_points(tiles, is_first_play):
 
 
 
-
+'''
 def _gaddag_traverse(
     anchor_pos, rack_counts, tiles, board, blanks, cross_check_sets, gaddag_node,
     current_word_tiles, is_reversed, current_axis, all_found_moves, unique_move_signatures,
@@ -4380,9 +4405,11 @@ def _gaddag_traverse(
                 original_tiles_state, is_first_play, full_rack_size, max_len, depth + 1,
                 is_silent_batch_run_param
             )
+'''
 
 
 
+'''
 def generate_all_moves_gaddag(rack, tiles, board, blanks, gaddag_root, is_silent_batch_run_param=False): # MODIFIED: Removed is_first_play_param
     """
     Generates ALL valid Scrabble moves using GADDAG traversal.
@@ -4454,9 +4481,9 @@ def generate_all_moves_gaddag(rack, tiles, board, blanks, gaddag_root, is_silent
                     if new_rack_counts[tile_letter] == 0: del new_rack_counts[tile_letter]
                     initial_tiles = [(r_anchor, c_anchor, tile_letter, False, True)]
                     if tile_letter in allowed_v: 
-                         _gaddag_traverse(anchor_pos, new_rack_counts.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles, True, 'H', all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
+                         ai_engine._gaddag_traverse(anchor_pos, new_rack_counts.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles, True, 'H', all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE, is_silent_batch_run_param=is_silent_batch_run_param) 
                     if tile_letter in allowed_h: 
-                         _gaddag_traverse(anchor_pos, new_rack_counts.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles, True, 'V', all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
+                         ai_engine._gaddag_traverse(anchor_pos, new_rack_counts.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles, True, 'V', all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE, is_silent_batch_run_param=is_silent_batch_run_param) 
 
         if rack_counts[' '] > 0:
             if ' ' in allowed_h or ' ' in allowed_v:
@@ -4467,9 +4494,9 @@ def generate_all_moves_gaddag(rack, tiles, board, blanks, gaddag_root, is_silent
                         next_node = gaddag_root.children[assigned_letter]
                         initial_tiles = [(r_anchor, c_anchor, assigned_letter, True, True)]
                         if assigned_letter in allowed_v: 
-                            _gaddag_traverse(anchor_pos, new_rack_counts_blank_base.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles, True, 'H', all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
+                            ai_engine._gaddag_traverse(anchor_pos, new_rack_counts_blank_base.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles, True, 'H', all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE, is_silent_batch_run_param=is_silent_batch_run_param) 
                         if assigned_letter in allowed_h: 
-                            _gaddag_traverse(anchor_pos, new_rack_counts_blank_base.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles, True, 'V', all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
+                            ai_engine._gaddag_traverse(anchor_pos, new_rack_counts_blank_base.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles, True, 'V', all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE, is_silent_batch_run_param=is_silent_batch_run_param) 
         
         if not is_first_play: # Use the locally calculated is_first_play
             for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
@@ -4484,8 +4511,8 @@ def generate_all_moves_gaddag(rack, tiles, board, blanks, gaddag_root, is_silent
                             initial_tiles = [(nr, nc, existing_tile_letter, False, False)]
                             start_axis = 'V' if dr != 0 else 'H' 
                             # Pass the locally calculated is_first_play
-                            _gaddag_traverse(anchor_pos, rack_counts.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], False, start_axis, all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
-                            _gaddag_traverse(anchor_pos, rack_counts.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, start_axis, all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, is_silent_batch_run_param=is_silent_batch_run_param) 
+                            ai_engine._gaddag_traverse(anchor_pos, rack_counts.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], False, start_axis, all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE, is_silent_batch_run_param=is_silent_batch_run_param) 
+                            ai_engine._gaddag_traverse(anchor_pos, rack_counts.copy(), tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, start_axis, all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE, is_silent_batch_run_param=is_silent_batch_run_param) 
 
     all_found_moves.sort(key=lambda m: m['score'], reverse=True)
     final_unique_moves = []
@@ -4497,6 +4524,8 @@ def generate_all_moves_gaddag(rack, tiles, board, blanks, gaddag_root, is_silent
             seen_final_signatures.add(sig_tuple)
 
     return final_unique_moves
+
+'''
 
 
 
@@ -4590,7 +4619,7 @@ def generate_turn_insights_data(full_sgs_game_data, is_silent_run_param=False):
 
 
         # Generate all possible moves for 'rack_for_analysis' on 'current_board_tiles'
-        possible_moves_for_turn = generate_all_moves_gaddag(
+        possible_moves_for_turn = ai_engine.generate_all_moves_gaddag(
             rack_for_analysis,
             current_board_tiles, # Board state *before* this historical move
             temp_multiplier_board_layout,
@@ -4617,6 +4646,7 @@ def generate_turn_insights_data(full_sgs_game_data, is_silent_run_param=False):
                 'equity': round(equity, 1),
                 'newly_placed': p_move.get('newly_placed', []),
                 'blanks_in_move': p_move.get('blanks', set())
+            
             })
 
         analyzed_moves_for_this_turn_list.sort(key=lambda x: x['equity'], reverse=True)
@@ -4642,7 +4672,7 @@ def generate_turn_insights_data(full_sgs_game_data, is_silent_run_param=False):
 
 
 
-def draw_hint_dialog(screen, moves, selected_index, dialog_x, dialog_y, is_simulation_result=False): # Added dialog_x, dialog_y
+def draw_hint_dialog(screen, moves, selected_index, dialog_x, dialog_y, is_simulation_result=False, is_play_disabled=False, is_loaded_or_replay_mode=False):
     """Draw the hint dialog showing top 5 moves or simulation results at specified coordinates."""
     # dialog_width and dialog_height are properties of this specific dialog
     dialog_width, dialog_height = 400, 250
@@ -4658,6 +4688,7 @@ def draw_hint_dialog(screen, moves, selected_index, dialog_x, dialog_y, is_simul
     hint_rects = []
     y_pos_offset = 40 # Relative y-position within the dialog
     for i, move_data in enumerate(moves[:5]):
+        text_str = "" # Initialize text_str to prevent UnboundLocalError
         if is_simulation_result and isinstance(move_data, dict):
             move = move_data.get('move', {})
             final_score = move_data.get('final_score', 0.0)
@@ -4682,9 +4713,9 @@ def draw_hint_dialog(screen, moves, selected_index, dialog_x, dialog_y, is_simul
         leave_val = evaluate_leave(leave)
 
         if is_simulation_result:
-            text_str = f"{i+1}. {word_display} {coord} ({score}{leave_val:+0.1f}-{avg_opp_score:.1f}={final_score:.1f}) L:{leave_str}"
+            text_str = f"{i+1}. {word_display} {coord} ({int(score)}{leave_val:+0.1f}-{avg_opp_score:.1f}={int(final_score)}) L:{leave_str}"
         else:
-            text_str = f"{i+1}. {word_display} ({score} pts) at {coord} ({leave_str})"
+            text_str = f"{i+1}. {word_display} ({int(score)} pts) at {coord} ({leave_str})"
 
         text_surface = ui_font.render(text_str, True, BLACK) # Renamed to avoid conflict
 
@@ -4709,7 +4740,8 @@ def draw_hint_dialog(screen, moves, selected_index, dialog_x, dialog_y, is_simul
     all_words_button_rect = pygame.Rect(button_start_x_abs + BUTTON_WIDTH + BUTTON_GAP, button_y_abs, BUTTON_WIDTH, BUTTON_HEIGHT)
     ok_button_rect = pygame.Rect(button_start_x_abs + 2 * (BUTTON_WIDTH + BUTTON_GAP), button_y_abs, BUTTON_WIDTH, BUTTON_HEIGHT)
 
-    pygame.draw.rect(screen, BUTTON_COLOR, play_button_rect)
+    play_button_color = GRAYED_OUT_COLOR if is_play_disabled or is_loaded_or_replay_mode else BUTTON_COLOR
+    pygame.draw.rect(screen, play_button_color, play_button_rect)
     pygame.draw.rect(screen, BUTTON_COLOR, all_words_button_rect)
     pygame.draw.rect(screen, BUTTON_COLOR, ok_button_rect)
 
@@ -6196,7 +6228,8 @@ def negamax_endgame(rack_player, rack_opponent, tiles, blanks, board,
         #     if depth < 4: print(f"{'  ' * depth}DEBUG Depth {depth}: Terminal Node. FinalDiff={final_diff:.1f}")
         return final_diff, []
 
-    possible_moves = generate_all_moves_gaddag(rack_player, tiles, board, blanks, GADDAG_STRUCTURE.root, is_silent_batch_run_param=True) # Always silent for internal calls
+    possible_moves = ai_engine.generate_all_moves_gaddag(rack_player, tiles, board, blanks, is_silent_batch_run_param=True) # Always silent for internal calls
+
     if possible_moves is None:
         possible_moves = []
 
@@ -6341,9 +6374,8 @@ def solve_endgame(rack_player, rack_opponent, tiles, blanks, board, current_scor
     # Generate all possible first moves for the current AI player
     # Always use True for is_silent_batch_run_param for internal generate_all_moves_gaddag calls
     # as we only want the final summary print from solve_endgame itself.
-    possible_ai_first_moves = generate_all_moves_gaddag(
+    possible_ai_first_moves = ai_engine.generate_all_moves_gaddag(
         initial_rack_player_state, initial_tiles_board_state, board, initial_blanks_board_state,
-        GADDAG_STRUCTURE.root,
         is_silent_batch_run_param=True # Internal call should be silent
     )
     if possible_ai_first_moves is None:
@@ -6759,6 +6791,7 @@ def run_ai_simulation(initial_ai_moves_list, ai_rack, opponent_rack_len, tiles, 
         return []
         
 
+
     # Sort by raw score to pick candidates for simulation (already done in ai_turn, but good to ensure)
     all_ai_moves.sort(key=lambda m: m.get('score', 0), reverse=True)
     top_ai_moves_candidates = all_ai_moves[:num_ai_candidates]
@@ -6833,7 +6866,7 @@ def run_ai_simulation(initial_ai_moves_list, ai_rack, opponent_rack_len, tiles, 
             actual_opponent_rack_len = min(opponent_rack_len, len(opponent_available_pool_for_this_sim))
             sim_opponent_rack = opponent_available_pool_for_this_sim[:actual_opponent_rack_len]
             
-            opponent_moves = generate_all_moves_gaddag(\
+            opponent_moves = ai_engine.generate_all_moves_gaddag(\
                         sim_opponent_rack, sim_tiles_after_ai, board, sim_blanks_after_ai, gaddag_root,\
                         is_silent_batch_run_param=is_silent_batch_run_param\
             )
@@ -6862,6 +6895,7 @@ def run_ai_simulation(initial_ai_moves_list, ai_rack, opponent_rack_len, tiles, 
         # The calling function (ai_turn) will handle this if simulation_results is empty.
         return [] 
          
+
 
     # Sort by (AI_raw_score - average_opponent_score)
     # The leave value will be added *after* this simulation stage
@@ -6922,6 +6956,7 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
             sim_config_num_candidates, \
             sim_config_num_opponent_sims,\
             sim_config_num_post_sim_candidates,\
+            all_moves_gen, # NEW PARAMETER
             is_silent_batch_run_param):
     """
     Handles the AI's turn. Calculates expected draw value for luck factor.
@@ -6990,60 +7025,10 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
 
     move_data_for_turn = None
 
-    expected_single_draw_value_for_turn = 0.0
-    if gaddag_loading_status == 'loaded':
-        expected_single_draw_value_for_turn = get_expected_single_draw_value(current_rack, tiles, blanks)
+    expected_single_draw_value_for_turn = get_expected_single_draw_value(current_rack, tiles, blanks)
 
     if not is_silent_batch_run_param:
         print(f"  AI Turn {turn}: Calculated expected_single_draw_value_for_turn = {expected_single_draw_value_for_turn:.2f}")
-
-    if gaddag_loading_status != 'loaded':
-        action_chosen = 'pass'
-        if not is_silent_batch_run_param:
-            if gaddag_loading_status == 'loading':
-                print(f"AI {turn}: GADDAG still loading, passing turn.")
-            elif gaddag_loading_status == 'error':
-                print(f"AI {turn}: GADDAG failed to load, passing turn.")
-            else:
-                 print(f"AI {turn}: GADDAG status unknown ('{gaddag_loading_status}'), passing turn.")
-
-        move_rack_before = racks[player_idx][:] if 0 <= player_idx < len(racks) and racks[player_idx] is not None else []
-        exchanged_tiles_for_history = []
-        next_turn_val = turn
-        drawn_tiles = []
-        newly_placed = []
-        move_type = ''
-        score_val = 0
-        word = ''
-        positions = []
-        blanks_used = set()
-        coord = ''
-        word_with_blanks = ''
-        is_bingo = False
-        luck_factor = 0.0
-        tiles_consumed_from_rack_history = []
-
-        move_type = 'pass'
-        score_val = 0
-        consecutive_zero_point_turns += 1
-        pass_count += 1
-        exchange_count = 0
-        next_turn_val = 3 - turn
-        last_played_highlight_coords = set()
-
-        end_turn_time = time.time()
-        turn_duration = end_turn_time - start_turn_time
-        move_data_for_turn = {
-            'player': turn, 'move_type': move_type, 'rack': move_rack_before,
-            'score': score_val, 'word': word, 'positions': positions, 'blanks': blanks_used,
-            'drawn': drawn_tiles, 'coord': coord, 'word_with_blanks': word_with_blanks,
-            'is_bingo': is_bingo, 'turn_duration': turn_duration,
-            'total_expected_draw_value': 0.0,
-            'luck_factor': luck_factor,
-            'tiles_played_from_rack': tiles_consumed_from_rack_history,
-            'leave': move_rack_before
-        }
-        return next_turn_val, first_play, pass_count, exchange_count, consecutive_zero_point_turns, [], dropdown_open, hinting, showing_all_words, False, None, False, set(), move_data_for_turn
 
     if use_endgame_solver_param and bag_count == 0 and practice_mode_param != "eight_letter" and not is_solving_endgame:
         if not is_silent_batch_run_param:
@@ -7190,7 +7175,6 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
     paused_for_power_tile_local_flag = False
     paused_for_bingo_practice_local_flag = False # Local flag for this turn's decision
     current_power_tile_local_val = None
-    all_moves_gen = []
     best_play_move = None
     action_chosen = 'pass'
     tiles_consumed_from_rack_history = []
@@ -7216,18 +7200,11 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
             turn_duration = end_turn_time - start_turn_time
             if not is_silent_batch_run_param:
                 print(f"AI turn took {turn_duration:.2f} seconds (paused for power tile).")
-            if gaddag_loading_status == 'loaded' and GADDAG_STRUCTURE:
-                all_moves_gen = generate_all_moves_gaddag(current_rack, tiles, board, blanks, GADDAG_STRUCTURE.root, is_silent_batch_run_param=is_silent_batch_run_param)
-                if all_moves_gen is None:
-                    all_moves_gen = []
+            
             return turn, first_play, pass_count, exchange_count, consecutive_zero_point_turns, all_moves_gen, dropdown_open, hinting, showing_all_words, paused_for_power_tile_local_flag, current_power_tile_local_val, False, set(), None
 
-    current_player_rack_for_gen = racks[player_idx][:] if 0 <= player_idx < len(racks) and racks[player_idx] is not None else []
-    all_moves_gen = generate_all_moves_gaddag(current_player_rack_for_gen, tiles, board, blanks, GADDAG_STRUCTURE.root, is_silent_batch_run_param=is_silent_batch_run_param)
-    if all_moves_gen is None:
-        all_moves_gen = []
     if not is_silent_batch_run_param:
-        print(f"AI Player {turn} generated {len(all_moves_gen)} raw moves.")
+        print(f"AI Player {turn} received {len(all_moves_gen)} raw moves.")
 
     if practice_mode_param == "only_fives":
         original_tiles_copy = [row[:] for row in tiles]
@@ -7338,7 +7315,7 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
             _m_leave_val = evaluate_leave(best_raw_plus_leave_play_candidate.get('leave', []), is_silent_batch_run_param=is_silent_batch_run_param)
             print(f"  Best Raw+Leave Play: '{_m_word}' ({_m_score} + {_m_leave_val:.2f} = {best_raw_plus_leave_evaluation:.2f})")
 
-    run_simulation_for_decision = (use_ai_simulation_param and game_mode in [MODE_HVA, MODE_AVA] and practice_mode_param is None and can_play)
+    run_simulation_for_decision = (use_ai_simulation_param and game_mode in [MODE_HVH, MODE_AVA] and practice_mode_param is None and can_play)
     if run_simulation_for_decision:
         opponent_rack_len_sim = len(racks[opponent_idx]) if 0 <= opponent_idx < len(racks) and racks[opponent_idx] is not None else 7
         simulation_results = run_ai_simulation(all_moves_gen, current_rack, opponent_rack_len_sim, tiles, blanks, board, bag, GADDAG_STRUCTURE.root, first_play,\
@@ -7466,13 +7443,14 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
             
             temp_rack_after_exchange.extend(drawn_tiles)
             
-            should_sort_rack_ai_exchange = not is_silent_batch_run_param
-            if should_sort_rack_ai_exchange:
+            should_sort_racks_ai_exchange = not is_silent_batch_run_param
+            if should_sort_racks_ai_exchange:
                 if temp_rack_after_exchange is not None:
                     temp_rack_after_exchange.sort()
             
             racks[player_idx] = temp_rack_after_exchange
             # --- MODIFICATION END ---
+            
             move_type = 'exchange'
             score_val = 0
             consecutive_zero_point_turns += 1
@@ -7536,6 +7514,7 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
         move_data_for_turn['exchanged_tiles'] = exchanged_tiles_for_history
 
     return next_turn_val, first_play, pass_count, exchange_count, consecutive_zero_point_turns, [], dropdown_open, hinting, showing_all_words, paused_for_power_tile_local_flag, current_power_tile_local_val, paused_for_bingo_practice_local_flag, set(), move_data_for_turn
+
 
 
 
@@ -7673,8 +7652,9 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                 ai_sim_num_opponent_sims_init = return_data[11]
                 ai_sim_num_post_sim_candidates_init = return_data[12]
             elif len(return_data) == 10: 
-                dev_cprofile_checked_init = return_data[8]
-                dev_visualize_batch_checked_init = return_data[9]
+                 player_names_sel, human_player_sel, practice_mode_sel, letter_checks_sel, \
+                number_checks_sel, use_endgame_solver_sel, use_ai_simulation_sel, \
+                practice_state_from_mode_sel, _, _ = return_data
             else:
                 if not _is_potentially_silent_batch:
                     print("Warning (initialize_game): Unexpected return_data structure for standard game mode.")
@@ -7691,44 +7671,9 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
             print(f"--- initialize_game(): BBB Params Initialized: 7L Max Prob={bbb_7l_max_prob_init}, 8L Max Prob={bbb_8l_max_prob_init} ---")
 
 
-    is_silent_for_gaddag = (selected_mode_result == "BATCH_MODE" and not DEV_VISUALIZE_BATCH_ENABLED_SESSION)
-
-    if not main_called_flag and gaddag_loading_status == 'idle':
-        if not is_silent_for_gaddag:
-            print("--- initialize_game(): Starting GADDAG background load... ---")
-        gaddag_loading_status = 'loading'
-        GADDAG_STRUCTURE = None
-        gaddag_load_thread = threading.Thread(target=_load_gaddag_background, daemon=True)
-        gaddag_load_thread.start()
-    elif gaddag_loading_status == 'loading':
-        if not is_silent_for_gaddag:
-            print("--- initialize_game(): GADDAG is already loading in the background. ---")
-    elif gaddag_loading_status == 'loaded':
-        if not is_silent_for_gaddag:
-            print("--- initialize_game(): GADDAG is already loaded. ---")
-    elif gaddag_loading_status == 'error':
-        print("--- initialize_game(): GADDAG failed to load previously. AI features disabled. ---")
-        GADDAG_STRUCTURE = None
-
-    is_silent_for_definitions = is_silent_for_gaddag
-
-    if not main_called_flag and word_definitions_loading_status == 'idle':
-        if not is_silent_for_definitions:
-            print("--- initialize_game(): Starting Word Definitions background load... ---")
-        word_definitions_loading_status = 'loading'
-        WORD_DEFINITIONS.clear()
-        word_definitions_load_thread = threading.Thread(target=_load_word_definitions_background, daemon=True)
-        word_definitions_load_thread.start()
-    elif word_definitions_loading_status == 'loading':
-        if not is_silent_for_definitions:
-            print("--- initialize_game(): Word Definitions are already loading. ---")
-    elif word_definitions_loading_status == 'loaded':
-        if not is_silent_for_definitions:
-            print("--- initialize_game(): Word Definitions are already loaded. ---")
-    elif word_definitions_loading_status == 'error':
-        if not _is_potentially_silent_batch:
-            print("--- initialize_game(): Word Definitions failed to load previously. Lookup disabled. ---")
-
+    # --- REMOVED BACKGROUND THREAD LOGIC ---
+    # The loading is now handled synchronously in main() before the game loop starts.
+    
     game_mode = None
     is_loaded_game = False
     player_names = ["Player 1", "Player 2"]
@@ -7773,6 +7718,11 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
     last_scoreboard_click_time_init = 0
     last_scoreboard_click_idx_init = -1
     insights_data_for_replay = [] 
+
+    if selected_mode_result in [MODE_HVH, MODE_HVA] and not is_loaded_game:
+        rack_visibility = [False, False] # Hidden for live human games
+    else:
+        rack_visibility = [True, True] # Visible for all other modes (AIvAI, Replay, etc.)
 
     is_silent_run_for_init = (selected_mode_result == "BATCH_MODE" and not DEV_VISUALIZE_BATCH_ENABLED_SESSION)
 
@@ -7830,6 +7780,14 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
             exchange_count = snapshot.get('current_exchange_count', 0)
             consecutive_zero_point_turns = snapshot.get('current_consecutive_zero_point_turns', 0)
             last_played_highlight_coords = snapshot.get('current_last_played_highlight_coords', set())
+
+            # Load visibility, but ensure it's visible if it's not a human game
+            loaded_visibility = snapshot.get('rack_visibility', [True, True])
+            game_mode_from_settings = game_settings.get('game_mode_str', game_mode)
+            if game_mode_from_settings in [MODE_AVA]:
+                 rack_visibility = [True, True]
+            else:
+                 rack_visibility = loaded_visibility
             
             if not isinstance(racks_init, list) or len(racks_init) != 2 or \
                not all(isinstance(r, list) for r in racks_init) or \
@@ -7850,8 +7808,6 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                 print(f"  Racks from snapshot: P1={p1r_disp}, P2={p2r_disp}")
                 print(f"  Bag size from snapshot: {len(bag_init)}")
             
-            # For in-progress games, we might still want insights up to the current point.
-            # This means treating it like a replay up to the saved turn.
             if gaddag_loading_status == 'loaded':
                 if not is_silent_run_for_init:
                     screen.fill(WHITE) 
@@ -8100,7 +8056,8 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
             last_scoreboard_click_time_init, \
             last_scoreboard_click_idx_init, \
             bbb_7l_max_prob_init, \
-            bbb_8l_max_prob_init \
+            bbb_8l_max_prob_init, \
+            rack_visibility \
             )
 
 
@@ -8120,39 +8077,31 @@ def draw_board_labels(screen, ui_font):
 
 
 
-def draw_player_racks(screen, racks_to_display, scores_to_display, turn_to_display, player_names, dragged_tile, drag_pos, practice_mode):
+def draw_player_racks(screen, racks_to_display, scores_to_display, turn_to_display, player_names, dragged_tile, drag_pos, practice_mode, rack_visibility, is_ai, replay_mode, game_over_state):
     """
-    Draws the racks for both players (conditionally for P2 in practice mode).
-
-    Args:
-        screen: The Pygame surface to draw on.
-        racks_to_display: List containing the racks [[P1_rack], [P2_rack]].
-        scores_to_display: List of scores [P1_score, P2_score].
-        turn_to_display: The current turn number (1 or 2).
-        player_names: List of player names ["P1_name", "P2_name"].
-        dragged_tile: Tuple (player, index) if a tile is being dragged, else None.
-        drag_pos: Tuple (x, y) of the dragged tile's position, else None.
-        practice_mode: String indicating the current practice mode, or None.
-
-    Returns:
-        tuple: (p1_alpha_rect, p1_rand_rect, p2_alpha_rect, p2_rand_rect)
-               Contains the pygame.Rect objects for the alphabetize and randomize
-               buttons for both players (P2 rects will be None if not drawn).
+    Draws the racks for both players, including visibility controls.
     """
+    # Determine if the visibility icon should be shown at all.
+    # It should only appear in live (not replay/game over) non-practice games with at least one human.
+    show_visibility_controls = not practice_mode and not replay_mode and not game_over_state and not all(is_ai)
+
     # Draw Player 1 Rack
     p1_rack_to_draw = racks_to_display[0] if len(racks_to_display) > 0 else []
     p1_drag_info = dragged_tile if dragged_tile and dragged_tile[0] == 1 else None
-    p1_alpha_rect, p1_rand_rect = draw_rack(1, p1_rack_to_draw, scores_to_display, turn_to_display, player_names, p1_drag_info, drag_pos)
+    # Determine if P1's rack should be visible. It's visible if the feature is off OR if the player-specific flag is True.
+    p1_is_visible = not show_visibility_controls or (len(rack_visibility) > 0 and rack_visibility[0])
+    p1_alpha_rect, p1_rand_rect, p1_eye_rect = draw_rack(1, p1_rack_to_draw, scores_to_display, turn_to_display, player_names, p1_drag_info, drag_pos, is_visible=p1_is_visible, is_human_game=show_visibility_controls)
 
     # Draw Player 2 Rack (conditionally)
-    p2_alpha_rect, p2_rand_rect = None, None
+    p2_alpha_rect, p2_rand_rect, p2_eye_rect = None, None, None
     if practice_mode != "eight_letter":
         p2_rack_to_draw = racks_to_display[1] if len(racks_to_display) > 1 else []
         p2_drag_info = dragged_tile if dragged_tile and dragged_tile[0] == 2 else None
-        # Note: draw_rack handles the case where p2_rack_to_draw might be empty
-        p2_alpha_rect, p2_rand_rect = draw_rack(2, p2_rack_to_draw, scores_to_display, turn_to_display, player_names, p2_drag_info, drag_pos)
+        # Determine if P2's rack should be visible.
+        p2_is_visible = not show_visibility_controls or (len(rack_visibility) > 1 and rack_visibility[1])
+        p2_alpha_rect, p2_rand_rect, p2_eye_rect = draw_rack(2, p2_rack_to_draw, scores_to_display, turn_to_display, player_names, p2_drag_info, drag_pos, is_visible=p2_is_visible, is_human_game=show_visibility_controls)
 
-    return p1_alpha_rect, p1_rand_rect, p2_alpha_rect, p2_rand_rect
+    return p1_alpha_rect, p1_rand_rect, p2_alpha_rect, p2_rand_rect, p1_eye_rect, p2_eye_rect
 
 
 
@@ -8179,6 +8128,9 @@ def _handle_mouse_down_suggest_button(event, state, drawn_rects):
     current_power_tile = state.get('current_power_tile')
     number_checks = state.get('number_checks', [True]*6)
     practice_target_moves = state.get('practice_target_moves', [])
+    replay_mode = state.get('replay_mode', False)
+    current_replay_turn = state.get('current_replay_turn', 0)
+    move_history = state.get('move_history', [])
 
 
     is_silent_run_local = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
@@ -8186,10 +8138,9 @@ def _handle_mouse_down_suggest_button(event, state, drawn_rects):
     suggest_rect_base = drawn_rects.get('suggest_rect_base')
     x, y = event.pos
 
-    is_human_turn_or_paused_practice_ui = (0 <= turn - 1 < len(is_ai)) and \
-                                       (not is_ai[turn - 1] or paused_for_power_tile or paused_for_bingo_practice)
-
-    if suggest_rect_base and suggest_rect_base.collidepoint(x, y) and is_human_turn_or_paused_practice_ui:
+    # The logic to decide if the button should exist is now in draw_game_screen.
+    # If the rect exists and is clicked, we proceed.
+    if suggest_rect_base and suggest_rect_base.collidepoint(x, y):
         if gaddag_loading_status != 'loaded' or GADDAG_STRUCTURE is None:
             show_message_dialog("Cannot suggest moves: AI data is not loaded or available.", "Loading")
         else:
@@ -8213,15 +8164,25 @@ def _handle_mouse_down_suggest_button(event, state, drawn_rects):
                 state['typing_start'] = None
                 state['original_blanks_before_typing'] = None
             
-            state = clear_current_preview(state) # Clear any visual preview
+            state = clear_current_preview(state)
 
             moves_to_hint_ui = []
-            current_player_rack_ui = racks[turn-1] if 0 <= turn-1 < len(racks) and racks[turn-1] is not None else []
+            
+            # Determine which rack to use for move generation
+            if replay_mode:
+                # In replay, get the rack from the move history for the *current* replay turn
+                if 0 <= current_replay_turn < len(move_history):
+                    current_player_rack_ui = move_history[current_replay_turn].get('rack', [])
+                else:
+                    # If at the end of replay, there's no "current" rack to suggest for
+                    current_player_rack_ui = [] 
+            else: # Live game
+                current_player_rack_ui = racks[turn-1] if 0 <= turn-1 < len(racks) and racks[turn-1] is not None else []
             
             if not is_silent_run_local:
-                print(f"DEBUG: Suggest clicked (UI). Player {turn}, Rack: {''.join(sorted(current_player_rack_ui))}, Practice: {practice_mode}")
+                print(f"DEBUG: Suggest clicked (UI). Rack: {''.join(sorted(current_player_rack_ui))}")
             
-            all_moves_generated_ui = generate_all_moves_gaddag(
+            all_moves_generated_ui = ai_engine.generate_all_moves_gaddag(
                 current_player_rack_ui, state['tiles'], state['board'], state['blanks'],
                 GADDAG_STRUCTURE.root, 
                 is_silent_batch_run_param=is_silent_run_local
@@ -8229,6 +8190,7 @@ def _handle_mouse_down_suggest_button(event, state, drawn_rects):
             if all_moves_generated_ui is None:
                 all_moves_generated_ui = []
             
+            # Filter moves for practice modes if applicable
             if practice_mode == "eight_letter":
                 moves_to_hint_ui = sorted(all_moves_generated_ui, key=lambda m: m.get('score', 0), reverse=True)
             elif practice_mode == "power_tiles" and paused_for_power_tile and current_power_tile:
@@ -8242,16 +8204,16 @@ def _handle_mouse_down_suggest_button(event, state, drawn_rects):
                 bingo_moves_hint_ui = [m for m in all_moves_generated_ui if m.get('is_bingo', False)]
                 moves_to_hint_ui = sorted(bingo_moves_hint_ui, key=lambda m: m['score'], reverse=True)
             else:
-                moves_to_hint_ui = all_moves_generated_ui # Already sorted by GADDAG
+                moves_to_hint_ui = all_moves_generated_ui
 
-            state['hint_moves'] = moves_to_hint_ui[:5] # Show top 5
+            state['hint_moves'] = moves_to_hint_ui[:5]
             state['hinting'] = True
             state['selected_hint_index'] = 0 if state['hint_moves'] else None
-            state['all_moves'] = all_moves_generated_ui # Store all generated moves
-            state['hint_dialog_x'] = (WINDOW_WIDTH - 400) // 2 # Standard hint dialog width
-            state['hint_dialog_y'] = (WINDOW_HEIGHT - 250) // 2 # Standard hint dialog height
+            state['all_moves'] = all_moves_generated_ui
+            state['hint_dialog_x'] = (WINDOW_WIDTH - 400) // 2
+            state['hint_dialog_y'] = (WINDOW_HEIGHT - 250) // 2
             state['hint_dialog_dragging'] = False
-        return True # Event handled
+        return True
     return False
 
 
@@ -8267,6 +8229,7 @@ def _handle_mouse_down_simulate_button(event, state, drawn_rects):
     """
     global GADDAG_STRUCTURE, DEV_VISUALIZE_BATCH_ENABLED_SESSION # For GADDAG access and conditional printing
     global DEFAULT_AI_CANDIDATES, DEFAULT_OPPONENT_SIMULATIONS, DEFAULT_POST_SIM_CANDIDATES # For sim defaults
+    global sgs_loaded_game_data # For replay simulation
 
     # Unpack necessary state variables
     turn = state['turn']
@@ -8274,6 +8237,8 @@ def _handle_mouse_down_simulate_button(event, state, drawn_rects):
     paused_for_power_tile = state.get('paused_for_power_tile', False)
     paused_for_bingo_practice = state.get('paused_for_bingo_practice', False)
     gaddag_loading_status = state['gaddag_loading_status']
+    replay_mode = state['replay_mode']
+    current_replay_turn = state['current_replay_turn']
 
     is_silent_run_local = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
 
@@ -8283,43 +8248,48 @@ def _handle_mouse_down_simulate_button(event, state, drawn_rects):
     is_human_turn_or_paused_practice_ui = (0 <= turn - 1 < len(is_ai)) and \
                                        (not is_ai[turn - 1] or paused_for_power_tile or paused_for_bingo_practice)
 
-    if simulate_button_rect and simulate_button_rect.collidepoint(x, y) and is_human_turn_or_paused_practice_ui:
+    # Allow simulation in replay mode OR on a human's turn in a live game
+    if simulate_button_rect and simulate_button_rect.collidepoint(x, y) and (is_human_turn_or_paused_practice_ui or replay_mode):
         if gaddag_loading_status != 'loaded' or GADDAG_STRUCTURE is None:
             show_message_dialog("Cannot simulate: AI data is not loaded or available.", "Loading")
-        else:
-            # Clear typing state if active
-            if state.get('typing'):
-                if state.get('original_tiles') and state.get('original_rack'):
-                    for r_wp, c_wp, _ in state.get('word_positions', []):
-                        state['tiles'][r_wp][c_wp] = state['original_tiles'][r_wp][c_wp]
-                    state['racks'][turn-1] = state['original_rack'][:]
-                    if not is_silent_run_local and state['racks'][turn-1] is not None:
-                        state['racks'][turn-1].sort()
-                    state['blanks'] = state.get('original_blanks_before_typing', set()).copy()
-                state['typing'] = False
-                state['word_positions'] = []
-                state['original_tiles'] = None
-                state['original_rack'] = None
-                state['selected_square'] = None
-                state['current_r'] = None
-                state['current_c'] = None
-                state['typing_direction'] = None
-                state['typing_start'] = None
-                state['original_blanks_before_typing'] = None
+            return True # Event handled (by showing message)
+
+        # Clear any active typing state if in a live game
+        if not replay_mode and state.get('typing'):
+            if state.get('original_tiles') and state.get('original_rack'):
+                for r_wp, c_wp, _ in state.get('word_positions', []):
+                    state['tiles'][r_wp][c_wp] = state['original_tiles'][r_wp][c_wp]
+                state['racks'][turn-1] = state['original_rack'][:]
+                if not is_silent_run_local and state['racks'][turn-1] is not None:
+                    state['racks'][turn-1].sort()
+                state['blanks'] = state.get('original_blanks_before_typing', set()).copy()
+            state['typing'] = False
+            state['word_positions'] = []
+            state['original_tiles'] = None
+            state['original_rack'] = None
+            state['selected_square'] = None
+            state['current_r'] = None
+            state['current_c'] = None
+            state['typing_direction'] = None
+            state['typing_start'] = None
+            state['original_blanks_before_typing'] = None
+        
+        state = clear_current_preview(state) # Clear any visual preview
+
+        # For both live and replay mode, just show the config dialog.
+        # The logic to run the simulation will be in the dialog's handler.
+        if not is_silent_run_local:
+            mode_str = "Replay Mode" if replay_mode else "Live Game"
+            print(f"Simulate button clicked (UI in {mode_str}). Showing config dialog.")
+        
+        state['showing_simulation_config'] = True
+        state['simulation_config_inputs'] = [
+            str(state.get('ai_sim_num_candidates_cfg', DEFAULT_AI_CANDIDATES)),
+            str(state.get('ai_sim_num_opponent_sims_cfg', DEFAULT_OPPONENT_SIMULATIONS)),
+            str(state.get('ai_sim_num_post_sim_candidates_cfg', DEFAULT_POST_SIM_CANDIDATES))
+        ]
+        state['simulation_config_active_input'] = None
             
-            state = clear_current_preview(state) # Clear any visual preview
-            
-            if not is_silent_run_local:
-                print("Simulate button clicked (UI).")
-            
-            state['showing_simulation_config'] = True
-            # Pre-fill with current global/session config values
-            state['simulation_config_inputs'] = [
-                str(state.get('ai_sim_num_candidates_cfg', DEFAULT_AI_CANDIDATES)),
-                str(state.get('ai_sim_num_opponent_sims_cfg', DEFAULT_OPPONENT_SIMULATIONS)),
-                str(state.get('ai_sim_num_post_sim_candidates_cfg', DEFAULT_POST_SIM_CANDIDATES))
-            ]
-            state['simulation_config_active_input'] = None
         return True # Event handled
     return False
 
@@ -8651,7 +8621,7 @@ def process_game_events(state, drawn_rects):
                 start_new_game_same_mode = state['start_new_game_same_mode']
                 continue
             elif word_lookup_button_in_game_rect and word_lookup_button_in_game_rect.collidepoint(event.pos[0], event.pos[1]) and \
-                 not state['is_batch_running'] and not state['game_over_state'] and not state['replay_mode']:
+                 not state['is_batch_running'] and not state['game_over_state']:
                 if word_definitions_loading_status == 'loading': show_message_dialog("Word definitions are still loading. Please wait.", "Loading")
                 elif word_definitions_loading_status == 'error' or not WORD_DEFINITIONS: show_message_dialog("Word definitions are unavailable. Lookup feature disabled.", "Error")
                 elif word_definitions_loading_status == 'loaded': show_word_lookup_dialog()
@@ -8884,7 +8854,8 @@ def _handle_general_mouse_down(event, state, drawn_rects):
     if not state.get('dragged_tile'):
         state = _handle_mouse_down_board_click(event, state)
 
-    if state['replay_mode']:
+    # If insights data exists, it means we are in a mode that uses the replay/insights UI.
+    if state.get('insights_data_for_replay'):
         if _handle_mouse_down_replay_buttons(event, state, drawn_rects):
             return updated_state_flags
         if event.button == 1 and _handle_mouse_down_scoreboard_replay_nav(event, state, drawn_rects):
@@ -8950,6 +8921,10 @@ def _handle_general_mouse_down(event, state, drawn_rects):
                             print(f"Warning: Could not retrieve insights move for key {unique_key} to apply preview.")
                         state['analyzer_selected_move_index'] = None 
                     return updated_state_flags 
+        
+        # Also check for simulate button in replay mode
+        if _handle_mouse_down_simulate_button(event, state, drawn_rects):
+            return updated_state_flags
         return updated_state_flags
 
 
@@ -8962,6 +8937,15 @@ def _handle_general_mouse_down(event, state, drawn_rects):
             return updated_state_flags
 
         if _handle_mouse_down_simulate_button(event, state, drawn_rects):
+            return updated_state_flags
+
+        p1_eye_rect = drawn_rects.get('p1_eye_rect')
+        p2_eye_rect = drawn_rects.get('p2_eye_rect')
+        if p1_eye_rect and p1_eye_rect.collidepoint(x, y):
+            state['rack_visibility'][0] = not state['rack_visibility'][0]
+            return updated_state_flags
+        if p2_eye_rect and p2_eye_rect.collidepoint(x, y):
+            state['rack_visibility'][1] = not state['rack_visibility'][1]
             return updated_state_flags
 
         if _handle_mouse_down_rack_ui_elements(event, state, drawn_rects):
@@ -9163,7 +9147,7 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
     """
     # Ensure global GADDAG_STRUCTURE is accessible if not passed via state explicitly
     global GADDAG_STRUCTURE, DEFAULT_AI_CANDIDATES, DEFAULT_OPPONENT_SIMULATIONS, DEFAULT_POST_SIM_CANDIDATES
-    global DEV_VISUALIZE_BATCH_ENABLED_SESSION # For conditional printing in called functions
+    global DEV_VISUALIZE_BATCH_ENABLED_SESSION, sgs_loaded_game_data # For conditional printing and replay
 
     # Determine if this is a silent run for functions called by this helper
     is_silent_run_local = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
@@ -9172,6 +9156,8 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
     showing_simulation_config = state['showing_simulation_config']
     simulation_config_active_input = state['simulation_config_active_input']
     simulation_config_inputs = list(state['simulation_config_inputs']) # Work with a copy
+    replay_mode = state['replay_mode']
+    current_replay_turn = state['current_replay_turn']
 
     # Unpack drawn rectangles for the dialog
     sim_input_rects = drawn_rects.get('sim_input_rects', [])
@@ -9214,7 +9200,8 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
                 state['ai_sim_num_post_sim_candidates_cfg'] = num_post_sim
 
                 if not is_silent_run_local:
-                    print(f"--- Running Human Turn Simulation with Params: AI Cands={num_ai_cand}, Opp Sims={num_opp_sim}, Post Sims={num_post_sim} ---")
+                    mode_str = "Replay" if replay_mode else "Live"
+                    print(f"--- Running {mode_str} Turn Simulation with Params: AI Cands={num_ai_cand}, Opp Sims={num_opp_sim}, Post Sims={num_post_sim} ---")
 
                 state['showing_simulation_config'] = False
                 state['simulation_config_active_input'] = None
@@ -9222,64 +9209,75 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
                 if state['gaddag_loading_status'] != 'loaded' or GADDAG_STRUCTURE is None:
                     show_message_dialog("Cannot simulate: AI data (GADDAG) is not loaded or available.", "Error")
                 else:
-                    player_idx = state['turn'] - 1
-                    opponent_idx = 1 - player_idx
-                    opponent_rack_len = len(state['racks'][opponent_idx]) if opponent_idx < len(state['racks']) and state['racks'][opponent_idx] is not None else 7
-                    current_player_rack = state['racks'][player_idx] if 0 <= player_idx < len(state['racks']) and state['racks'][player_idx] is not None else []
-                    
-                    # --- MODIFICATION: Generate moves for the current player ---
-                    if not is_silent_run_local:
-                        print("  _handle_mouse_down_simulation_config: Generating moves for current player before simulation...")
-                    
-                    # Ensure any existing preview is cleared before generating moves from the true board state
-                    state = clear_current_preview(state)
-
-                    current_player_all_moves = generate_all_moves_gaddag(
-                        current_player_rack, state['tiles'], state['board'], state['blanks'],
-                        GADDAG_STRUCTURE.root, # Removed is_first_play, generate_all_moves_gaddag calculates it
-                        is_silent_batch_run_param=is_silent_run_local
-                    )
-                    if current_player_all_moves is None:
-                       current_player_all_moves = []
-                    
-                    state['all_moves'] = current_player_all_moves # Update state's all_moves for consistency
-                    # --- END MODIFICATION ---
-
-                    simulation_results = run_ai_simulation(
-                        current_player_all_moves, # Pass the freshly generated moves
-                        current_player_rack, opponent_rack_len,
-                        state['tiles'], state['blanks'], state['board'], state['bag'],
-                        GADDAG_STRUCTURE.root, state['first_play'],
-                        num_ai_candidates=num_ai_cand,
-                        num_opponent_sims=num_opp_sim,
-                        num_post_sim_candidates=num_post_sim,
-                        is_silent_batch_run_param=is_silent_run_local
-                    )
-
-                    if simulation_results:
-                        top_sim_move = simulation_results[0]['move']
-                        top_sim_score = simulation_results[0]['final_score']
-                        if not is_silent_run_local:
-                            print(f"  Simulate Button Top Sim Result: Play '{top_sim_move.get('word','N/A')}' (Sim Score: {top_sim_score:.1f})")
-                    elif not is_silent_run_local:
-                        print("  Simulate Button: No valid simulation results found.")
+                    simulation_results = []
+                    if replay_mode:
+                        target_turn_for_state_recon = current_replay_turn if current_replay_turn > 0 else 1
+                        sgs_data_for_sim = state.get('sgs_loaded_game_data', sgs_loaded_game_data)
+                        if not sgs_data_for_sim:
+                            sgs_data_for_sim = {
+                                'sgs_initial_bag': state.get('sgs_initial_bag', []),
+                                'initial_racks_sgs': state.get('initial_racks', [[], []]),
+                                'full_move_history': state.get('move_history', [])
+                            }
+                        if not sgs_data_for_sim.get('full_move_history'):
+                            show_message_dialog("Cannot simulate replay: Game history data is missing.", "Error")
+                            return state
+                        
+                        sim_tiles, sim_blanks, _, sim_racks, sim_bag, sim_turn = get_sgs_replay_state(sgs_data_for_sim, target_turn_for_state_recon, is_silent_batch_run_param=True)
+                        sim_player_idx = sim_turn - 1
+                        sim_opponent_idx = 1 - sim_player_idx
+                        sim_ai_rack = sim_racks[sim_player_idx]
+                        sim_opponent_rack_len = len(sim_racks[sim_opponent_idx])
+                        sim_is_first_play = sum(1 for row in sim_tiles for t in row if t) == 0
+                        
+                        simulation_results = run_ai_simulation(
+                            ai_engine.generate_all_moves_gaddag(sim_ai_rack, sim_tiles, state['board'], sim_blanks, GADDAG_STRUCTURE.root, is_silent_batch_run_param=True),
+                            sim_ai_rack, sim_opponent_rack_len, sim_tiles, sim_blanks, state['board'], sim_bag,
+                            GADDAG_STRUCTURE.root, sim_is_first_play,
+                            num_ai_candidates=num_ai_cand, num_opponent_sims=num_opp_sim, num_post_sim_candidates=num_post_sim,
+                            is_silent_batch_run_param=is_silent_run_local
+                        )
+                    else: # Live game simulation
+                        player_idx = state['turn'] - 1
+                        opponent_idx = 1 - player_idx
+                        opponent_rack_len = len(state['racks'][opponent_idx]) if opponent_idx < len(state['racks']) and state['racks'][opponent_idx] is not None else 7
+                        current_player_rack = state['racks'][player_idx] if 0 <= player_idx < len(state['racks']) and state['racks'][player_idx] is not None else []
+                        
+                        state = clear_current_preview(state)
+                        current_player_all_moves = ai_engine.generate_all_moves_gaddag(
+                            current_player_rack, state['tiles'], state['board'], state['blanks'],
+                            GADDAG_STRUCTURE.root,
+                            is_silent_batch_run_param=is_silent_run_local
+                        )
+                        if current_player_all_moves is None:
+                           current_player_all_moves = []
+                        
+                        state['all_moves'] = current_player_all_moves
+                        
+                        simulation_results = run_ai_simulation(
+                            current_player_all_moves,
+                            current_player_rack, opponent_rack_len,
+                            state['tiles'], state['blanks'], state['board'], state['bag'],
+                            GADDAG_STRUCTURE.root, state['first_play'],
+                            num_ai_candidates=num_ai_cand, num_opponent_sims=num_opp_sim, num_post_sim_candidates=num_post_sim,
+                            is_silent_batch_run_param=is_silent_run_local
+                        )
 
                     state['hint_moves'] = simulation_results
                     state['hinting'] = True
                     state['selected_hint_index'] = 0 if state['hint_moves'] else None
-                    state['hint_dialog_x'] = (WINDOW_WIDTH - 400) // 2 # Standard hint dialog width
-                    state['hint_dialog_y'] = (WINDOW_HEIGHT - 250) // 2 # Standard hint dialog height
+                    state['hint_dialog_x'] = (WINDOW_WIDTH - 400) // 2
+                    state['hint_dialog_y'] = (WINDOW_HEIGHT - 250) // 2
                     state['hint_dialog_dragging'] = False
-                    # state = clear_current_preview(state) # Already done before generating moves
 
             except ValueError as e_val:
                 show_message_dialog(f"Invalid input: {e_val}\nPlease enter positive numbers.", "Input Error")
-            except Exception as e_sim: # Catch any other unexpected error during simulation setup/run
+            except Exception as e_sim:
                 print(f"Error during simulation configuration or execution: {e_sim}")
                 import traceback
                 traceback.print_exc()
                 show_message_dialog(f"Error during simulation: {e_sim}", "Simulation Error")
-                state['showing_simulation_config'] = False # Close dialog on error too
+                state['showing_simulation_config'] = False
                 state['simulation_config_active_input'] = None
     return state
 
@@ -9352,8 +9350,8 @@ def _handle_mouse_down_specify_rack_override_dialog(event, state, drawn_rects):
                     if not is_silent_run_local:
                         print("Regenerating moves after Specify Rack (Override)...")
                     first_play_for_spec_override = state.get('first_play', True)
-                    state['all_moves'] = generate_all_moves_gaddag(
-                        state['racks'][current_player_idx_for_spec], 
+                    state['all_moves'] = ai_engine.generate_all_moves_gaddag(
+                    state['racks'][current_player_idx_for_spec], 
                         state['tiles'], state['board'], state['blanks'],
                         state['GADDAG_STRUCTURE'].root,
                         is_silent_batch_run_param=is_silent_run_local
@@ -9548,8 +9546,8 @@ def _handle_mouse_down_specify_rack_dialog(event, state, drawn_rects):
                             if not is_silent_run_local:
                                 print("Regenerating moves after Specify Rack...")
                             first_play_for_spec_confirm = state.get('first_play', True)
-                            state['all_moves'] = generate_all_moves_gaddag(
-                                state['racks'][current_player_idx_for_spec],
+                            state['all_moves'] = ai_engine.generate_all_moves_gaddag(
+                            state['racks'][current_player_idx_for_spec],
                                 state['tiles'], state['board'], state['blanks'],
                                 state['GADDAG_STRUCTURE'].root,
                                 is_silent_batch_run_param=is_silent_run_local
@@ -9942,7 +9940,7 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
     MODIFIED: Adds drag initiation for All Words dialog and preview for its items.
     MODIFIED: Sets state['first_play'] = False after a successful hint/all_words play.
     MODIFIED: Ensures single click on Hint dialog item applies preview.
-    MODIFIED: Calls clear_current_preview when "OK" is clicked in All Words dialog.
+    MODIFIED: Clears current preview when "OK" is clicked in All Words dialog.
     MODIFIED: Corrected bug where clicking a hint item previewed the wrong move.
     MODIFIED: Corrected NameError for 'letter_check' in power_moves_filtered.
     NO CODE OMITTED.
@@ -9968,6 +9966,8 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
     paused_for_bingo_practice = state.get('paused_for_bingo_practice', False)
     practice_best_move = state.get('practice_best_move')
     practice_target_moves = state.get('practice_target_moves', [])
+    replay_mode = state.get('replay_mode', False)
+
 
     hint_rects_list = drawn_rects.get('hint_rects', [])
     play_button_rect_hint = drawn_rects.get('play_button_rect')
@@ -10012,6 +10012,8 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
             'tiles_played_from_rack': tiles_consumed_param,
             'newly_placed': newly_placed_param,
             'leave': selected_move_dict_param.get('leave', [])
+        
+        
         })
         current_state['current_replay_turn'] = len(current_state['move_history'])
         current_state['last_played_highlight_coords'] = set((pos[0], pos[1]) for pos in selected_move_dict_param.get('positions', []))
@@ -10024,12 +10026,15 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
         return current_state
 
     if hinting:
+        is_simulation_result = bool(hint_moves and isinstance(hint_moves[0], dict) and 'final_score' in hint_moves[0])
+        is_play_button_disabled = replay_mode and is_simulation_result
+
         hint_dialog_width, hint_dialog_height = 400, 250
         title_bar_height_hint = 40
         hint_title_bar_rect = pygame.Rect(hint_dialog_x, hint_dialog_y, hint_dialog_width, title_bar_height_hint)
         hint_dialog_main_rect = pygame.Rect(hint_dialog_x, hint_dialog_y, hint_dialog_width, hint_dialog_height)
 
-        if play_button_rect_hint and play_button_rect_hint.collidepoint(x, y) and \
+        if play_button_rect_hint and play_button_rect_hint.collidepoint(x, y) and not is_play_button_disabled and not state.get('replay_mode') and not state.get('is_loaded_game') and \
            selected_hint_index is not None and selected_hint_index < len(hint_moves): # selected_hint_index is local, correctly reflects state for Play button
             clicked_in_active_dialog = True
             state = clear_current_preview(state)
@@ -10066,18 +10071,16 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
                         show_message_dialog("Error: Best move data missing for validation.", "Internal Error"); state['hinting'] = False
                     valid_for_practice_play = False 
                 elif paused_for_power_tile:
-                    # ***** MODIFICATION START *****
                     power_moves_filtered = [
                         m for m in state['all_moves'] if 
-                        any(lt_check == current_power_tile for _, _, lt_check in m.get('newly_placed', [])) and # Use lt_check
+                        any(lt_check == current_power_tile for _, _, lt_check in m.get('newly_placed', [])) and
                         is_word_length_allowed(len(m.get('word', '')), number_checks)
                     ]
-                    # ***** MODIFICATION END *****
                     max_power_score_filtered = max(m['score'] for m in power_moves_filtered) if power_moves_filtered else 0
                     if selected_move_dict.get('score', -1) >= max_power_score_filtered and any(lt == current_power_tile for _,_,lt in selected_move_dict.get('newly_placed',[])): 
                         next_turn_val, drawn_tiles, newly_placed, tiles_consumed_for_history = play_hint_move(selected_move_dict, state['tiles'], state['racks'], state['blanks'], state['scores'], player_who_played, state['bag'], state['board'], state['is_ai'], state['practice_mode'], is_silent_batch_run_param=is_silent_run_local) 
                         state = finalize_dialog_play(state, selected_move_dict, move_rack_before_play, tiles_consumed_for_history, drawn_tiles, newly_placed, next_turn_val)
-                    else: show_message_dialog(f"This is not the highest scoring move with {current_power_tile} matching the selected lengths, or you didn't use {current_power_tile}.", "Incorrect Move"); valid_for_practice_play = False; state['hinting'] = False
+                    else: show_message_dialog(f"This is not the highest scoring move with {current_power_tile} matching the selected lengths (Max: {int(max_power_score_filtered)}). Try again!", "Incorrect Move"); valid_for_practice_play = False; state['hinting'] = False
                     if state.get('turn') != player_who_played : return state 
 
                 elif paused_for_bingo_practice:
@@ -10085,7 +10088,7 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
                     if selected_move_dict.get('is_bingo', False) and selected_move_dict.get('score', -1) >= max_bingo_score:
                         next_turn_val, drawn_tiles, newly_placed, tiles_consumed_for_history = play_hint_move(selected_move_dict, state['tiles'], state['racks'], state['blanks'], state['scores'], player_who_played, state['bag'], state['board'], state['is_ai'], state['practice_mode'], is_silent_batch_run_param=is_silent_run_local) 
                         state = finalize_dialog_play(state, selected_move_dict, move_rack_before_play, tiles_consumed_for_history, drawn_tiles, newly_placed, next_turn_val)
-                    else: show_message_dialog(f"This is not the highest scoring bingo! Max score is {max_bingo_score}.", "Incorrect Move"); valid_for_practice_play = False; state['hinting'] = False
+                    else: show_message_dialog(f"This is not the highest scoring bingo! Max score is {int(max_bingo_score)}.", "Incorrect Move"); valid_for_practice_play = False; state['hinting'] = False
                     if state.get('turn') != player_who_played : return state 
                 
                 if valid_for_practice_play and practice_mode not in ["eight_letter"] and not paused_for_power_tile and not paused_for_bingo_practice: 
@@ -10115,9 +10118,8 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
                     state['selected_hint_index'] = i_hint_rect # Update the state for highlighting
                     
                     move_to_preview_data = None
-                    is_sim_res_preview = bool(hint_moves and isinstance(hint_moves[0], dict) and 'final_score' in hint_moves[0])
                     
-                    if is_sim_res_preview:
+                    if is_simulation_result:
                         if i_hint_rect < len(hint_moves): 
                             move_to_preview_data = hint_moves[i_hint_rect].get('move')
                     else:
@@ -10150,7 +10152,10 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
         elif practice_mode == "bingo_bango_bongo" and paused_for_bingo_practice: current_moves_for_all_words = sorted([m for m in all_moves_list if m.get('is_bingo', False)], key=lambda m: m['score'], reverse=True)
         else: current_moves_for_all_words = all_moves_list
 
-        if all_words_play_rect and all_words_play_rect.collidepoint(x, y) and \
+        is_simulation_result_aw = bool(hint_moves and isinstance(hint_moves[0], dict) and 'final_score' in hint_moves[0])
+        is_play_disabled_in_all_words = replay_mode and is_simulation_result_aw
+
+        if all_words_play_rect and all_words_play_rect.collidepoint(x, y) and not is_play_disabled_in_all_words and not state.get('replay_mode') and not state.get('is_loaded_game') and \
            selected_hint_index is not None and selected_hint_index < len(current_moves_for_all_words): # selected_hint_index is local, correctly reflects state for Play button
             clicked_in_active_dialog = True
             state = clear_current_preview(state)
@@ -10189,21 +10194,19 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
                     if selected_move_dict.get('is_bingo', False) and selected_move_dict.get('score', -1) >= max_bingo_score:
                         next_turn_val, drawn_tiles, newly_placed, tiles_consumed_for_history = play_hint_move(selected_move_dict, state['tiles'], state['racks'], state['blanks'], state['scores'], player_who_played, state['bag'], state['board'], state['is_ai'], state['practice_mode'], is_silent_batch_run_param=is_silent_run_local) 
                         state = finalize_dialog_play(state, selected_move_dict, move_rack_before_play, tiles_consumed_for_history, drawn_tiles, newly_placed, next_turn_val)
-                    else: show_message_dialog(f"This is not the highest scoring bingo! Max score is {max_bingo_score}.", "Incorrect Move"); state['showing_all_words'] = False
+                    else: show_message_dialog(f"This is not the highest scoring bingo! Max score is {int(max_bingo_score)}.", "Incorrect Move"); state['showing_all_words'] = False
                     if state.get('turn') != player_who_played : return state 
                 elif paused_for_power_tile: 
-                    # ***** MODIFICATION START *****
                     power_moves_filtered = [
                         m for m in all_moves_list if 
-                        any(lt_check == current_power_tile for _, _, lt_check in m.get('newly_placed', [])) and # Use lt_check
+                        any(lt_check == current_power_tile for _, _, lt_check in m.get('newly_placed', [])) and
                         is_word_length_allowed(len(m.get('word', '')), number_checks)
                     ]
-                    # ***** MODIFICATION END *****
                     max_power_score_filtered = max(m['score'] for m in power_moves_filtered) if power_moves_filtered else 0
                     if selected_move_dict.get('score', -1) >= max_power_score_filtered and any(lt == current_power_tile for _,_,lt in selected_move_dict.get('newly_placed',[])):
                         next_turn_val, drawn_tiles, newly_placed, tiles_consumed_for_history = play_hint_move(selected_move_dict, state['tiles'], state['racks'], state['blanks'], state['scores'], player_who_played, state['bag'], state['board'], state['is_ai'], state['practice_mode'], is_silent_batch_run_param=is_silent_run_local)
                         state = finalize_dialog_play(state, selected_move_dict, move_rack_before_play, tiles_consumed_for_history, drawn_tiles, newly_placed, next_turn_val)
-                    else: show_message_dialog(f"This is not the highest scoring move with {current_power_tile} matching the selected lengths, or you didn't use {current_power_tile}.", "Incorrect Move"); state['showing_all_words'] = False
+                    else: show_message_dialog(f"This is not the highest scoring move with {current_power_tile} matching the selected lengths (Max: {int(max_power_score_filtered)}). Try again!", "Incorrect Move"); state['showing_all_words'] = False
                     if state.get('turn') != player_who_played : return state 
                 else: # Standard play from All Words
                     next_turn_val, drawn_tiles, newly_placed, tiles_consumed_for_history = play_hint_move(selected_move_dict, state['tiles'], state['racks'], state['blanks'], state['scores'], player_who_played, state['bag'], state['board'], state['is_ai'], state['practice_mode'], is_silent_batch_run_param=is_silent_run_local) 
@@ -10508,7 +10511,7 @@ def _handle_keydown_typing_on_board(event, state):
                     if is_power_tile_play and score_val_play >= max_power_score:
                         show_message_dialog(f"Correct! You found the highest scoring play ({score_val_play} pts) with {state['current_power_tile']} matching the selected lengths.", "Power Tile Success!")
                     elif is_power_tile_play: # Used power tile but not highest score
-                        show_message_dialog(f"You played the {state['current_power_tile']}, but there is a higher score: ({max_power_score}). Try again!", "Incorrect Score")
+                        show_message_dialog(f"You played the {state['current_power_tile']}, but there is a higher score: ({int(max_power_score)}). Try again!", "Incorrect Score")
                         practice_mode_allows_play = False
                     else: # Didn't use the power tile
                         show_message_dialog(f"You didn't use the required power tile: {state['current_power_tile']}. Try again!", "Incorrect Play")
@@ -10519,7 +10522,7 @@ def _handle_keydown_typing_on_board(event, state):
                     if is_bingo and score_val_play >= max_bingo_score:
                         show_message_dialog(f"Correct! You found the highest scoring bingo ({score_val_play} pts).", "Bingo Success!")
                     elif is_bingo: # Played a bingo, but not the highest scoring one
-                        show_message_dialog(f"You played a bingo, but score {score_val_play} is not the highest ({max_bingo_score}). Try again!", "Incorrect Score")
+                        show_message_dialog(f"You played a bingo, but score {score_val_play} is not the highest ({int(max_bingo_score)}). Try again!", "Incorrect Score")
                         practice_mode_allows_play = False
                     else: # Didn't play a bingo
                         show_message_dialog("That wasn't a bingo. Try again!", "Incorrect Play")
@@ -10707,7 +10710,7 @@ def _handle_keydown_typing_on_board(event, state):
             state['current_r'] = None; state['current_c'] = None; state['typing_direction'] = None; state['typing_start'] = None
             state['original_blanks_before_typing'] = None
 
-    return state # Return the modified state
+    return state
 
 
 
@@ -11436,14 +11439,14 @@ def handle_mouse_down_event(event, state, drawn_rects):
 
 
 
-def draw_all_words_dialog(moves, selected_index, current_scroll_offset, dialog_x_param, dialog_y_param):
+def draw_all_words_dialog(moves, selected_index, current_scroll_offset, dialog_x_param, dialog_y_param, is_play_disabled=False):
     """
     Draw the dialog showing all valid moves with scrolling, at specified coordinates.
     Uses passed dialog_x_param and dialog_y_param for positioning.
     MODIFIED: Uses a more robust item_height to prevent text overlap.
     """
     global ui_font, dialog_font, button_font 
-    global DIALOG_COLOR, BLACK, HINT_SELECTED_COLOR, HINT_NORMAL_COLOR, BUTTON_COLOR 
+    global DIALOG_COLOR, BLACK, HINT_SELECTED_COLOR, HINT_NORMAL_COLOR, BUTTON_COLOR, GRAYED_OUT_COLOR
     global WINDOW_WIDTH, WINDOW_HEIGHT, ALL_WORDS_DIALOG_WIDTH, ALL_WORDS_DIALOG_HEIGHT, BUTTON_HEIGHT, BUTTON_GAP 
 
     pygame.draw.rect(screen, DIALOG_COLOR, (dialog_x_param, dialog_y_param, ALL_WORDS_DIALOG_WIDTH, ALL_WORDS_DIALOG_HEIGHT))
@@ -11537,7 +11540,8 @@ def draw_all_words_dialog(moves, selected_index, current_scroll_offset, dialog_x
     play_button_rect = pygame.Rect(buttons_x_abs, button_y_abs, BUTTON_WIDTH, BUTTON_HEIGHT)
     ok_button_rect = pygame.Rect(buttons_x_abs + BUTTON_WIDTH + BUTTON_GAP, button_y_abs, BUTTON_WIDTH, BUTTON_HEIGHT)
 
-    pygame.draw.rect(screen, BUTTON_COLOR, play_button_rect)
+    play_button_color = GRAYED_OUT_COLOR if is_play_disabled or is_loaded_or_replay_mode else BUTTON_COLOR
+    pygame.draw.rect(screen, play_button_color, play_button_rect)
     pygame.draw.rect(screen, BUTTON_COLOR, ok_button_rect)
 
     play_text_surface = button_font.render("Play", True, BLACK) 
@@ -11648,16 +11652,13 @@ def draw_game_screen(screen, state):
     drawn_rects = {}
     screen.fill(WHITE)
 
-    # --- MODIFICATION START: Read pre-calculated replay state ---
     racks_to_display_for_draw_rack_func = state.get('replay_racks_for_display', racks_main) if replay_mode else racks_main
     scores_to_display_func = state.get('replay_scores_for_display', scores_main) if replay_mode else (final_scores_state if game_over_state else scores_main)
     turn_to_display_for_ui_func = state.get('replay_turn_for_display', turn) if replay_mode else turn
     unseen_tiles_for_display_dict_func = state.get('replay_unseen_tiles_for_display', {}) if replay_mode else Counter(bag + (racks_main[1- (turn-1)] if len(racks_main) > 1 else []))
     history_to_draw_func = move_history[:current_replay_turn] if replay_mode else move_history
     is_final_turn_in_replay_func = (current_replay_turn == len(move_history)) if replay_mode else game_over_state
-    # --- MODIFICATION END ---
 
-    # --- Board Drawing Loop ---
     for r_draw_board in range(GRID_SIZE):
         for c_draw_board in range(GRID_SIZE):
             pygame.draw.rect(screen, board_layout_multipliers[r_draw_board][c_draw_board], (40 + c_draw_board * SQUARE_SIZE, 40 + r_draw_board * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE))
@@ -11667,9 +11668,7 @@ def draw_game_screen(screen, state):
             
             if tile_char_to_render:
                 is_blank_tile_on_board = (r_draw_board, c_draw_board) in current_blanks_on_board
-                
                 is_part_of_last_actual_play = (r_draw_board, c_draw_board) in last_played_highlight_coords and not replay_mode and not state.get('previewed_move_details')
-                
                 is_previewed_tile = False
                 if state.get('previewed_move_details'):
                     for pr, pc, _, _ in state['previewed_move_details']:
@@ -11677,11 +11676,11 @@ def draw_game_screen(screen, state):
                             is_previewed_tile = True
                             break
                 
-                tile_bg_color = GREEN # Default
+                tile_bg_color = GREEN
                 if is_previewed_tile:
-                    tile_bg_color = YELLOW # Previewed tiles are yellow
+                    tile_bg_color = YELLOW
                 elif is_part_of_last_actual_play:
-                    tile_bg_color = PALE_YELLOW # Last actual played tiles
+                    tile_bg_color = PALE_YELLOW
                 
                 if is_blank_tile_on_board:
                     center = (40 + c_draw_board * SQUARE_SIZE + SQUARE_SIZE // 2, 40 + r_draw_board * SQUARE_SIZE + SQUARE_SIZE // 2)
@@ -11709,9 +11708,15 @@ def draw_game_screen(screen, state):
                         pygame.draw.rect(screen, PALE_YELLOW, (40 + c_hl * SQUARE_SIZE, 40 + r_hl * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE), 3)
 
     draw_board_labels(screen, ui_font)
-    p1_alpha_rect, p1_rand_rect, p2_alpha_rect, p2_rand_rect = draw_player_racks(screen, racks_to_display_for_draw_rack_func, scores_to_display_func, turn_to_display_for_ui_func, player_names, dragged_tile, drag_pos, practice_mode)
+    p1_alpha_rect, p1_rand_rect, p2_alpha_rect, p2_rand_rect, p1_eye_rect, p2_eye_rect = draw_player_racks(
+        screen, racks_to_display_for_draw_rack_func, scores_to_display_func, 
+        turn_to_display_for_ui_func, player_names, dragged_tile, drag_pos, 
+        practice_mode, state['rack_visibility'], is_ai, replay_mode, game_over_state
+    )
     drawn_rects['p1_alpha_rect'] = p1_alpha_rect; drawn_rects['p1_rand_rect'] = p1_rand_rect
     drawn_rects['p2_alpha_rect'] = p2_alpha_rect; drawn_rects['p2_rand_rect'] = p2_rand_rect
+    drawn_rects['p1_eye_rect'] = p1_eye_rect
+    drawn_rects['p2_eye_rect'] = p2_eye_rect
     
     if practice_mode != "eight_letter":
         draw_remaining_tiles(unseen_tiles_for_display_dict_func, turn_to_display_for_ui_func)
@@ -11726,47 +11731,27 @@ def draw_game_screen(screen, state):
     returned_scroll_offset = draw_scoreboard(screen, history_to_draw_func, state['scroll_offset'], scores_to_display_func, is_ai, player_names, final_scores=final_scores_state, game_over_state=(game_over_state or is_final_turn_in_replay_func))
     state['scroll_offset'] = returned_scroll_offset
 
-    if replay_mode:
-        new_replay_button_y = scoreboard_display_rect.bottom + 4
-        total_width_of_all_replay_buttons = (4 * REPLAY_BUTTON_WIDTH) + (3 * REPLAY_BUTTON_GAP)
-        replay_buttons_start_x = scoreboard_display_rect.left + (scoreboard_display_rect.width - total_width_of_all_replay_buttons) // 2
-        replay_buttons_start_x = max(0, replay_buttons_start_x)
+    # --- MODIFICATION START: Simplified and Corrected UI Drawing Logic ---
+    is_human_turn_or_paused_practice = (0 <= turn-1 < len(is_ai)) and (not is_ai[turn-1] or paused_for_power_tile or paused_for_bingo_practice)
 
-        local_replay_start_rect = pygame.Rect(replay_buttons_start_x, new_replay_button_y, REPLAY_BUTTON_WIDTH, REPLAY_BUTTON_HEIGHT)
-        local_replay_prev_rect = pygame.Rect(replay_buttons_start_x + REPLAY_BUTTON_WIDTH + REPLAY_BUTTON_GAP, new_replay_button_y, REPLAY_BUTTON_WIDTH, REPLAY_BUTTON_HEIGHT)
-        local_replay_next_rect = pygame.Rect(replay_buttons_start_x + 2 * (REPLAY_BUTTON_WIDTH + REPLAY_BUTTON_GAP), new_replay_button_y, REPLAY_BUTTON_WIDTH, REPLAY_BUTTON_HEIGHT)
-        local_replay_end_rect = pygame.Rect(replay_buttons_start_x + 3 * (REPLAY_BUTTON_WIDTH + REPLAY_BUTTON_GAP), new_replay_button_y, REPLAY_BUTTON_WIDTH, REPLAY_BUTTON_HEIGHT)
-        drawn_rects['replay_start_rect'] = local_replay_start_rect
-        drawn_rects['replay_prev_rect'] = local_replay_prev_rect
-        drawn_rects['replay_next_rect'] = local_replay_next_rect
-        drawn_rects['replay_end_rect'] = local_replay_end_rect
-        replay_controls_to_draw = [(local_replay_start_rect, "start"), (local_replay_prev_rect, "prev"), (local_replay_next_rect, "next"), (local_replay_end_rect, "end")]
-        for rect_rc, icon_type_rc in replay_controls_to_draw:
-            if rect_rc:
-                hover_rc = rect_rc.collidepoint(pygame.mouse.get_pos()); color_rc = BUTTON_HOVER if hover_rc else BUTTON_COLOR
-                pygame.draw.rect(screen, color_rc, rect_rc); draw_replay_icon(screen, rect_rc, icon_type_rc)
-        
-        insights_checkbox_rect_val, insights_item_rects_val = draw_insights_window(screen, state) 
-        drawn_rects['analyzer_checkbox_rect'] = insights_checkbox_rect_val 
-        drawn_rects['insights_item_rects'] = insights_item_rects_val
-
-    if selected_square and not typing: draw_arrow(selected_square[0], selected_square[1], selected_square[2])
-    elif typing:
-        if current_r is not None and current_c is not None:
-            if 0 <= current_r < GRID_SIZE and 0 <= current_c < GRID_SIZE:
-                cursor_x_draw = 40 + current_c * SQUARE_SIZE + SQUARE_SIZE // 2; cursor_y_draw = 40 + current_r * SQUARE_SIZE + SQUARE_SIZE - 5
-                if int(time.time() * 2) % 2 == 0: pygame.draw.line(screen, BLACK, (cursor_x_draw - 5, cursor_y_draw), (cursor_x_draw + 5, cursor_y_draw), 2)
-
-    suggest_rect_base = None; simulate_button_rect = None; preview_checkbox_rect = None; word_lookup_button_in_game_rect = None
+    suggest_rect_base = None
+    simulate_button_rect = None
+    preview_checkbox_rect = None
+    word_lookup_button_in_game_rect = None
+    
     if not is_batch_running_local_draw:
-        suggest_rect_base = draw_suggest_button()
-        if suggest_rect_base:
+        # Draw analysis buttons if in a live human turn OR in replay mode
+        if is_human_turn_or_paused_practice or replay_mode:
+            suggest_rect_base = draw_suggest_button()
+            
             simulate_button_rect = pygame.Rect(suggest_rect_base.x, suggest_rect_base.bottom + BUTTON_GAP, OPTIONS_WIDTH, BUTTON_HEIGHT)
             hover_sim = simulate_button_rect.collidepoint(pygame.mouse.get_pos()); color_sim = BUTTON_HOVER if hover_sim else BUTTON_COLOR
             pygame.draw.rect(screen, color_sim, simulate_button_rect)
             simulate_text = button_font.render("Simulate", True, BLACK); simulate_text_rect = simulate_text.get_rect(center=simulate_button_rect.center); screen.blit(simulate_text, simulate_text_rect)
+            
             word_lookup_button_in_game_rect = draw_word_lookup_button_in_game(screen, suggest_rect_base)
-        is_human_turn_or_paused_practice = (0 <= turn-1 < len(is_ai)) and (not is_ai[turn-1] or paused_for_power_tile or paused_for_bingo_practice)
+
+        # Draw Preview checkbox only during a live human turn
         if is_human_turn_or_paused_practice:
             relevant_rand_rect = p1_rand_rect if turn == 1 else p2_rand_rect
             if relevant_rand_rect:
@@ -11779,8 +11764,47 @@ def draw_game_screen(screen, state):
                 if preview_score_enabled:
                     score_text_pv = str(current_preview_score); score_surf_pv = ui_font.render(score_text_pv, True, BLACK)
                     score_x_pv = label_x_draw + label_surf.get_width() + 2; score_y_pv = label_y_draw; screen.blit(score_surf_pv, (score_x_pv, score_y_pv))
-    drawn_rects['suggest_rect_base'] = suggest_rect_base; drawn_rects['simulate_button_rect'] = simulate_button_rect
-    drawn_rects['preview_checkbox_rect'] = preview_checkbox_rect; drawn_rects['word_lookup_button_in_game_rect'] = word_lookup_button_in_game_rect
+
+    drawn_rects['suggest_rect_base'] = suggest_rect_base
+    drawn_rects['simulate_button_rect'] = simulate_button_rect
+    drawn_rects['preview_checkbox_rect'] = preview_checkbox_rect
+    drawn_rects['word_lookup_button_in_game_rect'] = word_lookup_button_in_game_rect
+
+    # Draw replay controls and insights window ONLY if in replay mode
+    if replay_mode:
+        new_replay_button_y = scoreboard_display_rect.bottom + 4
+        total_width_of_all_replay_buttons = (4 * REPLAY_BUTTON_WIDTH) + (3 * REPLAY_BUTTON_GAP)
+        replay_buttons_start_x = scoreboard_display_rect.left + (scoreboard_display_rect.width - total_width_of_all_replay_buttons) // 2
+        replay_buttons_start_x = max(0, replay_buttons_start_x)
+
+        local_replay_start_rect = pygame.Rect(replay_buttons_start_x, new_replay_button_y, REPLAY_BUTTON_WIDTH, REPLAY_BUTTON_HEIGHT)
+        local_replay_prev_rect = pygame.Rect(replay_buttons_start_x + REPLAY_BUTTON_WIDTH + REPLAY_BUTTON_GAP, new_replay_button_y, REPLAY_BUTTON_WIDTH, REPLAY_BUTTON_HEIGHT)
+        local_replay_next_rect = pygame.Rect(replay_buttons_start_x + 2 * (REPLAY_BUTTON_WIDTH + REPLAY_BUTTON_GAP), new_replay_button_y, REPLAY_BUTTON_WIDTH, REPLAY_BUTTON_HEIGHT)
+        local_replay_end_rect = pygame.Rect(replay_buttons_start_x + 3 * (REPLAY_BUTTON_WIDTH + REPLAY_BUTTON_GAP), new_replay_button_y, REPLAY_BUTTON_WIDTH, REPLAY_BUTTON_HEIGHT)
+        
+        drawn_rects['replay_start_rect'] = local_replay_start_rect
+        drawn_rects['replay_prev_rect'] = local_replay_prev_rect
+        drawn_rects['replay_next_rect'] = local_replay_next_rect
+        drawn_rects['replay_end_rect'] = local_replay_end_rect
+        
+        replay_controls_to_draw = [(local_replay_start_rect, "start"), (local_replay_prev_rect, "prev"), (local_replay_next_rect, "next"), (local_replay_end_rect, "end")]
+        for rect_rc, icon_type_rc in replay_controls_to_draw:
+            if rect_rc:
+                hover_rc = rect_rc.collidepoint(pygame.mouse.get_pos()); color_rc = BUTTON_HOVER if hover_rc else BUTTON_COLOR
+                pygame.draw.rect(screen, color_rc, rect_rc); draw_replay_icon(screen, rect_rc, icon_type_rc)
+        
+        insights_checkbox_rect_val, insights_item_rects_val = draw_insights_window(screen, state) 
+        drawn_rects['analyzer_checkbox_rect'] = insights_checkbox_rect_val 
+        drawn_rects['insights_item_rects'] = insights_item_rects_val
+    # --- MODIFICATION END ---
+
+    if selected_square and not typing: draw_arrow(selected_square[0], selected_square[1], selected_square[2])
+    elif typing:
+        if current_r is not None and current_c is not None:
+            if 0 <= current_r < GRID_SIZE and 0 <= current_c < GRID_SIZE:
+                cursor_x_draw = 40 + current_c * SQUARE_SIZE + SQUARE_SIZE // 2; cursor_y_draw = 40 + current_r * SQUARE_SIZE + SQUARE_SIZE - 5
+                if int(time.time() * 2) % 2 == 0: pygame.draw.line(screen, BLACK, (cursor_x_draw - 5, cursor_y_draw), (cursor_x_draw + 5, cursor_y_draw), 2)
+
     indicator_center_x = sb_x + sb_w // 2; indicator_base_y = sb_y; indicator_y_offset = 0
     if is_solving_endgame: draw_endgame_solving_indicator(indicator_center_x, indicator_base_y); indicator_y_offset += 25
     elif gaddag_loading_status_local == 'loading': draw_loading_indicator(sb_x, indicator_base_y, sb_w); indicator_y_offset += 25
@@ -11827,14 +11851,21 @@ def draw_game_screen(screen, state):
         drawn_rects['tile_rects'] = tile_rects_draw; drawn_rects['exchange_button_rect'] = exchange_button_rect_draw; drawn_rects['cancel_button_rect'] = cancel_button_rect_draw
     elif hinting:
         is_simulation_result = bool(hint_moves and isinstance(hint_moves[0], dict) and 'final_score' in hint_moves[0])
-        hint_rects_draw, play_button_rect_local_hint, ok_button_rect_local_hint, all_words_button_rect_hint = draw_hint_dialog(screen, hint_moves, selected_hint_index, hint_dialog_x, hint_dialog_y, is_simulation_result=is_simulation_result)
+        is_play_disabled_in_replay_sim = replay_mode and is_simulation_result
+        is_loaded_or_replay = state.get('is_loaded_game', False) or state.get('replay_mode', False)
+        hint_rects_draw, play_button_rect_local_hint, ok_button_rect_local_hint, all_words_button_rect_hint = draw_hint_dialog(screen, hint_moves, selected_hint_index, hint_dialog_x, hint_dialog_y, is_simulation_result=is_simulation_result, is_play_disabled=is_play_disabled_in_replay_sim, is_loaded_or_replay_mode=is_loaded_or_replay)
         drawn_rects['hint_rects'] = hint_rects_draw; drawn_rects['play_button_rect'] = play_button_rect_local_hint; drawn_rects['ok_button_rect'] = ok_button_rect_local_hint; drawn_rects['all_words_button_rect'] = all_words_button_rect_hint
     elif showing_all_words:
         if practice_mode == "eight_letter": moves_for_all = practice_target_moves
         elif practice_mode == "power_tiles" and paused_for_power_tile: moves_for_all = sorted([m for m in all_moves if any(letter_aw_ds == current_power_tile for _, _, letter_aw_ds in m.get('newly_placed',[])) and is_word_length_allowed(len(m.get('word','')), number_checks)], key=lambda m: m['score'], reverse=True)
         elif practice_mode == "bingo_bango_bongo" and paused_for_bingo_practice: moves_for_all = sorted([m for m in all_moves if m.get('is_bingo', False)], key=lambda m: m['score'], reverse=True)
         else: moves_for_all = all_moves
-        all_words_rects_draw, all_words_play_rect_draw, all_words_ok_rect_draw = draw_all_words_dialog(moves_for_all, selected_hint_index, all_words_scroll_offset, all_words_dialog_x, all_words_dialog_y)
+        
+        # Determine if the play button should be disabled (i.e., in replay mode after a simulation)
+        is_simulation_result_aw = bool(hint_moves and isinstance(hint_moves[0], dict) and 'final_score' in hint_moves[0])
+        is_play_disabled_in_all_words = replay_mode and is_simulation_result_aw
+
+        all_words_rects_draw, all_words_play_rect_draw, all_words_ok_rect_draw = draw_all_words_dialog(moves_for_all, selected_hint_index, all_words_scroll_offset, all_words_dialog_x, all_words_dialog_y, is_play_disabled=is_play_disabled_in_all_words)
         drawn_rects['all_words_rects'] = all_words_rects_draw; drawn_rects['all_words_play_rect'] = all_words_play_rect_draw; drawn_rects['all_words_ok_rect'] = all_words_ok_rect_draw
     elif game_over_state and not is_batch_running_local_draw:
         if final_scores_state is not None:
@@ -11845,11 +11876,9 @@ def draw_game_screen(screen, state):
             stats_ok_button_rect_stats, stats_total_content_height_stats = draw_stats_dialog(stats_dialog_x, stats_dialog_y, player_names, final_scores_state, current_tiles_on_board, stats_scroll_offset, move_history) # Pass current_tiles_on_board
             drawn_rects['stats_ok_button_rect'] = stats_ok_button_rect_stats; drawn_rects['stats_total_content_height'] = stats_total_content_height_stats
 
-    # --- MODIFICATION START: Always draw options menu unless it's a silent batch run ---
     if not showing_practice_end_dialog and not is_batch_running_local_draw:
         options_rect_base_draw, dropdown_rects_base_draw = draw_options_menu(turn_to_display_for_ui_func, dropdown_open, bag_count_live, is_batch_running_local_draw, replay_mode, game_over_state)
         drawn_rects['options_rect_base'] = options_rect_base_draw; drawn_rects['dropdown_rects_base'] = dropdown_rects_base_draw
-    # --- MODIFICATION END ---
 
     if dragged_tile and drag_pos:
         player_idx_drag = dragged_tile[0]-1; tile_val = None
@@ -12056,11 +12085,6 @@ def handle_turn_start_updates(state):
     GADDAG_STRUCTURE_from_state = state['GADDAG_STRUCTURE'] 
     is_ai = state['is_ai']
     
-    # REMOVED DEBUG PRINT for first_play
-    # first_play_local_for_debug = state.get('first_play', True) 
-    # if not is_silent_run:
-    #     print(f"  DEBUG handle_turn_start_updates: Turn {turn}, previous_turn {previous_turn}. State 'first_play' read as: {first_play_local_for_debug}")
-
     all_moves = state.get('all_moves', []) # Default to existing if not recalculated
     human_played = state.get('human_played', False)
     power_tile_message_shown = state.get('power_tile_message_shown', False)
@@ -12071,22 +12095,22 @@ def handle_turn_start_updates(state):
     if turn != previous_turn and not replay_mode and not game_over_state:
         if not is_solving_endgame:
             if practice_mode != "eight_letter" and not paused_for_power_tile and not paused_for_bingo_practice:
-                if gaddag_loading_status == 'loaded' and GADDAG_STRUCTURE_from_state:
+                # --- THIS IS THE CRITICAL CHECK ---
+                if gaddag_loading_status == 'loaded' and GADDAG_STRUCTURE_from_state is not None:
                     if racks and len(racks) > turn - 1 and racks[turn - 1] is not None:
-                        # generate_all_moves_gaddag determines is_first_play internally now.
-                        all_moves = generate_all_moves_gaddag(racks[turn - 1], tiles, board, blanks, \
-                                                              GADDAG_STRUCTURE_from_state.root, \
+                        all_moves = ai_engine.generate_all_moves_gaddag(racks[turn - 1], tiles, board, blanks, 
+                                                              GADDAG_STRUCTURE_from_state.root,
                                                               is_silent_batch_run_param=is_silent_run)
                         if all_moves is None:
                             all_moves = []
                     else:
                         all_moves = []
-                elif gaddag_loading_status == 'idle' or gaddag_loading_status == 'loading':
-                    all_moves = []
                 else: 
+                    # If GADDAG is not ready, ensure all_moves is empty.
+                    # The AI will see this empty list and pass its turn.
                     all_moves = []
 
-        if gaddag_loading_status == 'loaded' and GADDAG_STRUCTURE_from_state:
+        if gaddag_loading_status == 'loaded' and GADDAG_STRUCTURE_from_state is not None:
             if racks and len(racks) > turn - 1 and racks[turn - 1] is not None:
                 current_player_rack_for_luck_calc = racks[turn - 1]
                 state['current_turn_pool_quality_score'] = get_expected_single_draw_value(
@@ -12162,6 +12186,7 @@ def handle_ai_turn_trigger(state):
     showing_all_words = state['showing_all_words']
     letter_checks = state['letter_checks']
     current_power_tile = state['current_power_tile'] 
+    all_moves = state['all_moves'] # Get the pre-generated moves
 
     use_ai_simulation_for_turn = state.get('USE_AI_SIMULATION', False)
     use_endgame_solver_for_turn = state.get('USE_ENDGAME_SOLVER', False)
@@ -12182,77 +12207,51 @@ def handle_ai_turn_trigger(state):
        not human_played and \
        not is_solving_endgame:
 
-        if gaddag_loading_status == 'loading':
-            if not is_silent_run: 
-                print(f"AI {turn} waiting for GADDAG to load... Skipping turn execution.")
-            return state 
-        elif gaddag_loading_status == 'error' or GADDAG_STRUCTURE is None:
-            status_reason = "GADDAG failed to load" if gaddag_loading_status == 'error' else "GADDAG structure is None"
-            if not is_silent_run:
-                print(f"AI {turn} cannot play, {status_reason}. Passing.")
+        # The check for GADDAG status is now done in handle_turn_start_updates,
+        # which populates state['all_moves']. We just need to pass it.
+        ai_result = ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
+                            pass_count, exchange_count, consecutive_zero_point_turns, \
+                            player_names, dropdown_open, hinting, showing_all_words, letter_checks,\
+                            use_ai_simulation_for_turn, use_endgame_solver_for_turn, is_ai_list_from_state, \
+                            practice_mode_from_state, \
+                            sim_cands, sim_opp_sims, sim_post_sims, # NEW PARAMS
+                            all_moves, # Pass the pre-generated moves
+                            is_silent_batch_run_param=is_silent_run) 
+        
+        if len(ai_result) == 14: 
+            (turn_after_ai, first_play_after_ai, pass_count_after_ai, \
+             exchange_count_after_ai, consecutive_zero_after_ai, returned_moves_from_ai,
+             dropdown_open_after_ai, hinting_after_ai, showing_all_words_after_ai, \
+             paused_power_after_ai, current_power_tile_after_ai, \
+             paused_bingo_after_ai, _, returned_move_data) = ai_result 
+
+            if returned_move_data:
+                state['move_history'].append(returned_move_data)
+                state['current_replay_turn'] = len(state['move_history'])
+
+            state['first_play'] = first_play_after_ai
+            state['pass_count'] = pass_count_after_ai
+            state['exchange_count'] = exchange_count_after_ai
+            state['consecutive_zero_point_turns'] = consecutive_zero_after_ai
+            state['dropdown_open'] = dropdown_open_after_ai
+            state['hinting'] = hinting_after_ai
+            state['showing_all_words'] = showing_all_words_after_ai
+            state['paused_for_power_tile'] = paused_power_after_ai
+            state['current_power_tile'] = current_power_tile_after_ai
+            state['paused_for_bingo_practice'] = paused_bingo_after_ai
+
+            if returned_move_data and returned_move_data.get('move_type') == 'place':
+                positions_for_highlight = returned_move_data.get('newly_placed', returned_move_data.get('positions', []))
+                state['last_played_highlight_coords'] = set((pos[0], pos[1]) for pos in positions_for_highlight)
+            elif turn_after_ai != turn : 
+                state['last_played_highlight_coords'] = set()
             
-            move_rack = racks[turn-1][:] if racks and len(racks) > turn-1 and racks[turn-1] is not None else [] 
-            state['consecutive_zero_point_turns'] += 1
-            state['pass_count'] += 1
-            state['exchange_count'] = 0
-            pass_move_data = {
-                'player': turn, 'move_type': 'pass', 'rack': move_rack,
-                'score': 0, 'word': '', 'coord': '', 'blanks': set(),
-                'positions': [], 'drawn': [], 'is_bingo': False,
-                'word_with_blanks': '', 'turn_duration': 0.0,
-                'total_expected_draw_value': 0.0, 
-                'luck_factor': 0.0,
-                'tiles_played_from_rack': []
-            }
-            state['move_history'].append(pass_move_data)
-            state['current_replay_turn'] = len(state['move_history'])
-            state['turn'] = 3 - turn
-            state['last_played_highlight_coords'] = set()
-            return state
-        elif gaddag_loading_status == 'loaded':
-            # MODIFIED: Pass configured sim params to ai_turn
-            ai_result = ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
-                                pass_count, exchange_count, consecutive_zero_point_turns, \
-                                player_names, dropdown_open, hinting, showing_all_words, letter_checks,\
-                                use_ai_simulation_for_turn, use_endgame_solver_for_turn, is_ai_list_from_state, \
-                                practice_mode_from_state, \
-                                sim_cands, sim_opp_sims, sim_post_sims, # NEW PARAMS
-                                is_silent_batch_run_param=is_silent_run) 
-            
-            if len(ai_result) == 14: 
-                (turn_after_ai, first_play_after_ai, pass_count_after_ai, \
-                 exchange_count_after_ai, consecutive_zero_after_ai, returned_moves_from_ai,
-                 dropdown_open_after_ai, hinting_after_ai, showing_all_words_after_ai, \
-                 paused_power_after_ai, current_power_tile_after_ai, \
-                 paused_bingo_after_ai, _, returned_move_data) = ai_result 
+            state['turn'] = turn_after_ai
 
-                if returned_move_data:
-                    state['move_history'].append(returned_move_data)
-                    state['current_replay_turn'] = len(state['move_history'])
-
-                state['first_play'] = first_play_after_ai
-                state['pass_count'] = pass_count_after_ai
-                state['exchange_count'] = exchange_count_after_ai
-                state['consecutive_zero_point_turns'] = consecutive_zero_after_ai
-                state['dropdown_open'] = dropdown_open_after_ai
-                state['hinting'] = hinting_after_ai
-                state['showing_all_words'] = showing_all_words_after_ai
-                state['paused_for_power_tile'] = paused_power_after_ai
-                state['current_power_tile'] = current_power_tile_after_ai
-                state['paused_for_bingo_practice'] = paused_bingo_after_ai
-
-                if returned_move_data and returned_move_data.get('move_type') == 'place':
-                    positions_for_highlight = returned_move_data.get('newly_placed', returned_move_data.get('positions', []))
-                    state['last_played_highlight_coords'] = set((pos[0], pos[1]) for pos in positions_for_highlight)
-                elif turn_after_ai != turn : 
-                    state['last_played_highlight_coords'] = set()
-                
-                state['turn'] = turn_after_ai
-
-                if paused_power_after_ai or paused_bingo_after_ai:
-                    state['all_moves'] = returned_moves_from_ai
-            else:
-                print(f"Error: AI turn returned unexpected number of values: {len(ai_result)}")
+            if paused_power_after_ai or paused_bingo_after_ai:
+                state['all_moves'] = returned_moves_from_ai
+        else:
+            print(f"Error: AI turn returned unexpected number of values: {len(ai_result)}")
     return state
 
 
@@ -12287,8 +12286,8 @@ def handle_deferred_practice_init(state):
         if not is_silent_run: # Conditional print
             print("--- Main Loop: GADDAG loaded, generating 8-letter practice moves... ---")
         if GADDAG_STRUCTURE is not None and racks and len(racks) > 0 and racks[0] is not None:
-             generated_moves = generate_all_moves_gaddag(racks[0], tiles, board, blanks, \
-                                                     GADDAG_STRUCTURE.root, \
+             generated_moves = ai_engine.generate_all_moves_gaddag(racks[0], tiles, board, blanks, \
+                                                 GADDAG_STRUCTURE.root, \
                                                      is_silent_batch_run_param=is_silent_run)
              if generated_moves:
                  state['practice_target_moves'] = generated_moves
@@ -12761,6 +12760,7 @@ def reset_per_game_variables():
         'all_words_dialog_y': (WINDOW_HEIGHT - ALL_WORDS_DIALOG_HEIGHT) // 2,
         'all_words_dialog_dragging': False,
         'all_words_dialog_drag_offset': (0,0),
+        'rack_visibility': [False, False], # Default to hidden
         'replay_start_rect': None,
         'replay_prev_rect': None,
         'replay_next_rect': None,
@@ -12976,7 +12976,7 @@ def execute_game_session(is_initialized_from_outer_loop_param):
     global DEV_CPROFILE_ENABLED_SESSION, DEV_VISUALIZE_BATCH_ENABLED_SESSION
     global ai_sim_num_candidates_global, ai_sim_num_opponent_sims_global, ai_sim_num_post_sim_candidates_global
     global last_scoreboard_click_time, last_scoreboard_click_idx
-    global insights_data_for_replay
+    global insights_data_for_replay, rack_visibility
 
     # These were nonlocal, now local to this function and their final state returned
     _module_level_batch_stop_requested_internal = False
@@ -13291,9 +13291,21 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
     global last_scoreboard_click_time, last_scoreboard_click_idx
     global bbb_7l_max_prob_global, bbb_8l_max_prob_global
     global analyzer_data_for_replay
-    global insights_data_for_replay
+    global insights_data_for_replay, rack_visibility
+
+    # This flag will be set to True only if a batch run was just completed.
+    # This is the key to controlling when to print stats and exit.
+    just_finished_a_batch = False
 
     if not is_initialized_from_outer_loop_param:
+        # --- NEW SYNCHRONOUS LOADING LOGIC ---
+        # If this is the very first time main is called, handle loading.
+        if gaddag_loading_status == 'idle':
+            print("--- Main: Loading AI data synchronously... ---")
+            _load_gaddag_background() # Call directly, not in a thread
+            _load_word_definitions_background() # Call directly
+            print("--- Main: All data loaded. ---")
+        
         selected_mode_result, return_data_mode_sel = mode_selection_screen()
         init_result = initialize_game(selected_mode_result, return_data_mode_sel, False) # False for main_called_flag
         if init_result is None:
@@ -13310,57 +13322,40 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
          letter_checks, turn, pass_count, exchange_count, consecutive_zero_point_turns,
          last_played_highlight_coords, is_solving_endgame, gaddag_loading_status,
          sgs_initial_bag, sgs_loaded_game_data, active_practice_state_data,
-         game_over_state,
+         game_over_at_init,
          ai_sim_num_candidates_global,
          ai_sim_num_opponent_sims_global,
          ai_sim_num_post_sim_candidates_global,
          last_scoreboard_click_time,
          last_scoreboard_click_idx,
          bbb_7l_max_prob_global,
-         bbb_8l_max_prob_global
+         bbb_8l_max_prob_global,
+         rack_visibility
          ) = init_result
 
-        # --- MODIFIED: Populate dummy analyzer data if starting replay ---
-        # Populate the global analyzer_data_for_replay here if in replay mode
         if replay_mode:
             analyzer_data_for_replay = populate_dummy_analyzer_data(move_history)
-            # Diagnostic print
-            if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
-                print(f"--- main(): Populated dummy analyzer data. Turns in history: {len(move_history)}, Turns in analyzer_data: {len(analyzer_data_for_replay)}. ---")
-                if analyzer_data_for_replay and len(analyzer_data_for_replay) > 0:
-                    print(f"    Sample dummy data for first turn (if exists): {analyzer_data_for_replay[0][:2]}") # Print first 2 dummy moves for first turn
         else:
-            analyzer_data_for_replay = [] # Ensure it's empty for non-replay modes
-        # --- END MODIFIED ---
-
+            analyzer_data_for_replay = []
 
         if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
             print("--- main(): 'if not is_initialized_from_outer_loop_param' block completed (globals set by initialize_game) ---")
     else:
         if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
             print("--- main(): 'is_initialized_from_outer_loop_param' is True (Play Again) ---")
-        # --- MODIFIED: Populate dummy analyzer data if starting replay after "Play Again" ---
-        # Repopulate if it's a loaded game replay being played again
         if replay_mode:
             analyzer_data_for_replay = populate_dummy_analyzer_data(move_history)
-            # Diagnostic print
-            if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
-                print(f"--- main() (Play Again path): Populated dummy analyzer data. Turns in history: {len(move_history)}, Turns in analyzer_data: {len(analyzer_data_for_replay)}. ---")
-                if analyzer_data_for_replay and len(analyzer_data_for_replay) > 0:
-                    print(f"    Sample dummy data for first turn (if exists): {analyzer_data_for_replay[0][:2]}")
         else:
-            analyzer_data_for_replay = [] # Ensure it's empty for non-replay modes
-        # --- END MODIFIED ---
+            analyzer_data_for_replay = []
 
-
+    # --- NEW, SIMPLIFIED PROFILING LOGIC ---
     session_flags = {}
-
-    if DEV_CPROFILE_ENABLED_SESSION and not is_initialized_from_outer_loop_param :
+    if DEV_CPROFILE_ENABLED_SESSION:
         if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
             print("--- Profiling game session ---")
         import cProfile, pstats, io
         profiler = cProfile.Profile()
-
+        
         temp_namespace = {}
         profiler.runctx('temp_namespace["result"] = execute_game_session(is_initialized_from_outer_loop_param)',
                         globals(),
@@ -13369,30 +13364,36 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
                          'temp_namespace': temp_namespace})
         session_flags = temp_namespace.get("result", {})
 
-        if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
-            print("\n--- cProfile Stats ---")
+        # If the session we just profiled was a batch run, print stats and exit.
+        if is_batch_running:
+            print("\n--- cProfile Stats (Batch Run) ---")
             stats_obj = pstats.Stats(profiler, stream=sys.stdout).sort_stats('cumulative')
             stats_obj.print_stats(30)
+            # Set flag to signal a clean exit after this.
+            just_finished_a_batch = True
     else:
+        # If not profiling, just run the session normally.
         session_flags = execute_game_session(is_initialized_from_outer_loop_param)
 
+    # If we just finished a profiled batch run, we need to exit the program.
+    if just_finished_a_batch:
+        return False, False # This tells the main while loop to terminate.
 
     _module_level_batch_stop_requested_main = session_flags.get('batch_stop_requested', False)
     _local_start_new_game_same_mode_main = session_flags.get('start_new_game_same_mode', False)
     _return_to_mode_selection_main = session_flags.get('return_to_mode_selection', False)
 
-
     if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
         print(f"--- main(): execute_game_session returned: stop_batch={_module_level_batch_stop_requested_main}, play_again={_local_start_new_game_same_mode_main}, mode_select={_return_to_mode_selection_main} ---")
 
     if _return_to_mode_selection_main:
-        analyzer_data_for_replay = [] # Clear analyzer data when returning to mode selection
+        analyzer_data_for_replay = []
         return True, False
     elif _local_start_new_game_same_mode_main:
-        analyzer_data_for_replay = [] # Clear analyzer data for a new game
+        analyzer_data_for_replay = []
         return True, True
     else:
-        analyzer_data_for_replay = [] # Clear analyzer data on quit
+        analyzer_data_for_replay = []
         return False, False
 
 
@@ -13410,9 +13411,6 @@ if __name__ == "__main__":
 
     #random.seed(12345)
 
-
-
-    
     main_called_for_initial_mode_selection = False
     running_program = True
 
