@@ -1,6 +1,6 @@
 
 #python
-#Scrabble AA
+#Scrabble AB
 #Cython - Cython Optimize
 #09JUN25
 
@@ -4190,7 +4190,7 @@ def is_valid_play(word_positions, tiles_after_play, is_first_play_param, initial
     
 
 
-
+'''
 def get_anchor_points(tiles, is_first_play):
     """Get anchor points (empty squares adjacent to existing tiles) for valid moves."""
     anchors = set()
@@ -4207,7 +4207,7 @@ def get_anchor_points(tiles, is_first_play):
                  if is_anchor: anchors.add((r, c))
     if not has_tiles and not is_first_play: anchors.add(CENTER_SQUARE) # Fallback if board empty but not first play
     return anchors
-
+'''
 
 
 
@@ -4694,7 +4694,6 @@ def generate_turn_insights_data(full_sgs_game_data, is_silent_run_param=False):
             current_board_tiles, # Board state *before* this historical move
             temp_multiplier_board_layout,
             current_blanks_on_board, # Blanks state *before* this historical move
-            GADDAG_STRUCTURE.root,
             is_silent_batch_run_param=True # Internal call, already controlled by outer param
         )
         if possible_moves_for_turn is None:
@@ -6817,7 +6816,7 @@ def draw_simulation_config_dialog(input_texts, active_input_index):
 
 
 
-def run_ai_simulation(initial_ai_moves_list, ai_rack, opponent_rack_len, tiles, blanks, board, bag, gaddag_root, is_first_play, \
+def run_ai_simulation(initial_ai_moves_list, ai_rack, opponent_rack_len, tiles, blanks, board, bag, is_first_play, \
                       num_ai_candidates=DEFAULT_AI_CANDIDATES, \
                       num_opponent_sims=DEFAULT_OPPONENT_SIMULATIONS, \
                       num_post_sim_candidates=DEFAULT_POST_SIM_CANDIDATES, \
@@ -6828,25 +6827,6 @@ def run_ai_simulation(initial_ai_moves_list, ai_rack, opponent_rack_len, tiles, 
     then evaluates the top K results using the LEAVE_LOOKUP_TABLE (float values).
     MODIFIED: Accepts initial_ai_moves_list to avoid redundant generation.
     Print statements are now conditional.
-
-    Args:
-        initial_ai_moves_list (list): Pre-generated list of all possible moves for the AI.
-        ai_rack (list): The AI's current rack.
-        opponent_rack_len (int): The number of tiles on the opponent's rack.
-        tiles (list[list[str]]): Current board state.
-        blanks (set): Current blanks on board.
-        board (list[list[tuple]]): Board layout with multipliers.
-        bag (list): Current tile bag.
-        gaddag_root (GaddagNode): The root of the GADDAG structure.
-        is_first_play (bool): Whether it's the first play of the game.
-        num_ai_candidates (int): How many top raw-scoring AI moves to consider initially.
-        num_opponent_sims (int): How many opponent racks to simulate for each AI move.
-        num_post_sim_candidates (int): How many moves to evaluate with leave after simulation.
-        is_silent_batch_run_param (bool): If True, suppress most console output.
-
-    Returns:
-        list: A list of dictionaries, each containing {'move': move_dict, 'final_score': float},
-              sorted by 'final_score' descending. Returns empty list if no moves or simulation fails.
     """
     import time 
     if not is_silent_batch_run_param:
@@ -6936,7 +6916,7 @@ def run_ai_simulation(initial_ai_moves_list, ai_rack, opponent_rack_len, tiles, 
             sim_opponent_rack = opponent_available_pool_for_this_sim[:actual_opponent_rack_len]
             
             opponent_moves = ai_engine.generate_all_moves_gaddag(\
-                        sim_opponent_rack, sim_tiles_after_ai, board, sim_blanks_after_ai, gaddag_root,\
+                        sim_opponent_rack, sim_tiles_after_ai, board, sim_blanks_after_ai,\
                         is_silent_batch_run_param=is_silent_batch_run_param\
             )
             best_opponent_score = 0
@@ -8238,7 +8218,6 @@ def _handle_mouse_down_suggest_button(event, state, drawn_rects):
             
             all_moves_generated_ui = ai_engine.generate_all_moves_gaddag(
                 current_player_rack_ui, state['tiles'], state['board'], state['blanks'],
-                GADDAG_STRUCTURE.root, 
                 is_silent_batch_run_param=is_silent_run_local
             )
             if all_moves_generated_ui is None:
@@ -9285,9 +9264,9 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
                         sim_is_first_play = sum(1 for row in sim_tiles for t in row if t) == 0
                         
                         simulation_results = run_ai_simulation(
-                            ai_engine.generate_all_moves_gaddag(sim_ai_rack, sim_tiles, state['board'], sim_blanks, GADDAG_STRUCTURE.root, is_silent_batch_run_param=True),
+                            ai_engine.generate_all_moves_gaddag(sim_ai_rack, sim_tiles, state['board'], sim_blanks, is_silent_batch_run_param=True),
                             sim_ai_rack, sim_opponent_rack_len, sim_tiles, sim_blanks, state['board'], sim_bag,
-                            GADDAG_STRUCTURE.root, sim_is_first_play,
+                            sim_is_first_play,
                             num_ai_candidates=num_ai_cand, num_opponent_sims=num_opp_sim, num_post_sim_candidates=num_post_sim,
                             is_silent_batch_run_param=is_silent_run_local
                         )
@@ -9300,7 +9279,6 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
                         state = clear_current_preview(state)
                         current_player_all_moves = ai_engine.generate_all_moves_gaddag(
                             current_player_rack, state['tiles'], state['board'], state['blanks'],
-                            GADDAG_STRUCTURE.root,
                             is_silent_batch_run_param=is_silent_run_local
                         )
                         if current_player_all_moves is None:
@@ -9312,7 +9290,7 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
                             current_player_all_moves,
                             current_player_rack, opponent_rack_len,
                             state['tiles'], state['blanks'], state['board'], state['bag'],
-                            GADDAG_STRUCTURE.root, state['first_play'],
+                            state['first_play'],
                             num_ai_candidates=num_ai_cand, num_opponent_sims=num_opp_sim, num_post_sim_candidates=num_post_sim,
                             is_silent_batch_run_param=is_silent_run_local
                         )
@@ -9603,7 +9581,6 @@ def _handle_mouse_down_specify_rack_dialog(event, state, drawn_rects):
                             state['all_moves'] = ai_engine.generate_all_moves_gaddag(
                             state['racks'][current_player_idx_for_spec],
                                 state['tiles'], state['board'], state['blanks'],
-                                state['GADDAG_STRUCTURE'].root,
                                 is_silent_batch_run_param=is_silent_run_local
                             )
                             if state['all_moves'] is None:
@@ -12290,7 +12267,6 @@ def handle_ai_turn_trigger(state):
             if racks and len(racks) > turn - 1 and racks[turn - 1] is not None:
                 all_moves_for_ai = ai_engine.generate_all_moves_gaddag(
                     racks[turn - 1], tiles, board, blanks,
-                    GADDAG_STRUCTURE.root,
                     is_silent_batch_run_param=is_silent_run
                 )
                 if all_moves_for_ai is None:
@@ -13311,7 +13287,7 @@ def populate_dummy_analyzer_data(move_history_list):
 
 
 def main(is_initialized_from_outer_loop_param): # Renamed for clarity
-    # MODULE-LEVEL GLOBALS that main sets up via initialize_game or uses for control
+    # MODULE-LEVEL GLOBALS that this function and its helpers will use/modify
     global GADDAG_STRUCTURE, gaddag_loading_status, gaddag_load_thread
     global DEV_CPROFILE_ENABLED_SESSION, DEV_VISUALIZE_BATCH_ENABLED_SESSION
     global ai_sim_num_candidates_global, ai_sim_num_opponent_sims_global, ai_sim_num_post_sim_candidates_global
@@ -13335,12 +13311,40 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
 
     if not is_initialized_from_outer_loop_param:
         # --- NEW SYNCHRONOUS LOADING LOGIC ---
-        # If this is the very first time main is called, handle loading.
         if gaddag_loading_status == 'idle':
             print("--- Main: Loading AI data synchronously... ---")
             _load_gaddag_background() # Call directly, not in a thread
             _load_word_definitions_background() # Call directly
             print("--- Main: All data loaded. ---")
+        
+        # --- NEW: Initialize the Cython AI Engine with constants ---
+        # This is done once to pass all necessary data to the Cython module,
+        # avoiding slow Python-to-C calls during move generation.
+        if gaddag_loading_status == 'loaded' and GADDAG_STRUCTURE is not None:
+            print("--- Initializing Cython AI Engine with game constants... ---")
+            ai_engine.init_ai_engine(
+                grid_size=GRID_SIZE,
+                center_square=CENTER_SQUARE,
+                dawg=DAWG,
+                gaddag_root=GADDAG_STRUCTURE.root,
+                tile_distribution=TILE_DISTRIBUTION,
+                gaddag_separator=Gaddag.SEPARATOR,
+                vc_valid=VC_VALID,
+                vc_invalid_words=VC_INVALID_WORDS,
+                vc_invalid_structure_placement=VC_INVALID_STRUCTURE_PLACEMENT,
+                vc_invalid_structure_no_words=VC_INVALID_STRUCTURE_NO_WORDS,
+                vc_invalid_structure_not_center=VC_INVALID_STRUCTURE_NOT_CENTER,
+                vc_invalid_structure_not_connected=VC_INVALID_STRUCTURE_NOT_CONNECTED,
+                vc_invalid_structure_empty_play=VC_INVALID_STRUCTURE_EMPTY_PLAY,
+                light_blue=LIGHT_BLUE,
+                blue=BLUE,
+                pink=PINK,
+                red=RED
+            )
+            print("--- Cython AI Engine Initialized. ---")
+        else:
+            print("--- WARNING: GADDAG not loaded. AI Engine initialization skipped. AI will not function. ---")
+        # --- END NEW ---
         
         selected_mode_result, return_data_mode_sel = mode_selection_screen()
         init_result = initialize_game(selected_mode_result, return_data_mode_sel, False) # False for main_called_flag
@@ -13444,6 +13448,11 @@ if __name__ == "__main__":
     ai_sim_num_post_sim_candidates_global = DEFAULT_POST_SIM_CANDIDATES
     bbb_7l_max_prob_global = 1000 # Default integer value
     bbb_8l_max_prob_global = 1000 # Default integer value
+
+
+    #random.seed(12345)
+
+    main_called_for_initial_mode_selection = False
 
     #random.seed(12345)
 
