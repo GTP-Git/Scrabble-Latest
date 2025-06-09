@@ -1,8 +1,6 @@
 To-Do List
 
--- Add Simulate (Sim) button in Insights window
-
--- Lookup button should be available in Replay Mode
+-- For BatchStats, see if playing <=3 unique letters on the opening move is more/less better than playing >3 unique letters. The theory is that less unique letters allows for less 8-letter bingo opportunities for your opponent.
 
 -- Allow what-if scenarios, where the main_branch_game_state is saved, but players can make different plays, choose different racks, explore endgames, etc., Have a reset button that backs the main_branch_game_state to continue play. 
 
@@ -215,3 +213,7 @@ ________________________________________________
 -- In Simulation return results, both in the console and in the dialog, show board coordinates.
 
 -- MAJOR CHANGE: reduce move list window by 1/2 vertically. Below it put arrow controls like we have for replay mode. Under that window, when in Replay Mode, show 5-15 best moves, like on Woogles, showing score, equity, leave eval, simulate button, the whole shebang.
+
+-- Add Simulate (Sim) button in Insights window
+
+-- Lookup button should be available in Replay Mode
