@@ -1,5 +1,7 @@
 To-Do List
 
+-- For my BatchStats program, see if playing short on the first turn (<= 3 tiles) wins more/less than playing long. The theory is that playing short gives your opponent less tiles to bingo through.
+
 -- Add Simulate (Sim) button in Insights window
 
 -- Lookup button should be available in Replay Mode
