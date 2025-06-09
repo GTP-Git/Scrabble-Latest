@@ -2,6 +2,7 @@
 #python
 #Scrabble X
 #Cython - def generate_all_moves_gaddag
+#Various bug fixes
 #08JUN25
 
 
@@ -7008,7 +7009,7 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
                 print("Warning (ai_turn): 8-letter-list.txt not found for BBB.")
 
 
-    start_turn_time = time.time()
+    start_turn_time = time.perf_counter()
     player_idx = turn - 1
     opponent_idx = 1 - player_idx
     current_rack = racks[player_idx][:] if 0 <= player_idx < len(racks) and racks[player_idx] is not None else []
@@ -7150,7 +7151,7 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
             next_turn_val = 3 - turn
             last_played_highlight_coords = set()
 
-        end_turn_time = time.time()
+        end_turn_time = time.perf_counter()
         turn_duration = end_turn_time - start_turn_time
         if not is_silent_batch_run_param:
             print(f"AI turn took {turn_duration:.2f} seconds (Endgame Solver).")
@@ -7196,7 +7197,7 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
             paused_for_power_tile_local_flag = True
             if not is_silent_batch_run_param:
                 print(f"AI turn PAUSING for power tile practice. Target: {current_power_tile_local_val}")
-            end_turn_time = time.time()
+            end_turn_time = time.perf_counter()
             turn_duration = end_turn_time - start_turn_time
             if not is_silent_batch_run_param:
                 print(f"AI turn took {turn_duration:.2f} seconds (paused for power tile).")
@@ -11439,7 +11440,7 @@ def handle_mouse_down_event(event, state, drawn_rects):
 
 
 
-def draw_all_words_dialog(moves, selected_index, current_scroll_offset, dialog_x_param, dialog_y_param, is_play_disabled=False):
+def draw_all_words_dialog(moves, selected_index, current_scroll_offset, dialog_x_param, dialog_y_param, is_play_disabled=False, is_loaded_or_replay_mode=False):
     """
     Draw the dialog showing all valid moves with scrolling, at specified coordinates.
     Uses passed dialog_x_param and dialog_y_param for positioning.
@@ -11494,7 +11495,7 @@ def draw_all_words_dialog(moves, selected_index, current_scroll_offset, dialog_x
         word_display = move.get('word_with_blanks', word.upper())
         coord = get_coord(start_pos, direction) 
         leave_str = ''.join(sorted(l if l != ' ' else '?' for l in leave))
-        text_str_to_render = f"{i+1}. {word_display} ({score} pts) at {coord} ({leave_str})"
+        text_str_to_render = f"{i+1}. {word_display} ({int(score)} pts) at {coord} ({leave_str})"
         text_surface_item = ui_font.render(text_str_to_render, True, BLACK)
 
         max_text_width = rect_on_item_surface.width - 10 
@@ -11731,8 +11732,12 @@ def draw_game_screen(screen, state):
     returned_scroll_offset = draw_scoreboard(screen, history_to_draw_func, state['scroll_offset'], scores_to_display_func, is_ai, player_names, final_scores=final_scores_state, game_over_state=(game_over_state or is_final_turn_in_replay_func))
     state['scroll_offset'] = returned_scroll_offset
 
-    # --- MODIFICATION START: Simplified and Corrected UI Drawing Logic ---
+    # --- MODIFICATION START: Refined UI Drawing Logic for Suggest/Simulate/Lookup ---
     is_human_turn_or_paused_practice = (0 <= turn-1 < len(is_ai)) and (not is_ai[turn-1] or paused_for_power_tile or paused_for_bingo_practice)
+
+    # Determine which buttons to show based on game state
+    show_suggest_button = is_human_turn_or_paused_practice and not state.get('is_loaded_game', False) and not state.get('replay_mode', False)
+    show_simulate_lookup_buttons = is_human_turn_or_paused_practice or state.get('replay_mode', False) or state.get('is_loaded_game', False)
 
     suggest_rect_base = None
     simulate_button_rect = None
@@ -11740,10 +11745,14 @@ def draw_game_screen(screen, state):
     word_lookup_button_in_game_rect = None
     
     if not is_batch_running_local_draw:
-        # Draw analysis buttons if in a live human turn OR in replay mode
-        if is_human_turn_or_paused_practice or replay_mode:
-            suggest_rect_base = draw_suggest_button()
-            
+        # Define the base position for the top-most button in this stack
+        top_button_x = 10 + OPTIONS_WIDTH + BUTTON_GAP
+        top_button_y = OPTIONS_Y
+
+        if show_suggest_button:
+            # Draw Suggest, then Simulate and Lookup below it
+            suggest_rect_base = draw_suggest_button() # This function uses the constants to draw at the right spot
+
             simulate_button_rect = pygame.Rect(suggest_rect_base.x, suggest_rect_base.bottom + BUTTON_GAP, OPTIONS_WIDTH, BUTTON_HEIGHT)
             hover_sim = simulate_button_rect.collidepoint(pygame.mouse.get_pos()); color_sim = BUTTON_HOVER if hover_sim else BUTTON_COLOR
             pygame.draw.rect(screen, color_sim, simulate_button_rect)
@@ -11751,7 +11760,21 @@ def draw_game_screen(screen, state):
             
             word_lookup_button_in_game_rect = draw_word_lookup_button_in_game(screen, suggest_rect_base)
 
-        # Draw Preview checkbox only during a live human turn
+        elif show_simulate_lookup_buttons:
+            # Draw Simulate and Lookup, but shifted up to the top position
+            simulate_button_rect = pygame.Rect(top_button_x, top_button_y, OPTIONS_WIDTH, BUTTON_HEIGHT)
+            hover_sim = simulate_button_rect.collidepoint(pygame.mouse.get_pos()); color_sim = BUTTON_HOVER if hover_sim else BUTTON_COLOR
+            pygame.draw.rect(screen, color_sim, simulate_button_rect)
+            simulate_text = button_font.render("Simulate", True, BLACK); simulate_text_rect = simulate_text.get_rect(center=simulate_button_rect.center); screen.blit(simulate_text, simulate_text_rect)
+
+            # The lookup button's position is now based on the simulate button's position
+            lookup_button_rect = pygame.Rect(simulate_button_rect.x, simulate_button_rect.bottom + BUTTON_GAP, OPTIONS_WIDTH, BUTTON_HEIGHT)
+            hover_lookup = lookup_button_rect.collidepoint(pygame.mouse.get_pos()); color_lookup = BUTTON_HOVER if hover_lookup else BUTTON_COLOR
+            pygame.draw.rect(screen, color_lookup, lookup_button_rect)
+            lookup_text = button_font.render("Lookup", True, BLACK); lookup_text_rect = lookup_text.get_rect(center=lookup_button_rect.center); screen.blit(lookup_text, lookup_text_rect)
+            word_lookup_button_in_game_rect = lookup_button_rect
+
+        # Draw Preview checkbox only during a live human turn (this logic is independent of the above)
         if is_human_turn_or_paused_practice:
             relevant_rand_rect = p1_rand_rect if turn == 1 else p2_rand_rect
             if relevant_rand_rect:
@@ -11769,6 +11792,7 @@ def draw_game_screen(screen, state):
     drawn_rects['simulate_button_rect'] = simulate_button_rect
     drawn_rects['preview_checkbox_rect'] = preview_checkbox_rect
     drawn_rects['word_lookup_button_in_game_rect'] = word_lookup_button_in_game_rect
+    # --- MODIFICATION END ---
 
     # Draw replay controls and insights window ONLY if in replay mode
     if replay_mode:
@@ -11796,7 +11820,6 @@ def draw_game_screen(screen, state):
         insights_checkbox_rect_val, insights_item_rects_val = draw_insights_window(screen, state) 
         drawn_rects['analyzer_checkbox_rect'] = insights_checkbox_rect_val 
         drawn_rects['insights_item_rects'] = insights_item_rects_val
-    # --- MODIFICATION END ---
 
     if selected_square and not typing: draw_arrow(selected_square[0], selected_square[1], selected_square[2])
     elif typing:
@@ -11852,7 +11875,7 @@ def draw_game_screen(screen, state):
     elif hinting:
         is_simulation_result = bool(hint_moves and isinstance(hint_moves[0], dict) and 'final_score' in hint_moves[0])
         is_play_disabled_in_replay_sim = replay_mode and is_simulation_result
-        is_loaded_or_replay = state.get('is_loaded_game', False) or state.get('replay_mode', False)
+        is_loaded_or_replay = state.get('replay_mode', False)
         hint_rects_draw, play_button_rect_local_hint, ok_button_rect_local_hint, all_words_button_rect_hint = draw_hint_dialog(screen, hint_moves, selected_hint_index, hint_dialog_x, hint_dialog_y, is_simulation_result=is_simulation_result, is_play_disabled=is_play_disabled_in_replay_sim, is_loaded_or_replay_mode=is_loaded_or_replay)
         drawn_rects['hint_rects'] = hint_rects_draw; drawn_rects['play_button_rect'] = play_button_rect_local_hint; drawn_rects['ok_button_rect'] = ok_button_rect_local_hint; drawn_rects['all_words_button_rect'] = all_words_button_rect_hint
     elif showing_all_words:
@@ -11864,8 +11887,9 @@ def draw_game_screen(screen, state):
         # Determine if the play button should be disabled (i.e., in replay mode after a simulation)
         is_simulation_result_aw = bool(hint_moves and isinstance(hint_moves[0], dict) and 'final_score' in hint_moves[0])
         is_play_disabled_in_all_words = replay_mode and is_simulation_result_aw
+        is_loaded_or_replay = state.get('replay_mode', False)
 
-        all_words_rects_draw, all_words_play_rect_draw, all_words_ok_rect_draw = draw_all_words_dialog(moves_for_all, selected_hint_index, all_words_scroll_offset, all_words_dialog_x, all_words_dialog_y, is_play_disabled=is_play_disabled_in_all_words)
+        all_words_rects_draw, all_words_play_rect_draw, all_words_ok_rect_draw = draw_all_words_dialog(moves_for_all, selected_hint_index, all_words_scroll_offset, all_words_dialog_x, all_words_dialog_y, is_play_disabled=is_play_disabled_in_all_words, is_loaded_or_replay_mode=is_loaded_or_replay)
         drawn_rects['all_words_rects'] = all_words_rects_draw; drawn_rects['all_words_play_rect'] = all_words_play_rect_draw; drawn_rects['all_words_ok_rect'] = all_words_ok_rect_draw
     elif game_over_state and not is_batch_running_local_draw:
         if final_scores_state is not None:
@@ -12770,30 +12794,10 @@ def reset_per_game_variables():
         'analyzer_scroll_offset': 0,
         'analyzer_selected_move_index': None, # Index of the selected move within the current turn's analysis list
         'analyzer_window_rect_store': None, # To store the calculated rect of the analyzer window
-        'analyzer_checkbox_rect_store': None # To store the rect of the "Show Analysis" checkbox
+        'analyzer_checkbox_rect_store': None, # To store the rect of the "Show Analysis" checkbox
+        'last_turn_end_time': time.perf_counter() # Initialize with current high-res time
     }
     return reset_values
-
-
-
-def clear_current_preview(state):
-    """
-    Clears any active move preview from the board and resets preview state variables.
-    """
-    if state.get('previewed_move_details') and state.get('board_state_before_preview') is not None:
-        # print("DEBUG: Clearing preview.")
-        # Restore board tiles
-        state['tiles'] = copy.deepcopy(state['board_state_before_preview'])
-        # Restore blanks state
-        if state.get('blanks_state_before_preview') is not None:
-            state['blanks'] = state['blanks_state_before_preview'].copy()
-        else: # Should not happen if board_state_before_preview is set
-            state['blanks'] = set() 
-
-        state['previewed_move_details'] = []
-        state['board_state_before_preview'] = None
-        state['blanks_state_before_preview'] = None
-    return state
 
 
 
