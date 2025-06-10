@@ -2,7 +2,7 @@
 #python
 #Scrabble AB
 #Cython - Cython Optimize
-#09JUN25
+#10JUN25
 
 
 
@@ -1415,7 +1415,7 @@ def create_standard_bag():
 
 
 
-
+'''
 # --- Trie/DAWG Setup ---
 class TrieNode: # Keeping simple Trie for now, can replace with minimized DAWG later
     def __init__(self):
@@ -1442,9 +1442,12 @@ class Dawg: # Renaming our existing Trie to Dawg for conceptual clarity
                 return False
             node = node.children[char]
         return node.is_end
+'''
+
+
 
 # Load the DAWG with words from "All Words 2023.txt"
-DAWG = Dawg()
+DAWG = ai_engine.Dawg() # Use the Cythonized Dawg class
 try:
     # Ensure the path is correct or adjust as needed
     with open("All Words 2023.txt", "r") as f:
@@ -3325,7 +3328,7 @@ def calculate_avg_leave(move_history):
             rack_leave_after_play = move.get('leave') 
             if rack_leave_after_play is not None: 
                 place_moves_count[player] += 1
-                leave_score = evaluate_leave(rack_leave_after_play)
+                leave_score = ai_engine.evaluate_leave(rack_leave_after_play)
                 
                 # TEMPORARY DEBUG PRINT
                 #if player == 1: # Or check for specific player if needed
@@ -3414,29 +3417,7 @@ def draw_bingo_avg_row(screen, dialog_x, y_pos, bingo_avg_p1, bingo_avg_p2, bing
     screen.blit(p2_bingo_avg_text, (dialog_x + STATS_P2_VAL_X_OFFSET, y_pos))
 
 
-def calculate_blanks_per_player(move_history):
-    """Calculate the number of blanks played by each player."""
-    blanks_p1 = 0; blanks_p2 = 0
-    for move in move_history:
-        if move['move_type'] == 'place':
-            player = move['player']
-            blanks_count = len(move.get('blanks', set()))
-            # --- CORRECTED INDENTATION START ---
-            if player == 1:
-                blanks_p1 += blanks_count
-            elif player == 2:
-                blanks_p2 += blanks_count
-            # --- CORRECTED INDENTATION END ---
-    return blanks_p1, blanks_p2
 
-def draw_blanks_row(screen, dialog_x, y_pos, blanks_p1, blanks_p2):
-    """Draw the blanks played row."""
-    blanks_label = ui_font.render("Blanks:", True, BLACK)
-    p1_blanks_text = ui_font.render(str(blanks_p1), True, BLACK)
-    p2_blanks_text = ui_font.render(str(blanks_p2), True, BLACK)
-    screen.blit(blanks_label, (dialog_x + STATS_LABEL_X_OFFSET, y_pos))
-    screen.blit(p1_blanks_text, (dialog_x + STATS_P1_VAL_X_OFFSET, y_pos))
-    screen.blit(p2_blanks_text, (dialog_x + STATS_P2_VAL_X_OFFSET, y_pos))
 
 
 
@@ -3994,6 +3975,8 @@ def get_words_played(word_positions, tiles):
             if len(cross_word_h) > 1: words_found.add(cross_word_h)
     return list(words_found)
 
+
+'''
 def get_remaining_tiles(rack, tiles, blanks):
     """Calculate the remaining tiles (excluding those on board and current player's rack)."""
     remaining = {letter: count for letter, (count, _) in TILE_DISTRIBUTION.items()}
@@ -4010,47 +3993,64 @@ def get_remaining_tiles(rack, tiles, blanks):
                     if letter in remaining: remaining[letter] -= 1
     for letter in remaining: remaining[letter] = max(0, remaining[letter])
     return remaining
+'''
 
-def draw_remaining_tiles(remaining, turn):
+
+    
+
+def draw_remaining_tiles(unseen_tiles_dict, turn):
     """Draw the list of remaining tiles by repeating letters."""
     global practice_mode
     if practice_mode == "eight_letter": return # Don't draw remaining tiles in this mode
-    remaining_x = min(BOARD_SIZE + 70, WINDOW_WIDTH - 200);
+    
+    remaining_x = min(BOARD_SIZE + 70, WINDOW_WIDTH - 200)
     if remaining_x < BOARD_SIZE + 10: remaining_x = BOARD_SIZE + 10
-    title_text = ui_font.render(f"P{turn}'s Unseen Tiles:", True, BLACK); screen.blit(title_text, (remaining_x, 10))
-    y_pos = 40; col_width = 60; max_y = WINDOW_HEIGHT - 100; sorted_letters = sorted(remaining.keys()); current_col_x = remaining_x; items_in_col = 0; max_items_per_col = (max_y - y_pos) // 20
+    
+    title_text = ui_font.render(f"P{turn}'s Unseen Tiles:", True, BLACK)
+    screen.blit(title_text, (remaining_x, 10))
+    
+    y_pos = 40
+    col_width = 60
+    max_y = WINDOW_HEIGHT - 100
+    sorted_letters = sorted(unseen_tiles_dict.keys())
+    current_col_x = remaining_x
+    items_in_col = 0
+    max_items_per_col = (max_y - y_pos) // 20
     if max_items_per_col <= 0: max_items_per_col = 1
-    last_drawn_y = 40 # Initialize with starting y_pos in case list is empty
-    last_drawn_col_x = remaining_x # Track the column x of the last item
+    
+    last_drawn_y = 40 
+    last_drawn_col_x = remaining_x 
 
     for letter in sorted_letters:
-        count = remaining.get(letter, 0)
+        count = unseen_tiles_dict.get(letter, 0)
         if count > 0:
             display_letter = "?" if letter == " " else letter
             text_str = display_letter * count
             text = tile_count_font.render(text_str, True, BLACK)
             if items_in_col >= max_items_per_col:
-                y_pos = 40 # Reset y_pos for the new column
+                y_pos = 40 
                 current_col_x += col_width
                 items_in_col = 0
             screen.blit(text, (current_col_x, y_pos))
-            last_drawn_y = y_pos # Update the last drawn y position in the current column
-            last_drawn_col_x = current_col_x # Update the column x
-            y_pos += 20; items_in_col += 1
+            last_drawn_y = y_pos 
+            last_drawn_col_x = current_col_x 
+            y_pos += 20
+            items_in_col += 1
 
-    # Calculate summary position directly below the last drawn item's position
-    # Add the height of one line (20) to get the position below it, plus a small gap (e.g., 5)
     summary_y_start = last_drawn_y + 20 + 5
-    # Ensure it doesn't go off screen
-    summary_y_start = min(summary_y_start, max_y + 40) # Use max_y for clamping
+    summary_y_start = min(summary_y_start, max_y + 40) 
 
-    total_tiles = sum(remaining.values()); vowels = sum(remaining.get(letter, 0) for letter in 'AEIOU'); consonants = sum(remaining.get(letter, 0) for letter in remaining if letter.isalpha() and letter not in 'AEIOU '); blanks_rem = remaining.get(' ', 0)
-    text1 = tile_count_font.render(f"Tiles remaining: {total_tiles}", True, BLACK); text2 = tile_count_font.render(f"V: {vowels}  C: {consonants}  B: {blanks_rem}", True, BLACK)
+    total_tiles = sum(unseen_tiles_dict.values())
+    vowels = sum(unseen_tiles_dict.get(letter, 0) for letter in 'AEIOU')
+    consonants = sum(unseen_tiles_dict.get(letter, 0) for letter in unseen_tiles_dict if letter.isalpha() and letter not in 'AEIOU ')
+    blanks_rem = unseen_tiles_dict.get(' ', 0)
+    
+    text1 = tile_count_font.render(f"Tiles remaining: {total_tiles}", True, BLACK)
+    text2 = tile_count_font.render(f"V: {vowels}  C: {consonants}  B: {blanks_rem}", True, BLACK)
 
-    # Align summary text x-coordinate with the start of the list columns
     summary_x = remaining_x
-    screen.blit(text1, (summary_x, summary_y_start));
-    screen.blit(text2, (summary_x, summary_y_start + 20)) # Draw second line below first
+    screen.blit(text1, (summary_x, summary_y_start))
+    screen.blit(text2, (summary_x, summary_y_start + 20))
 
 
 
@@ -4701,7 +4701,7 @@ def generate_turn_insights_data(full_sgs_game_data, is_silent_run_param=False):
 
         analyzed_moves_for_this_turn_list = []
         for p_move in possible_moves_for_turn:
-            equity = p_move.get('score', 0) + evaluate_leave(p_move.get('leave', []), is_silent_batch_run_param=True)
+            equity = p_move.get('score', 0) + ai_engine.evaluate_leave(p_move.get('leave', []), is_silent_batch_run_param=True)
             
             # Format leave as a string for storage/display
             leave_list_for_format = p_move.get('leave', [])
@@ -4779,7 +4779,7 @@ def draw_hint_dialog(screen, moves, selected_index, dialog_x, dialog_y, is_simul
         coord = get_coord(start_pos, direction)
         leave_str = ''.join(sorted(l if l != ' ' else '?' for l in leave))
         avg_opp_score = move.get('avg_opp_score', 0.0)
-        leave_val = evaluate_leave(leave)
+        leave_val = ai_engine.evaluate_leave(leave)
 
         if is_simulation_result:
             text_str = f"{i+1}. {word_display} {coord} ({int(score)}{leave_val:+0.1f}-{avg_opp_score:.1f}={int(final_score)}) L:{leave_str}"
@@ -5855,7 +5855,9 @@ BALANCE_PENALTY_FACTOR = -4.0 # Penalty per vowel count away from ideal range
 
 
 
-def evaluate_leave(rack, verbose=False, is_silent_batch_run_param=False): # Added is_silent_batch_run_param
+
+'''
+def ai_engine.evaluate_leave(rack, verbose=False, is_silent_batch_run_param=False): # Added is_silent_batch_run_param
     """
     Retrieves the pre-calculated leave value (float) from the LEAVE_LOOKUP_TABLE.
     Handles leaves of length 1-6. Returns 0.0 for empty leaves or leaves > 6 tiles.
@@ -5905,6 +5907,7 @@ def evaluate_leave(rack, verbose=False, is_silent_batch_run_param=False): # Adde
         if can_print_verbose: # Or simply: if verbose: print(...)
             print(f"Error during leave table lookup for key '{leave_key}': {e}. Returning 0.0.")
         return 0.0
+'''
 
 
 
@@ -5936,52 +5939,6 @@ def evaluate_single_move(move_dict, leave_evaluation_func):
 
 
 
-def get_expected_single_draw_value(current_player_rack, game_tiles, game_blanks):
-    """
-    Calculates the expected statistical value of drawing a single tile from the
-    current unseen pool (bag + opponent's rack). Uses evaluate_leave for single tile values.
-
-    Args:
-        current_player_rack (list): The rack of the player whose perspective we're taking.
-                                   (Tiles on this rack are excluded from the "unseen pool" for this calculation).
-        game_tiles (list[list[str]]): The current state of the game board.
-        game_blanks (set): Set of (r,c) tuples for blanks on the board.
-
-    Returns:
-        float: The average statistical value of a single tile drawn from the unseen pool.
-               Returns 0.0 if the pool is empty.
-    """
-    # Determine the unseen pool (tiles not on board and not on current_player_rack)
-    # get_remaining_tiles considers tiles in TILE_DISTRIBUTION minus those on board and minus those in the passed rack.
-    # So, passing current_player_rack here correctly gives us the bag + opponent's rack.
-    unseen_pool_dict = get_remaining_tiles(current_player_rack, game_tiles, game_blanks)
-
-    if not unseen_pool_dict:
-        return 0.0
-
-    total_weighted_value = 0.0
-    total_tiles_in_pool = 0
-
-    for tile_type, count in unseen_pool_dict.items():
-        if count > 0:
-            # Get the statistical value of this single tile type using evaluate_leave
-            # evaluate_leave uses the LEAVE_LOOKUP_TABLE
-            single_tile_value = evaluate_leave([tile_type]) # Pass as a list
-            total_weighted_value += single_tile_value * count
-            total_tiles_in_pool += count
-
-    if total_tiles_in_pool == 0:
-        return 0.0
-
-    expected_value = total_weighted_value / total_tiles_in_pool
-    # print(f"DEBUG get_expected_single_draw_value: Pool: {unseen_pool_dict}, TotalWeightedVal: {total_weighted_value:.2f}, TotalTiles: {total_tiles_in_pool}, ExpectedVal: {expected_value:.2f}")
-    return expected_value
-
-
-
-
-
-
 
 def estimate_draw_value(num_to_draw, expected_single_draw_value):
     """
@@ -6002,85 +5959,7 @@ def estimate_draw_value(num_to_draw, expected_single_draw_value):
 
 
 
-#from itertools import combinations # Ensure this is imported (likely already global)
-#from collections import Counter # Ensure this is imported (likely already global)
 
-
-
-def find_best_exchange_option(rack, game_tiles, game_blanks, bag_count, is_silent_batch_run_param=False): # Added is_silent_batch_run_param
-    """
-    Finds the best set of tiles to exchange from the rack using Python logic.
-    Print statements are now conditional.
-
-    Args:
-        rack (list): The player's current rack.
-        game_tiles (list[list[str]]): The current state of the board's tiles.
-        game_blanks (set): The set of (r,c) for blanks on the board.
-        bag_count (int): Number of tiles currently in the bag.
-        is_silent_batch_run_param (bool): If True, suppress most console output.
-
-    Returns:
-        tuple: (list_of_tiles_to_exchange, estimated_value_of_exchange_option)
-               Returns ([], -float('inf')) if no good exchange is found or cannot exchange.
-    """
-    if not is_silent_batch_run_param:
-        print(f"DEBUG: find_best_exchange_option (Python) called. Rack: {''.join(sorted(rack))}, Bag: {bag_count}")
-    
-    if not rack or bag_count == 0:
-        if not is_silent_batch_run_param:
-            print("DEBUG: No exchange possible (empty rack or bag).")
-        return [], -float('inf')
-
-    best_overall_exchange_tiles = []
-    best_overall_estimated_value = -float('inf') 
-
-    # Pass the silent flag to evaluate_leave if its verbose prints are to be controlled
-    expected_single_draw_value = get_expected_single_draw_value(rack, game_tiles, game_blanks) # This calls evaluate_leave internally
-    if not is_silent_batch_run_param:
-        print(f"DEBUG: find_best_exchange_option - Expected Single Draw Value: {expected_single_draw_value:.2f}")
-
-    max_tiles_to_exchange = min(len(rack), bag_count)
-
-    for k in range(1, max_tiles_to_exchange + 1):
-        num_to_keep = len(rack) - k
-        current_best_leave_score_for_keeping_num = -float('inf')
-        tiles_to_exchange_for_this_k = [] 
-
-        if num_to_keep == 0: 
-            current_best_leave_score_for_keeping_num = 0.0 
-            tiles_to_exchange_for_this_k = rack[:] 
-        else:
-            best_kept_subset_for_this_k = []
-            for kept_subset_tuple in combinations(rack, num_to_keep):
-                kept_subset_list = list(kept_subset_tuple)
-                # Pass silent flag if evaluate_leave's verbose prints need to be controlled by it
-                score_of_this_kept_subset = evaluate_leave(kept_subset_list, verbose=False, is_silent_batch_run_param=is_silent_batch_run_param) 
-
-                if score_of_this_kept_subset > current_best_leave_score_for_keeping_num:
-                    current_best_leave_score_for_keeping_num = score_of_this_kept_subset
-                    best_kept_subset_for_this_k = kept_subset_list
-            
-            if best_kept_subset_for_this_k is not None: 
-                temp_rack_counts = Counter(rack)
-                temp_kept_counts = Counter(best_kept_subset_for_this_k)
-                tiles_to_exchange_counts = temp_rack_counts - temp_kept_counts
-                tiles_to_exchange_for_this_k = list(tiles_to_exchange_counts.elements())
-            else: 
-                tiles_to_exchange_for_this_k = []
-
-        estimated_value_of_drawing_k_tiles = expected_single_draw_value * k
-        total_estimated_value_for_this_option = current_best_leave_score_for_keeping_num + estimated_value_of_drawing_k_tiles
-        
-        if not is_silent_batch_run_param:
-            print(f"  k={k}: Exchanging {len(tiles_to_exchange_for_this_k)} tiles ({''.join(sorted(tiles_to_exchange_for_this_k))}), KeptLeaveScore={current_best_leave_score_for_keeping_num:.2f}, DrawEst={estimated_value_of_drawing_k_tiles:.2f}, TotalEst={total_estimated_value_for_this_option:.2f}")
-
-        if total_estimated_value_for_this_option > best_overall_estimated_value:
-            best_overall_estimated_value = total_estimated_value_for_this_option
-            best_overall_exchange_tiles = tiles_to_exchange_for_this_k
-    
-    if not is_silent_batch_run_param:
-        print(f"DEBUG: find_best_exchange_option (Python) result: Tiles: {''.join(sorted(best_overall_exchange_tiles))}, Value: {best_overall_estimated_value:.2f}")
-    return best_overall_exchange_tiles, best_overall_estimated_value
 
 
 
@@ -6676,90 +6555,7 @@ def format_end_state_for_print(final_rack_p1_sim, final_rack_p2_sim, last_player
 
 
 
-def draw_simulation_config_dialog_mode_sel(screen_surf, input_texts_list, active_input_idx_val, default_values_list):
-    """
-    Draws the dialog for configuring AI simulation parameters from the mode selection screen.
-    Uses global constants for dialog dimensions and fonts.
-    Args:
-        screen_surf: The Pygame surface to draw on.
-        input_texts_list (list[str]): List of current string values in the input fields.
-        active_input_idx_val (int or None): Index of the currently active input field, or None.
-        default_values_list (list[int]): List of default integer values for placeholders.
-    Returns:
-        tuple: (list_of_input_rects, ok_button_rect, cancel_button_rect)
-    """
-    dialog_width, dialog_height = 480, 280  # Adjusted width for longer labels
-    dialog_x = (WINDOW_WIDTH - dialog_width) // 2
-    dialog_y = (WINDOW_HEIGHT - dialog_height) // 2
-
-    pygame.draw.rect(screen_surf, DIALOG_COLOR, (dialog_x, dialog_y, dialog_width, dialog_height))
-    pygame.draw.rect(screen_surf, BLACK, (dialog_x, dialog_y, dialog_width, dialog_height), 2)
-
-    title_text_surf = dialog_font.render("AI Simulation Parameters", True, BLACK)
-    screen_surf.blit(title_text_surf, (dialog_x + 10, dialog_y + 10))
-
-    labels = [
-        "Initial AI Move Candidates:",
-        "Opponent Rack Sims / AI Move:",
-        "Post-Sim Candidates:"
-    ]
-    input_rects_list = []
-    input_y_start = dialog_y + 60 # Increased top padding for title
-    input_height = 30
-    input_gap = 20 # Increased gap
-    label_x_pos = dialog_x + 20
-    input_x_pos = dialog_x + 320  # Adjusted for wider dialog
-    input_width_val = 100
-
-    for i, label_str in enumerate(labels):
-        y_pos_val = input_y_start + i * (input_height + input_gap)
-        label_surf = ui_font.render(label_str, True, BLACK)
-        screen_surf.blit(label_surf, (label_x_pos, y_pos_val + 5))
-
-        rect_val = pygame.Rect(input_x_pos, y_pos_val, input_width_val, input_height)
-        input_rects_list.append(rect_val)
-        pygame.draw.rect(screen_surf, WHITE, rect_val)
-        pygame.draw.rect(screen_surf, BLACK, rect_val, 1 if active_input_idx_val != i else 2)
-        
-        current_text_to_display = input_texts_list[i]
-        if not current_text_to_display: # Show placeholder if empty
-            placeholder_surf = ui_font.render(f"(Def: {default_values_list[i]})", True, GRAY)
-            screen_surf.blit(placeholder_surf, (rect_val.x + 5, rect_val.y + 7))
-        else:
-            text_surf_val = ui_font.render(current_text_to_display, True, BLACK)
-            screen_surf.blit(text_surf_val, (rect_val.x + 5, rect_val.y + 5))
-
-        if active_input_idx_val == i and int(time.time() * 2) % 2 == 0:
-            # Use text_surf_val if text exists, otherwise cursor at start
-            cursor_offset_x = ui_font.size(current_text_to_display)[0] if current_text_to_display else 0
-            cursor_x_pos_val = rect_val.x + 5 + cursor_offset_x
-            pygame.draw.line(screen_surf, BLACK, (cursor_x_pos_val, rect_val.y + 5), (cursor_x_pos_val, rect_val.bottom - 5), 1)
-
-    button_y_pos = dialog_y + dialog_height - BUTTON_HEIGHT - 20
-    ok_rect = pygame.Rect(dialog_x + dialog_width // 2 - BUTTON_WIDTH - BUTTON_GAP // 2, button_y_pos, BUTTON_WIDTH, BUTTON_HEIGHT)
-    cancel_rect = pygame.Rect(dialog_x + dialog_width // 2 + BUTTON_GAP // 2, button_y_pos, BUTTON_WIDTH, BUTTON_HEIGHT)
-    
-    # OK Button
-    hover_ok = ok_rect.collidepoint(pygame.mouse.get_pos())
-    color_ok = BUTTON_HOVER if hover_ok else BUTTON_COLOR
-    pygame.draw.rect(screen_surf, color_ok, ok_rect)
-    ok_text_surf = button_font.render("OK", True, BLACK)
-    screen_surf.blit(ok_text_surf, ok_text_surf.get_rect(center=ok_rect.center))
-
-    # Cancel Button
-    hover_cancel = cancel_rect.collidepoint(pygame.mouse.get_pos())
-    color_cancel = BUTTON_HOVER if hover_cancel else BUTTON_COLOR
-    pygame.draw.rect(screen_surf, color_cancel, cancel_rect)
-    cancel_text_surf = button_font.render("Cancel", True, BLACK)
-    screen_surf.blit(cancel_text_surf, cancel_text_surf.get_rect(center=cancel_rect.center))
-
-    return input_rects_list, ok_rect, cancel_rect
-
-
-
-
-
-def draw_simulation_config_dialog(input_texts, active_input_index):
+def draw_simulation_config_dialog(input_texts, active_input_index, state):
     """Draws the dialog for configuring simulation parameters."""
     dialog_width, dialog_height = 450, 280 # Slightly taller
     dialog_x = (WINDOW_WIDTH - dialog_width) // 2
@@ -6775,7 +6571,6 @@ def draw_simulation_config_dialog(input_texts, active_input_index):
         "Initial AI Move Candidates:",
         "Opponent Rack Sims / AI Move:",
         "Post-Sim Candidates:"
-        # "Ply Depth:" # Not currently used by run_ai_simulation
     ]
     input_rects = []
     input_y_start = dialog_y + 50
@@ -6801,6 +6596,14 @@ def draw_simulation_config_dialog(input_texts, active_input_index):
             cursor_x_pos = rect.x + 5 + text_surf.get_width()
             pygame.draw.line(screen, BLACK, (cursor_x_pos, rect.y + 5), (cursor_x_pos, rect.bottom - 5), 1)
 
+    # --- NEW: Add Profile Checkbox ---
+    profile_checkbox_y = input_y_start + len(labels) * (input_height + input_gap)
+    profile_checkbox_rect = pygame.Rect(label_x, profile_checkbox_y, 20, 20)
+    draw_checkbox(screen, profile_checkbox_rect.x, profile_checkbox_rect.y, state.get('profile_simulation_checked', False))
+    profile_label_surf = ui_font.render("Profile this simulation", True, BLACK)
+    screen.blit(profile_label_surf, (profile_checkbox_rect.right + 5, profile_checkbox_rect.y + 2))
+    # --- END NEW ---
+
     # Bottom Buttons
     button_y = dialog_y + dialog_height - BUTTON_HEIGHT - 20
     simulate_rect = pygame.Rect(dialog_x + dialog_width // 2 - BUTTON_WIDTH - BUTTON_GAP // 2, button_y, BUTTON_WIDTH, BUTTON_HEIGHT)
@@ -6812,184 +6615,18 @@ def draw_simulation_config_dialog(input_texts, active_input_index):
     screen.blit(simulate_text, simulate_text.get_rect(center=simulate_rect.center))
     screen.blit(cancel_text, cancel_text.get_rect(center=cancel_rect.center))
 
-    return input_rects, simulate_rect, cancel_rect
+    # Return all clickable rects, including the new checkbox
+    return input_rects, simulate_rect, cancel_rect, profile_checkbox_rect
 
 
 
-def run_ai_simulation(initial_ai_moves_list, ai_rack, opponent_rack_len, tiles, blanks, board, bag, is_first_play, \
-                      num_ai_candidates=DEFAULT_AI_CANDIDATES, \
-                      num_opponent_sims=DEFAULT_OPPONENT_SIMULATIONS, \
-                      num_post_sim_candidates=DEFAULT_POST_SIM_CANDIDATES, \
-                      is_silent_batch_run_param=False):
-    """
-    Performs a 2-ply simulation to find the best AI move.
-    Simulates top N AI moves, estimates opponent's best response M times for each,
-    then evaluates the top K results using the LEAVE_LOOKUP_TABLE (float values).
-    MODIFIED: Accepts initial_ai_moves_list to avoid redundant generation.
-    Print statements are now conditional.
-    """
-    import time 
-    if not is_silent_batch_run_param:
-        print("--- Running AI 2-Ply Simulation ---")
-
-    # Use the provided list of AI moves
-    all_ai_moves = initial_ai_moves_list
-    if not all_ai_moves:
-        if not is_silent_batch_run_param:
-            print(f"  Simulation: No initial AI moves found (received empty list).")
-        return []
-        
 
 
-    # Sort by raw score to pick candidates for simulation (already done in ai_turn, but good to ensure)
-    all_ai_moves.sort(key=lambda m: m.get('score', 0), reverse=True)
-    top_ai_moves_candidates = all_ai_moves[:num_ai_candidates]
-    if not is_silent_batch_run_param:
-        print(f"  Simulating top {len(top_ai_moves_candidates)} AI moves (from {len(all_ai_moves)} total)...")
-    
-    simulation_results = [] 
-    num_simulations_per_move = num_opponent_sims
-    
-    remaining_dict = get_remaining_tiles(ai_rack, tiles, blanks)
-    unseen_tiles_pool = []
-    for tile, count in remaining_dict.items():
-        unseen_tiles_pool.extend([tile] * count)
-
-    for i, ai_move in enumerate(top_ai_moves_candidates):
-        if not is_silent_batch_run_param:
-            if (i + 1) % 5 == 0 or i == 0 or i == len(top_ai_moves_candidates) - 1:
-                 print(f"  Simulating AI move {i+1}/{len(top_ai_moves_candidates)}...")
-
-        total_opponent_score_for_this_move = 0
-        ai_score = ai_move.get('score', 0)
-        newly_placed_count = len(ai_move.get('newly_placed', []))
-
-        sim_tiles_after_ai = copy.deepcopy(tiles)
-        sim_blanks_after_ai = blanks.copy()
-        sim_rack_after_ai = ai_rack[:] # Start with AI's original rack for this move's simulation
-        sim_bag_after_ai = bag[:]
-        move_blanks = ai_move.get('blanks', set())
-        valid_placement = True
-        
-        # Simulate placing the AI's current candidate move
-        for r, c, letter in ai_move.get('newly_placed', []):
-            if 0 <= r < GRID_SIZE and 0 <= c < GRID_SIZE:
-                sim_tiles_after_ai[r][c] = letter
-                if (r, c) in move_blanks:
-                    sim_blanks_after_ai.add((r, c))
-                    if ' ' in sim_rack_after_ai: sim_rack_after_ai.remove(' ')
-                    else: valid_placement = False; break
-                else:
-                    if letter in sim_rack_after_ai: sim_rack_after_ai.remove(letter)
-                    else: valid_placement = False; break
-            else: valid_placement = False; break
-        if not valid_placement: 
-            if not is_silent_batch_run_param:
-                print(f"    Skipping candidate {ai_move.get('word', 'N/A')} due to invalid placement during sim setup.")
-            continue # Skip this candidate if it can't be placed from the original rack
-
-        # Simulate drawing tiles for the AI after its move
-        num_to_draw_ai = newly_placed_count
-        drawn_ai = []
-        for _ in range(num_to_draw_ai):
-            if sim_bag_after_ai: drawn_ai.append(sim_bag_after_ai.pop())
-        # sim_rack_after_ai is now the AI's rack *after* playing the move but *before* drawing.
-        # The leave is already calculated and stored in ai_move['leave'].
-        # For opponent simulation, we need the state of the bag *after* AI draws.
-        
-        for sim_run in range(num_simulations_per_move):
-            # Create a pool of tiles for the opponent's rack for this specific simulation run
-            # This pool is (unseen_tiles_pool - tiles drawn by AI for *this* candidate move)
-            opponent_available_pool_for_this_sim = unseen_tiles_pool[:]
-            temp_drawn_ai_counts = Counter(drawn_ai) # Count of tiles AI would draw for this move
-            
-            # Remove tiles AI drew from the opponent's potential pool
-            # This needs to be careful if a tile is drawn multiple times by AI
-            temp_opponent_pool_copy = opponent_available_pool_for_this_sim[:]
-            for tile_in_pool in temp_opponent_pool_copy:
-                if temp_drawn_ai_counts.get(tile_in_pool, 0) > 0:
-                    temp_drawn_ai_counts[tile_in_pool] -= 1
-                    opponent_available_pool_for_this_sim.remove(tile_in_pool)
-            
-            random.shuffle(opponent_available_pool_for_this_sim)
-            actual_opponent_rack_len = min(opponent_rack_len, len(opponent_available_pool_for_this_sim))
-            sim_opponent_rack = opponent_available_pool_for_this_sim[:actual_opponent_rack_len]
-            
-            opponent_moves = ai_engine.generate_all_moves_gaddag(\
-                        sim_opponent_rack, sim_tiles_after_ai, board, sim_blanks_after_ai,\
-                        is_silent_batch_run_param=is_silent_batch_run_param\
-            )
-            best_opponent_score = 0
-            if opponent_moves:
-                # Opponent also plays to maximize their raw_score + leave_value
-                best_opp_eval = -float('inf')
-                for opp_move in opponent_moves:
-                    opp_raw_score = opp_move.get('score', 0)
-                    opp_leave_val = evaluate_leave(opp_move.get('leave',[]), is_silent_batch_run_param=is_silent_batch_run_param)
-                    if opp_raw_score + opp_leave_val > best_opp_eval:
-                        best_opp_eval = opp_raw_score + opp_leave_val
-                        best_opponent_score = opp_raw_score # We care about opponent's immediate score for our calculation
-            total_opponent_score_for_this_move += best_opponent_score
-        
-        average_opponent_score = total_opponent_score_for_this_move / num_simulations_per_move if num_simulations_per_move > 0 else 0
-        ai_move['avg_opp_score'] = average_opponent_score 
-        simulation_results.append(ai_move) 
 
 
-    if not simulation_results:
-        if not is_silent_batch_run_param:
-            print(f"  Simulation: No results generated after processing candidates. Falling back.")
-        # Fallback to top raw+leave moves if simulation yields nothing,
-        # but these should already be sorted by raw score initially.
-        # The calling function (ai_turn) will handle this if simulation_results is empty.
-        return [] 
-         
 
 
-    # Sort by (AI_raw_score - average_opponent_score)
-    # The leave value will be added *after* this simulation stage
-    simulation_results.sort(key=lambda r: r.get('score', 0) - r.get('avg_opp_score', 0.0), reverse=True)
-    top_sim_results = simulation_results[:num_post_sim_candidates]
-    
-    if not is_silent_batch_run_param:
-        print("--- Evaluating Top Simulation Results with Leave Lookup ---")
-    final_evaluated_moves = []
-    for move_result in top_sim_results:
-        ai_move_dict = move_result # This is the dictionary for the AI's move
-        avg_opp_score = ai_move_dict.get('avg_opp_score', 0.0)
-        ai_raw_score = ai_move_dict.get('score', 0)
-        leave = ai_move_dict.get('leave', [])
-        leave_value = evaluate_leave(leave, is_silent_batch_run_param=is_silent_batch_run_param) 
-        if not is_silent_batch_run_param:
-            leave_str_eval = "".join(sorted(['?' if tile == ' ' else tile for tile in leave])) 
-            word_eval = ai_move_dict.get('word_with_blanks', ai_move_dict.get('word', '?'))
-            print(f"  Evaluating: {word_eval} ({ai_raw_score} pts), Leave: '{leave_str_eval}', Lookup Value: {leave_value:.2f}")
-        
-        final_eval_score = float(ai_raw_score) + leave_value - float(avg_opp_score) 
-        final_evaluated_moves.append({'move': ai_move_dict, 'final_score': final_eval_score})
-    if not is_silent_batch_run_param:
-        print("-" * 20)
 
-    final_evaluated_moves.sort(key=lambda m: m['final_score'], reverse=True)
-
-    if not is_silent_batch_run_param:
-        print("--- Simulation Top 5 Choices (AI Score + LeaveLookup - Avg Opponent Score) ---")
-        for i, evaluated_move in enumerate(final_evaluated_moves[:5]):
-            move = evaluated_move['move']
-            final_score = evaluated_move['final_score']
-            word = move.get('word_with_blanks', move.get('word', '?'))
-            coord = get_coord(move.get('start', (0,0)), move.get('direction', '?'))
-            raw_score = move.get('score', 0)
-            leave_list = move.get('leave', [])
-            leave_str = "".join(sorted(l if l != ' ' else '?' for l in leave_list))
-            avg_opp = move.get('avg_opp_score', 0.0) 
-            leave_val = evaluate_leave(leave_list, is_silent_batch_run_param=is_silent_batch_run_param) 
-            print(f"  {i+1}. {word} at {coord} ({raw_score}) L:'{leave_str}' ({leave_val:.2f}) OppAvg:{avg_opp:.1f} -> Final:{final_score:.1f}") 
-        
-        print("-" * 20)
-        print(f"--- AI Simulation Complete ---") 
-
-    return final_evaluated_moves
     
 
 
@@ -7073,7 +6710,7 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
 
     move_data_for_turn = None
 
-    expected_single_draw_value_for_turn = get_expected_single_draw_value(current_rack, tiles, blanks)
+    expected_single_draw_value_for_turn = ai_engine.get_expected_single_draw_value(current_rack, tiles, blanks)
 
     if not is_silent_batch_run_param:
         print(f"  AI Turn {turn}: Calculated expected_single_draw_value_for_turn = {expected_single_draw_value_for_turn:.2f}")
@@ -7343,7 +6980,7 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
             print(f"AI {turn} evaluating {len(all_moves_gen)} plays for Raw+Leave score...")
         for move in all_moves_gen:
             raw_score = move.get('score', 0)
-            leave_value = evaluate_leave(move.get('leave', []), is_silent_batch_run_param=is_silent_batch_run_param)
+            leave_value = ai_engine.evaluate_leave(move.get('leave', []), is_silent_batch_run_param=is_silent_batch_run_param)
             current_move_raw_plus_leave_eval = raw_score + leave_value
             if current_move_raw_plus_leave_eval > best_raw_plus_leave_evaluation:
                 best_raw_plus_leave_evaluation = current_move_raw_plus_leave_eval
@@ -7351,7 +6988,7 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
         if not is_silent_batch_run_param and best_raw_plus_leave_play_candidate:
             _m_word = best_raw_plus_leave_play_candidate.get('word_with_blanks', best_raw_plus_leave_play_candidate.get('word', 'N/A'))
             _m_score = best_raw_plus_leave_play_candidate.get('score',0)
-            _m_leave_val = evaluate_leave(best_raw_plus_leave_play_candidate.get('leave', []), is_silent_batch_run_param=is_silent_batch_run_param)
+            _m_leave_val = ai_engine.evaluate_leave(best_raw_plus_leave_play_candidate.get('leave', []), is_silent_batch_run_param=is_silent_batch_run_param)
             print(f"  Best Raw+Leave Play: '{_m_word}' ({_m_score} + {_m_leave_val:.2f} = {best_raw_plus_leave_evaluation:.2f})")
 
     run_simulation_for_decision = (use_ai_simulation_param and game_mode in [MODE_HVH, MODE_AVA] and practice_mode_param is None and can_play)
@@ -7375,7 +7012,7 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
     if can_exchange:
         if not is_silent_batch_run_param:
             print(f"AI {turn} evaluating exchange options...")
-        best_exchange_tiles, best_exchange_evaluation = find_best_exchange_option(\
+        best_exchange_tiles, best_exchange_evaluation = ai_engine.find_best_exchange_option(\
             current_rack, tiles, blanks, bag_count, is_silent_batch_run_param=is_silent_batch_run_param\
         )
         if not is_silent_batch_run_param:
@@ -7519,7 +7156,7 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
 
     total_expected_value_of_this_draw = 0.0
     if drawn_tiles:
-        actual_drawn_leave_value = evaluate_leave(drawn_tiles, is_silent_batch_run_param=is_silent_batch_run_param)
+        actual_drawn_leave_value = ai_engine.evaluate_leave(drawn_tiles, is_silent_batch_run_param=is_silent_batch_run_param)
         total_expected_value_of_this_draw = expected_single_draw_value_for_turn * len(drawn_tiles)
         luck_factor = actual_drawn_leave_value - total_expected_value_of_this_draw
         if not is_silent_batch_run_param:
@@ -8599,7 +8236,7 @@ def process_game_events(state, drawn_rects):
 
         if event.type == pygame.MOUSEBUTTONDOWN:
             word_lookup_button_in_game_rect = drawn_rects.get('word_lookup_button_in_game_rect')
-
+            
             if state['showing_practice_end_dialog']: 
                 practice_end_updates = _handle_mouse_down_practice_end_dialog(event, state, drawn_rects)
                 state.update(practice_end_updates)
@@ -9069,7 +8706,7 @@ def _handle_mouse_down_exchange_dialog(event, state, drawn_rects):
                     
                     luck_factor_exchange = 0.0
                     if drawn_tiles_exchange:
-                        drawn_leave_value_exchange = evaluate_leave(drawn_tiles_exchange, is_silent_batch_run_param=is_silent_run_local)
+                        drawn_leave_value_exchange = ai_engine.evaluate_leave(drawn_tiles_exchange, is_silent_batch_run_param=is_silent_run_local)
                         expected_draw_value_simple_exchange = state.get('current_turn_pool_quality_score', 0.0) * len(drawn_tiles_exchange)
                         luck_factor_exchange = drawn_leave_value_exchange - expected_draw_value_simple_exchange
                         if not is_silent_run_local:
@@ -9196,6 +8833,7 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
     sim_input_rects = drawn_rects.get('sim_input_rects', [])
     sim_simulate_rect = drawn_rects.get('sim_simulate_rect')
     sim_cancel_rect = drawn_rects.get('sim_cancel_rect')
+    profile_checkbox_rect = drawn_rects.get('profile_checkbox_rect_sim_dialog') # Get the new checkbox rect
 
     x, y = event.pos
 
@@ -9209,9 +8847,16 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
         if not clicked_input:
             state['simulation_config_active_input'] = None
 
+        # --- NEW: Handle click on profile checkbox ---
+        if profile_checkbox_rect and profile_checkbox_rect.collidepoint(x, y):
+            state['profile_simulation_checked'] = not state.get('profile_simulation_checked', False)
+            return state # Event handled, no further action needed
+        # --- END NEW ---
+
         if sim_cancel_rect and sim_cancel_rect.collidepoint(x, y):
             state['showing_simulation_config'] = False
             state['simulation_config_active_input'] = None
+            state['profile_simulation_checked'] = False # Reset on cancel
             # Reset inputs to defaults on cancel
             state['simulation_config_inputs'] = [
                 str(DEFAULT_AI_CANDIDATES),
@@ -9243,6 +8888,16 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
                     show_message_dialog("Cannot simulate: AI data (GADDAG) is not loaded or available.", "Error")
                 else:
                     simulation_results = []
+                    
+                    # --- NEW: Profiling Logic ---
+                    profiler = None
+                    if state.get('profile_simulation_checked', False):
+                        import cProfile, pstats
+                        print("\n--- PROFILING SIMULATION ---")
+                        profiler = cProfile.Profile()
+                        profiler.enable()
+                    # --- END NEW ---
+
                     if replay_mode:
                         target_turn_for_state_recon = current_replay_turn if current_replay_turn > 0 else 1
                         sgs_data_for_sim = state.get('sgs_loaded_game_data', sgs_loaded_game_data)
@@ -9263,7 +8918,7 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
                         sim_opponent_rack_len = len(sim_racks[sim_opponent_idx])
                         sim_is_first_play = sum(1 for row in sim_tiles for t in row if t) == 0
                         
-                        simulation_results = run_ai_simulation(
+                        simulation_results = ai_engine.run_ai_simulation(
                             ai_engine.generate_all_moves_gaddag(sim_ai_rack, sim_tiles, state['board'], sim_blanks, is_silent_batch_run_param=True),
                             sim_ai_rack, sim_opponent_rack_len, sim_tiles, sim_blanks, state['board'], sim_bag,
                             sim_is_first_play,
@@ -9276,17 +8931,11 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
                         opponent_rack_len = len(state['racks'][opponent_idx]) if opponent_idx < len(state['racks']) and state['racks'][opponent_idx] is not None else 7
                         current_player_rack = state['racks'][player_idx] if 0 <= player_idx < len(state['racks']) and state['racks'][player_idx] is not None else []
                         
-                        state = clear_current_preview(state)
-                        current_player_all_moves = ai_engine.generate_all_moves_gaddag(
-                            current_player_rack, state['tiles'], state['board'], state['blanks'],
-                            is_silent_batch_run_param=is_silent_run_local
-                        )
-                        if current_player_all_moves is None:
-                           current_player_all_moves = []
+                        state = clear_current_preview(state)                        
+                        # Use the moves already generated at the start of the turn
+                        current_player_all_moves = state.get('all_moves', [])
                         
-                        state['all_moves'] = current_player_all_moves
-                        
-                        simulation_results = run_ai_simulation(
+                        simulation_results = ai_engine.run_ai_simulation(
                             current_player_all_moves,
                             current_player_rack, opponent_rack_len,
                             state['tiles'], state['blanks'], state['board'], state['bag'],
@@ -9294,6 +8943,14 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
                             num_ai_candidates=num_ai_cand, num_opponent_sims=num_opp_sim, num_post_sim_candidates=num_post_sim,
                             is_silent_batch_run_param=is_silent_run_local
                         )
+                    
+                    # --- NEW: Stop profiler and print stats ---
+                    if profiler:
+                        profiler.disable()
+                        stats_obj = pstats.Stats(profiler, stream=sys.stdout).sort_stats('cumulative')
+                        stats_obj.print_stats(30)
+                        state['profile_simulation_checked'] = False # Reset checkbox
+                    # --- END NEW ---
 
                     state['hint_moves'] = simulation_results
                     state['hinting'] = True
@@ -10024,7 +9681,7 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
         
         luck_factor = 0.0
         if drawn_tiles_param:
-            drawn_leave_value = evaluate_leave(drawn_tiles_param, is_silent_batch_run_param=is_silent_run_local)
+            drawn_leave_value = ai_engine.evaluate_leave(drawn_tiles_param, is_silent_batch_run_param=is_silent_run_local)
             expected_draw_value_simple = current_state.get('current_turn_pool_quality_score', 0.0) * len(drawn_tiles_param)
             luck_factor = drawn_leave_value - expected_draw_value_simple
         
@@ -10043,8 +9700,9 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
             'tiles_played_from_rack': tiles_consumed_param,
             'newly_placed': newly_placed_param,
             'leave': selected_move_dict_param.get('leave', [])
-        
-        
+
+
+
         })
         current_state['current_replay_turn'] = len(current_state['move_history'])
         current_state['last_played_highlight_coords'] = set((pos[0], pos[1]) for pos in selected_move_dict_param.get('positions', []))
@@ -10122,8 +9780,8 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
                     else: show_message_dialog(f"This is not the highest scoring bingo! Max score is {int(max_bingo_score)}.", "Incorrect Move"); valid_for_practice_play = False; state['hinting'] = False
                     if state.get('turn') != player_who_played : return state 
                 
-                if valid_for_practice_play and practice_mode not in ["eight_letter"] and not paused_for_power_tile and not paused_for_bingo_practice: 
-                    next_turn_val, drawn_tiles, newly_placed, tiles_consumed_for_history = play_hint_move(selected_move_dict, state['tiles'], state['racks'], state['blanks'], state['scores'], player_who_played, state['bag'], state['board'], state['is_ai'], state['practice_mode'], is_silent_batch_run_param=is_silent_run_local) 
+                if valid_for_practice_play and practice_mode not in ["eight_letter"] and not paused_for_power_tile and not paused_for_bingo_practice:
+                    next_turn_val, drawn_tiles, newly_placed, tiles_consumed_for_history = play_hint_move(selected_move_dict, state['tiles'], state['racks'], state['blanks'], state['scores'], player_who_played, state['bag'], state['board'], state['is_ai'], state['practice_mode'], is_silent_batch_run_param=is_silent_run_local)
                     state = finalize_dialog_play(state, selected_move_dict, move_rack_before_play, tiles_consumed_for_history, drawn_tiles, newly_placed, next_turn_val)
             else: 
                  show_message_dialog("Error retrieving move data from selected hint/simulation result.", "Internal Error")
@@ -10219,15 +9877,16 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
                      show_message_dialog("Error: Best move data missing for validation.", "Internal Error"); state['showing_all_words'] = False
                  valid_for_practice_play = False 
             
-            if valid_for_practice_play: 
-                if paused_for_bingo_practice: 
+            if valid_for_practice_play:
+                if paused_for_bingo_practice:
                     bingo_moves = [m for m in all_moves_list if m.get('is_bingo', False)]; max_bingo_score = max(m['score'] for m in bingo_moves) if bingo_moves else 0
                     if selected_move_dict.get('is_bingo', False) and selected_move_dict.get('score', -1) >= max_bingo_score:
                         next_turn_val, drawn_tiles, newly_placed, tiles_consumed_for_history = play_hint_move(selected_move_dict, state['tiles'], state['racks'], state['blanks'], state['scores'], player_who_played, state['bag'], state['board'], state['is_ai'], state['practice_mode'], is_silent_batch_run_param=is_silent_run_local) 
                         state = finalize_dialog_play(state, selected_move_dict, move_rack_before_play, tiles_consumed_for_history, drawn_tiles, newly_placed, next_turn_val)
-                    else: show_message_dialog(f"This is not the highest scoring bingo! Max score is {int(max_bingo_score)}.", "Incorrect Move"); state['showing_all_words'] = False
-                    if state.get('turn') != player_who_played : return state 
-                elif paused_for_power_tile: 
+                    else:
+                        show_message_dialog(f"This is not the highest scoring bingo! Max score is {int(max_bingo_score)}.", "Incorrect Move")
+                        state['showing_all_words'] = False
+                elif paused_for_power_tile:
                     power_moves_filtered = [
                         m for m in all_moves_list if 
                         any(lt_check == current_power_tile for _, _, lt_check in m.get('newly_placed', [])) and
@@ -10237,9 +9896,10 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
                     if selected_move_dict.get('score', -1) >= max_power_score_filtered and any(lt == current_power_tile for _,_,lt in selected_move_dict.get('newly_placed',[])):
                         next_turn_val, drawn_tiles, newly_placed, tiles_consumed_for_history = play_hint_move(selected_move_dict, state['tiles'], state['racks'], state['blanks'], state['scores'], player_who_played, state['bag'], state['board'], state['is_ai'], state['practice_mode'], is_silent_batch_run_param=is_silent_run_local)
                         state = finalize_dialog_play(state, selected_move_dict, move_rack_before_play, tiles_consumed_for_history, drawn_tiles, newly_placed, next_turn_val)
-                    else: show_message_dialog(f"This is not the highest scoring move with {current_power_tile} matching the selected lengths (Max: {int(max_power_score_filtered)}). Try again!", "Incorrect Move"); state['showing_all_words'] = False
-                    if state.get('turn') != player_who_played : return state 
-                else: # Standard play from All Words
+                    else:
+                        show_message_dialog(f"This is not the highest scoring move with {current_power_tile} matching the selected lengths (Max: {int(max_power_score_filtered)}). Try again!", "Incorrect Move")
+                        state['showing_all_words'] = False
+                else: # This is a standard, non-practice play
                     next_turn_val, drawn_tiles, newly_placed, tiles_consumed_for_history = play_hint_move(selected_move_dict, state['tiles'], state['racks'], state['blanks'], state['scores'], player_who_played, state['bag'], state['board'], state['is_ai'], state['practice_mode'], is_silent_batch_run_param=is_silent_run_local) 
                     state = finalize_dialog_play(state, selected_move_dict, move_rack_before_play, tiles_consumed_for_history, drawn_tiles, newly_placed, next_turn_val)
         elif all_words_ok_rect and all_words_ok_rect.collidepoint(x, y):
@@ -10466,7 +10126,6 @@ def _handle_keydown_typing_on_board(event, state):
                 print("\n--- DEBUG: Finalizing Typed Play (K_RETURN) ---")
                 print(f"  Newly Placed Raw: {newly_placed_details}")
                 print(f"  First Play? {state['first_play']}")
-                print(f"  Original Tiles (before typing): {state['original_tiles']}") 
                 print(f"  Calling is_valid_play with current state['tiles'] as tiles_after_play...")
             
             validation_code, is_bingo, validation_detail = ai_engine.is_valid_play(
@@ -10692,7 +10351,7 @@ def _handle_keydown_typing_on_board(event, state):
                     
                     luck_factor = 0.0
                     if drawn_tiles:
-                        drawn_leave_value = evaluate_leave(drawn_tiles, is_silent_batch_run_param=is_silent_run)
+                        drawn_leave_value = ai_engine.evaluate_leave(drawn_tiles, is_silent_batch_run_param=is_silent_run)
                         expected_draw_value_simple = state['current_turn_pool_quality_score'] * len(drawn_tiles)
                         luck_factor = drawn_leave_value - expected_draw_value_simple
                         if not is_silent_run:
@@ -11682,7 +11341,8 @@ def draw_game_screen(screen, state):
     racks_to_display_for_draw_rack_func = state.get('replay_racks_for_display', racks_main) if replay_mode else racks_main
     scores_to_display_func = state.get('replay_scores_for_display', scores_main) if replay_mode else (final_scores_state if game_over_state else scores_main)
     turn_to_display_for_ui_func = state.get('replay_turn_for_display', turn) if replay_mode else turn
-    unseen_tiles_for_display_dict_func = state.get('replay_unseen_tiles_for_display', {}) if replay_mode else Counter(bag + (racks_main[1- (turn-1)] if len(racks_main) > 1 else []))
+
+    unseen_tiles_for_display_dict_func = state.get('unseen_tiles_for_display', {}) if not replay_mode else state.get('replay_unseen_tiles_for_display', {})
     history_to_draw_func = move_history[:current_replay_turn] if replay_mode else move_history
     is_final_turn_in_replay_func = (current_replay_turn == len(move_history)) if replay_mode else game_over_state
 
@@ -11758,49 +11418,41 @@ def draw_game_screen(screen, state):
     returned_scroll_offset = draw_scoreboard(screen, history_to_draw_func, state['scroll_offset'], scores_to_display_func, is_ai, player_names, final_scores=final_scores_state, game_over_state=(game_over_state or is_final_turn_in_replay_func))
     state['scroll_offset'] = returned_scroll_offset
 
-    # --- MODIFICATION START: Refined UI Drawing Logic for Suggest/Simulate/Lookup ---
+    # --- MODIFICATION START: Refined UI Drawing Logic for Suggest/Simulate/Lookup/Profile ---
     is_human_turn_or_paused_practice = (0 <= turn-1 < len(is_ai)) and (not is_ai[turn-1] or paused_for_power_tile or paused_for_bingo_practice)
 
-    # Determine which buttons to show based on game state
     show_suggest_button = is_human_turn_or_paused_practice and not state.get('is_loaded_game', False) and not state.get('replay_mode', False)
-    show_simulate_lookup_buttons = is_human_turn_or_paused_practice or state.get('replay_mode', False) or state.get('is_loaded_game', False)
+    show_secondary_buttons = is_human_turn_or_paused_practice or state.get('replay_mode', False) or state.get('is_loaded_game', False)
 
     suggest_rect_base = None
     simulate_button_rect = None
+    profile_button_rect = None
     preview_checkbox_rect = None
     word_lookup_button_in_game_rect = None
     
     if not is_batch_running_local_draw:
-        # Define the base position for the top-most button in this stack
         top_button_x = 10 + OPTIONS_WIDTH + BUTTON_GAP
         top_button_y = OPTIONS_Y
 
+        current_button_y = top_button_y
+        
         if show_suggest_button:
-            # Draw Suggest, then Simulate and Lookup below it
-            suggest_rect_base = draw_suggest_button() # This function uses the constants to draw at the right spot
-
-            simulate_button_rect = pygame.Rect(suggest_rect_base.x, suggest_rect_base.bottom + BUTTON_GAP, OPTIONS_WIDTH, BUTTON_HEIGHT)
+            suggest_rect_base = draw_suggest_button()
+            current_button_y = suggest_rect_base.bottom + BUTTON_GAP
+        
+        if show_secondary_buttons:
+            simulate_button_rect = pygame.Rect(top_button_x, current_button_y, OPTIONS_WIDTH, BUTTON_HEIGHT)
             hover_sim = simulate_button_rect.collidepoint(pygame.mouse.get_pos()); color_sim = BUTTON_HOVER if hover_sim else BUTTON_COLOR
             pygame.draw.rect(screen, color_sim, simulate_button_rect)
             simulate_text = button_font.render("Simulate", True, BLACK); simulate_text_rect = simulate_text.get_rect(center=simulate_button_rect.center); screen.blit(simulate_text, simulate_text_rect)
-            
-            word_lookup_button_in_game_rect = draw_word_lookup_button_in_game(screen, suggest_rect_base)
+            current_button_y = simulate_button_rect.bottom + BUTTON_GAP
 
-        elif show_simulate_lookup_buttons:
-            # Draw Simulate and Lookup, but shifted up to the top position
-            simulate_button_rect = pygame.Rect(top_button_x, top_button_y, OPTIONS_WIDTH, BUTTON_HEIGHT)
-            hover_sim = simulate_button_rect.collidepoint(pygame.mouse.get_pos()); color_sim = BUTTON_HOVER if hover_sim else BUTTON_COLOR
-            pygame.draw.rect(screen, color_sim, simulate_button_rect)
-            simulate_text = button_font.render("Simulate", True, BLACK); simulate_text_rect = simulate_text.get_rect(center=simulate_button_rect.center); screen.blit(simulate_text, simulate_text_rect)
+            word_lookup_button_in_game_rect = pygame.Rect(top_button_x, current_button_y, OPTIONS_WIDTH, BUTTON_HEIGHT)
+            hover_lookup = word_lookup_button_in_game_rect.collidepoint(pygame.mouse.get_pos()); color_lookup = BUTTON_HOVER if hover_lookup else BUTTON_COLOR
+            pygame.draw.rect(screen, color_lookup, word_lookup_button_in_game_rect)
+            lookup_text = button_font.render("Lookup", True, BLACK); lookup_text_rect = lookup_text.get_rect(center=word_lookup_button_in_game_rect.center); screen.blit(lookup_text, lookup_text_rect)
+            current_button_y = word_lookup_button_in_game_rect.bottom + BUTTON_GAP
 
-            # The lookup button's position is now based on the simulate button's position
-            lookup_button_rect = pygame.Rect(simulate_button_rect.x, simulate_button_rect.bottom + BUTTON_GAP, OPTIONS_WIDTH, BUTTON_HEIGHT)
-            hover_lookup = lookup_button_rect.collidepoint(pygame.mouse.get_pos()); color_lookup = BUTTON_HOVER if hover_lookup else BUTTON_COLOR
-            pygame.draw.rect(screen, color_lookup, lookup_button_rect)
-            lookup_text = button_font.render("Lookup", True, BLACK); lookup_text_rect = lookup_text.get_rect(center=lookup_button_rect.center); screen.blit(lookup_text, lookup_text_rect)
-            word_lookup_button_in_game_rect = lookup_button_rect
-
-        # Draw Preview checkbox only during a live human turn (this logic is independent of the above)
         if is_human_turn_or_paused_practice:
             relevant_rand_rect = p1_rand_rect if turn == 1 else p2_rand_rect
             if relevant_rand_rect:
@@ -11816,6 +11468,7 @@ def draw_game_screen(screen, state):
 
     drawn_rects['suggest_rect_base'] = suggest_rect_base
     drawn_rects['simulate_button_rect'] = simulate_button_rect
+    drawn_rects['profile_button_rect'] = profile_button_rect
     drawn_rects['preview_checkbox_rect'] = preview_checkbox_rect
     drawn_rects['word_lookup_button_in_game_rect'] = word_lookup_button_in_game_rect
     # --- MODIFICATION END ---
@@ -11886,8 +11539,9 @@ def draw_game_screen(screen, state):
         practice_play_again_rect_draw, practice_main_menu_rect_draw, practice_quit_rect_draw = draw_practice_end_dialog(practice_end_message)
         drawn_rects['practice_play_again_rect'] = practice_play_again_rect_draw; drawn_rects['practice_main_menu_rect'] = practice_main_menu_rect_draw; drawn_rects['practice_quit_rect'] = practice_quit_rect_draw
     elif showing_simulation_config:
-        sim_input_rects_draw, sim_simulate_rect_draw, sim_cancel_rect_draw = draw_simulation_config_dialog(simulation_config_inputs, simulation_config_active_input)
+        sim_input_rects_draw, sim_simulate_rect_draw, sim_cancel_rect_draw, profile_checkbox_rect_sim_dialog = draw_simulation_config_dialog(simulation_config_inputs, simulation_config_active_input, state)
         drawn_rects['sim_input_rects'] = sim_input_rects_draw; drawn_rects['sim_simulate_rect'] = sim_simulate_rect_draw; drawn_rects['sim_cancel_rect'] = sim_cancel_rect_draw
+        drawn_rects['profile_checkbox_rect_sim_dialog'] = profile_checkbox_rect_sim_dialog
     elif specifying_rack:
         p1_name_disp = player_names[0] if player_names and player_names[0] else "Player 1"; p2_name_disp = player_names[1] if player_names and len(player_names) > 1 and player_names[1] else "Player 2"
         p1_input_rect_sr_draw, p2_input_rect_sr_draw, p1_reset_rect_sr_draw, p2_reset_rect_sr_draw, confirm_rect_sr_draw, cancel_rect_sr_draw = draw_specify_rack_dialog(p1_name_disp, p2_name_disp, specify_rack_inputs, specify_rack_active_input, specify_rack_original_racks)
@@ -12107,6 +11761,7 @@ def handle_turn_start_updates(state):
     - Resets turn-specific flags.
     - Updates previous_turn.
     - Calculates and stores the expected single draw value for the current player.
+    - Calculates and stores the list of unseen tiles for display.
     Print statements are now conditional.
 
     Args:
@@ -12126,16 +11781,17 @@ def handle_turn_start_updates(state):
     is_solving_endgame = state['is_solving_endgame']
     racks = state['racks']
     tiles = state['tiles']
-    blanks = state['blanks'] # Make sure this is the current blanks from state
-    board = state['board'] # Make sure this is the current board multipliers from state
+    blanks = state['blanks'] 
+    board = state['board'] 
     practice_mode = state['practice_mode']
     paused_for_power_tile = state['paused_for_power_tile']
     paused_for_bingo_practice = state['paused_for_bingo_practice']
     gaddag_loading_status = state['gaddag_loading_status']
     GADDAG_STRUCTURE_from_state = state['GADDAG_STRUCTURE'] 
     is_ai = state['is_ai']
+    bag = state['bag']
     
-    all_moves = state.get('all_moves', []) # Default to existing if not recalculated
+    all_moves = state.get('all_moves', []) 
     human_played = state.get('human_played', False)
     power_tile_message_shown = state.get('power_tile_message_shown', False)
     bingo_practice_message_shown = state.get('bingo_practice_message_shown', False)
@@ -12144,17 +11800,15 @@ def handle_turn_start_updates(state):
 
 
     if turn != previous_turn and not replay_mode and not game_over_state:
-        state['turn_start_time'] = time.perf_counter() # Record start time for the new turn
+        state['turn_start_time'] = time.perf_counter() 
         
         if not is_solving_endgame:
             current_player_is_human = (0 <= turn - 1 < len(is_ai)) and not is_ai[turn - 1]
             
-            # Only generate moves if it's a human's turn. AI will receive moves.
             if current_player_is_human:
                 if gaddag_loading_status == 'loaded' and GADDAG_STRUCTURE_from_state is not None:
                     if racks and len(racks) > turn - 1 and racks[turn - 1] is not None:
                         all_moves = ai_engine.generate_all_moves_gaddag(racks[turn - 1], tiles, board, blanks, 
-                                                              GADDAG_STRUCTURE_from_state.root,
                                                               is_silent_batch_run_param=is_silent_run)
                         if all_moves is None:
                             all_moves = []
@@ -12162,13 +11816,13 @@ def handle_turn_start_updates(state):
                         all_moves = []
                 else: 
                     all_moves = []
-            else: # It's an AI's turn, no need to pre-generate moves here.
+            else: 
                 all_moves = []
 
         if gaddag_loading_status == 'loaded' and GADDAG_STRUCTURE_from_state is not None:
             if racks and len(racks) > turn - 1 and racks[turn - 1] is not None:
                 current_player_rack_for_luck_calc = racks[turn - 1]
-                state['current_turn_pool_quality_score'] = get_expected_single_draw_value(
+                state['current_turn_pool_quality_score'] = ai_engine.get_expected_single_draw_value(
                     current_player_rack_for_luck_calc, tiles, blanks
                 )
                 if not is_silent_run:
@@ -12180,18 +11834,26 @@ def handle_turn_start_updates(state):
             if not is_silent_run and gaddag_loading_status != 'loaded':
                 print(f"  Turn Start P{turn}: GADDAG not loaded, cannot calculate expected draw value for luck.")
 
+        # --- NEW: Calculate unseen tiles once per turn ---
+        opponent_idx = 1 - (turn - 1)
+        unseen_tiles_counter = Counter(bag)
+        if 0 <= opponent_idx < len(racks) and racks[opponent_idx] is not None:
+            unseen_tiles_counter.update(racks[opponent_idx])
+        state['unseen_tiles_for_display'] = unseen_tiles_counter
+        # --- END NEW ---
+
         if 0 <= turn - 1 < len(is_ai) and not is_ai[turn - 1]:
             if not is_silent_run: 
                 rack_display = ''.join(sorted(racks[turn - 1])) if racks and len(racks) > turn - 1 and racks[turn - 1] is not None else "N/A"
                 print(f"Player {turn} turn started. Rack: {rack_display}")
 
-        previous_turn = turn # This is the main update to previous_turn
+        previous_turn = turn 
         human_played = False
         power_tile_message_shown = False
         bingo_practice_message_shown = False
 
     state['all_moves'] = all_moves
-    state['previous_turn'] = previous_turn # Ensure state reflects the updated previous_turn
+    state['previous_turn'] = previous_turn 
     state['human_played'] = human_played
     state['power_tile_message_shown'] = power_tile_message_shown
     state['bingo_practice_message_shown'] = bingo_practice_message_shown
@@ -13329,6 +12991,7 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
                 gaddag_root=GADDAG_STRUCTURE.root,
                 tile_distribution=TILE_DISTRIBUTION,
                 gaddag_separator=Gaddag.SEPARATOR,
+                leave_lookup_table=LEAVE_LOOKUP_TABLE,
                 vc_valid=VC_VALID,
                 vc_invalid_words=VC_INVALID_WORDS,
                 vc_invalid_structure_placement=VC_INVALID_STRUCTURE_PLACEMENT,
