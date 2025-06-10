@@ -1,14 +1,12 @@
 
 #python
-#Scrabble AB
+#Scrabble AC
 #Cython - Cython Optimize
 #10JUN25
 
 
 
-import pyximport
-pyximport.install()
-import ai_engine
+
 import pygame
 import random
 import math
@@ -22,6 +20,7 @@ from itertools import permutations, product, combinations
 from collections import Counter
 import copy
 import threading
+import ai_engine
 
 try:
     import pyperclip
@@ -7390,10 +7389,8 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
     last_scoreboard_click_idx_init = -1
     insights_data_for_replay = [] 
 
-    if selected_mode_result in [MODE_HVH, MODE_HVA] and not is_loaded_game:
-        rack_visibility = [False, False] # Hidden for live human games
-    else:
-        rack_visibility = [True, True] # Visible for all other modes (AIvAI, Replay, etc.)
+    # Default visibility
+    rack_visibility = [True, True]
 
     is_silent_run_for_init = (selected_mode_result == "BATCH_MODE" and not DEV_VISUALIZE_BATCH_ENABLED_SESSION)
 
@@ -7504,6 +7501,7 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                 game_over_at_init = False 
                 final_scores_at_init = None
             replay_mode = True
+            rack_visibility = [True, True] # Racks are always visible in replay mode
             current_replay_turn = 0 
             
             if gaddag_loading_status == 'loaded':
@@ -7525,6 +7523,7 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
 
     elif selected_mode_result == "BATCH_MODE":
         is_batch_running = True
+        rack_visibility = [True, True] # Racks are always visible for batch
         if len(return_data) == 11:
             game_mode_tuple, player_names_sel, human_player_sel, use_endgame_solver_checked, \
             use_ai_simulation_checked, num_games, _, _, \
@@ -7646,6 +7645,11 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
         USE_ENDGAME_SOLVER = use_endgame_solver_sel
         USE_AI_SIMULATION = use_ai_simulation_sel
         active_practice_state_data = practice_state_from_mode_sel
+
+        if practice_mode or game_mode == MODE_AVA:
+            rack_visibility = [True, True]
+        else: # HvH or HvA
+            rack_visibility = [False, False]
 
         if not is_silent_run_for_init:
             print(f"--- initialize_game(): Use Endgame Solver set to: {USE_ENDGAME_SOLVER} ---")
@@ -9040,9 +9044,8 @@ def _handle_mouse_down_specify_rack_override_dialog(event, state, drawn_rects):
                         print("Regenerating moves after Specify Rack (Override)...")
                     first_play_for_spec_override = state.get('first_play', True)
                     state['all_moves'] = ai_engine.generate_all_moves_gaddag(
-                    state['racks'][current_player_idx_for_spec], 
+                        state['racks'][current_player_idx_for_spec], 
                         state['tiles'], state['board'], state['blanks'],
-                        state['GADDAG_STRUCTURE'].root,
                         is_silent_batch_run_param=is_silent_run_local
                     )
                     if state['all_moves'] is None:
@@ -9236,7 +9239,7 @@ def _handle_mouse_down_specify_rack_dialog(event, state, drawn_rects):
                                 print("Regenerating moves after Specify Rack...")
                             first_play_for_spec_confirm = state.get('first_play', True)
                             state['all_moves'] = ai_engine.generate_all_moves_gaddag(
-                            state['racks'][current_player_idx_for_spec],
+                                state['racks'][current_player_idx_for_spec],
                                 state['tiles'], state['board'], state['blanks'],
                                 is_silent_batch_run_param=is_silent_run_local
                             )
@@ -12012,8 +12015,7 @@ def handle_deferred_practice_init(state):
         if not is_silent_run: # Conditional print
             print("--- Main Loop: GADDAG loaded, generating 8-letter practice moves... ---")
         if GADDAG_STRUCTURE is not None and racks and len(racks) > 0 and racks[0] is not None:
-             generated_moves = ai_engine.generate_all_moves_gaddag(racks[0], tiles, board, blanks, \
-                                                 GADDAG_STRUCTURE.root, \
+             generated_moves = ai_engine.generate_all_moves_gaddag(racks[0], tiles, board, blanks,
                                                      is_silent_batch_run_param=is_silent_run)
              if generated_moves:
                  state['practice_target_moves'] = generated_moves
@@ -13005,6 +13007,28 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
                 red=RED
             )
             print("--- Cython AI Engine Initialized. ---")
+
+            # --- NEW: AI Engine Warm-up Call ---
+        # This forces the JIT compilation of the Cython functions to happen now,
+        # preventing a long lag on the first AI turn.
+        try:
+            print("--- Warming up AI Engine (one-time JIT compilation)... ---")
+            # Use a dummy board state and rack for the warm-up.
+            # The results are discarded; the goal is just to trigger compilation.
+            _ = ai_engine.generate_all_moves_gaddag(
+                ['A', 'B', 'C', 'D', 'E', 'F', 'G'],
+                [['' for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)],
+                create_board()[0],
+                set(),
+                is_silent_batch_run_param=True
+            )
+            print("--- AI Engine is ready. ---")
+        except Exception as e_warmup:
+            print(f"WARNING: AI Engine warm-up call failed: {e_warmup}")
+
+
+
+            
         else:
             print("--- WARNING: GADDAG not loaded. AI Engine initialization skipped. AI will not function. ---")
         # --- END NEW ---
