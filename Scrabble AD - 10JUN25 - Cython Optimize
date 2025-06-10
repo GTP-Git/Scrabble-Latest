@@ -1,6 +1,6 @@
 
 #python
-#Scrabble AC
+#Scrabble AD
 #Cython - Cython Optimize
 #10JUN25
 
@@ -6714,9 +6714,15 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
     if not is_silent_batch_run_param:
         print(f"  AI Turn {turn}: Calculated expected_single_draw_value_for_turn = {expected_single_draw_value_for_turn:.2f}")
 
-    if use_endgame_solver_param and bag_count == 0 and practice_mode_param != "eight_letter" and not is_solving_endgame:
+    # --- MODIFICATION START: Calculate total tiles on racks for endgame trigger ---
+    player_rack_len = len(racks[player_idx]) if 0 <= player_idx < len(racks) and racks[player_idx] is not None else 0
+    opponent_rack_len = len(racks[opponent_idx]) if 0 <= opponent_idx < len(racks) and racks[opponent_idx] is not None else 0
+    total_tiles_on_racks = player_rack_len + opponent_rack_len
+
+    if use_endgame_solver_param and bag_count == 0 and total_tiles_on_racks <= 10 and practice_mode_param != "eight_letter" and not is_solving_endgame:
         if not is_silent_batch_run_param:
-            print("AI: Bag empty and solver enabled, entering endgame solver...")
+            print(f"AI: Endgame condition met (Bag empty, {total_tiles_on_racks} tiles on racks <= 8). Entering solver...")
+        # --- MODIFICATION END ---
         
         opponent_rack = []
         if 0 <= opponent_idx < len(racks) and racks[opponent_idx] is not None:
@@ -6993,11 +6999,19 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
     run_simulation_for_decision = (use_ai_simulation_param and game_mode in [MODE_HVH, MODE_AVA] and practice_mode_param is None and can_play)
     if run_simulation_for_decision:
         opponent_rack_len_sim = len(racks[opponent_idx]) if 0 <= opponent_idx < len(racks) and racks[opponent_idx] is not None else 7
-        simulation_results = run_ai_simulation(all_moves_gen, current_rack, opponent_rack_len_sim, tiles, blanks, board, bag, GADDAG_STRUCTURE.root, first_play,\
-                                             num_ai_candidates=sim_config_num_candidates,\
-                                             num_opponent_sims=sim_config_num_opponent_sims,\
-                                             num_post_sim_candidates=sim_config_num_post_sim_candidates,\
-                                             is_silent_batch_run_param=is_silent_batch_run_param)
+        simulation_results = ai_engine.run_ai_simulation(
+            all_moves_gen,
+            current_rack,
+            opponent_rack_len_sim,
+            tiles,
+            blanks,
+            board,
+            bag,
+            sim_config_num_candidates,
+            sim_config_num_opponent_sims,
+            sim_config_num_post_sim_candidates,
+            is_silent_batch_run_param=is_silent_batch_run_param
+        )
         if simulation_results:
             best_simulated_play_candidate = simulation_results[0]['move']
             best_simulated_play_final_score = simulation_results[0]['final_score']
@@ -7186,8 +7200,6 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
         move_data_for_turn['exchanged_tiles'] = exchanged_tiles_for_history
 
     return next_turn_val, first_play, pass_count, exchange_count, consecutive_zero_point_turns, [], dropdown_open, hinting, showing_all_words, paused_for_power_tile_local_flag, current_power_tile_local_val, paused_for_bingo_practice_local_flag, set(), move_data_for_turn
-
-
 
 
 
@@ -8920,13 +8932,11 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
                         sim_opponent_idx = 1 - sim_player_idx
                         sim_ai_rack = sim_racks[sim_player_idx]
                         sim_opponent_rack_len = len(sim_racks[sim_opponent_idx])
-                        sim_is_first_play = sum(1 for row in sim_tiles for t in row if t) == 0
                         
                         simulation_results = ai_engine.run_ai_simulation(
                             ai_engine.generate_all_moves_gaddag(sim_ai_rack, sim_tiles, state['board'], sim_blanks, is_silent_batch_run_param=True),
                             sim_ai_rack, sim_opponent_rack_len, sim_tiles, sim_blanks, state['board'], sim_bag,
-                            sim_is_first_play,
-                            num_ai_candidates=num_ai_cand, num_opponent_sims=num_opp_sim, num_post_sim_candidates=num_post_sim,
+                            num_ai_cand, num_opp_sim, num_post_sim,
                             is_silent_batch_run_param=is_silent_run_local
                         )
                     else: # Live game simulation
@@ -8943,8 +8953,7 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
                             current_player_all_moves,
                             current_player_rack, opponent_rack_len,
                             state['tiles'], state['blanks'], state['board'], state['bag'],
-                            state['first_play'],
-                            num_ai_candidates=num_ai_cand, num_opponent_sims=num_opp_sim, num_post_sim_candidates=num_post_sim,
+                            num_ai_cand, num_opp_sim, num_post_sim,
                             is_silent_batch_run_param=is_silent_run_local
                         )
                     
@@ -13075,7 +13084,7 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
         else:
             analyzer_data_for_replay = []
 
-    # --- NEW, SIMPLIFIED PROFILING LOGIC ---
+    # --- MODIFICATION START: Corrected Profiling Logic ---
     session_flags = {}
     if DEV_CPROFILE_ENABLED_SESSION:
         if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
@@ -13091,18 +13100,19 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
                          'temp_namespace': temp_namespace})
         session_flags = temp_namespace.get("result", {})
 
-        # If the session we just profiled was a batch run, print stats and exit.
+        # This block now runs UNCONDITIONALLY if profiling was enabled
+        print("\n--- cProfile Stats ---")
+        stats_obj = pstats.Stats(profiler, stream=sys.stdout).sort_stats('cumulative')
+        stats_obj.print_stats(30) # Print the top 30 cumulative time functions
+        
         if is_batch_running:
-            print("\n--- cProfile Stats (Batch Run) ---")
-            stats_obj = pstats.Stats(profiler, stream=sys.stdout).sort_stats('cumulative')
-            stats_obj.print_stats(30)
-            # Set flag to signal a clean exit after this.
             just_finished_a_batch = True
     else:
         # If not profiling, just run the session normally.
         session_flags = execute_game_session(is_initialized_from_outer_loop_param)
+    # --- MODIFICATION END ---
 
-    # If we just finished a profiled batch run, we need to exit the program.
+    # If we just finished a batch run, we need to exit the program.
     if just_finished_a_batch:
         return False, False # This tells the main while loop to terminate.
 
