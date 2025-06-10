@@ -1,6 +1,6 @@
 # ai_engine.pyx
 
-#ai_engine_pyx - AC - 10JUN25 - Cythonize Optimize
+#ai_engine_pyx - AD - 10JUN25 - Cythonize Optimize
 
 
 
@@ -12,6 +12,17 @@ from itertools import permutations, combinations
 import cython
 from collections import Counter
 import random
+from libc.stdlib cimport rand, srand, RAND_MAX
+from libc.time cimport time
+
+# Seed the C random number generator once when the module is imported
+srand(<unsigned int>time(NULL))
+
+
+
+
+
+
 
 # --- Sorting Helper Functions for Cython ---
 # These replace the lambda functions which are not fully supported in cpdef functions.
@@ -1063,51 +1074,58 @@ cpdef tuple find_best_exchange_option(list rack, list game_tiles, set game_blank
 @cython.cdivision(True)
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cpdef list run_ai_simulation(list initial_ai_moves_list, list ai_rack, int opponent_rack_len, list tiles, set blanks, list board, list bag, bint is_first_play,
+cpdef list run_ai_simulation(list initial_ai_moves_list, list ai_rack, int opponent_rack_len, list tiles, set blanks, list board, list bag,
                              int num_ai_candidates, int num_opponent_sims, int num_post_sim_candidates,
                              bint is_silent_batch_run_param=False):
     """
     Performs a 2-ply simulation to find the best AI move. (Cythonized)
+    This version uses C arrays for high-performance opponent rack simulation.
     """
-    cdef list all_ai_moves, top_ai_moves_candidates, simulation_results, unseen_tiles_pool, final_evaluated_moves
-    cdef list sim_tiles_after_ai, sim_rack_after_ai, sim_bag_after_ai, drawn_ai, opponent_available_pool_for_this_sim
-    cdef list temp_opponent_pool_copy, sim_opponent_rack, opponent_moves
+    cdef list all_ai_moves, top_ai_moves_candidates, simulation_results, final_evaluated_moves
+    cdef list sim_tiles_after_ai, sim_rack_after_ai, sim_bag_after_ai, drawn_ai, opponent_moves, sim_opponent_rack
     cdef set sim_blanks_after_ai, move_blanks
-    cdef dict ai_move, move_result, ai_move_dict
+    cdef dict ai_move, move_result, ai_move_dict, unseen_pool_dict
     cdef float total_opponent_score_for_this_move, average_opponent_score, ai_raw_score, leave_value, final_eval_score
     cdef float best_opp_eval, opp_raw_score, opp_leave_val, avg_opp_score, best_opponent_score
     cdef int i, sim_run, newly_placed_count, num_to_draw_ai, actual_opponent_rack_len, r, c
     cdef bint valid_placement
-    cdef str tile_in_pool, letter
+    cdef str letter
     cdef object temp_drawn_ai_counts
+
+    # C-level variables for high-speed simulation
+    cdef int[27] unseen_pool_counts_c, opponent_pool_counts_c, temp_opp_pool_counts
+    cdef int total_unseen_tiles, total_opponent_tiles, temp_total_opp_tiles
+    cdef int rand_idx, tile_idx, cumulative_count, k
 
     all_ai_moves = initial_ai_moves_list
     if not all_ai_moves:
         return []
 
-    # --- MODIFICATION START ---
-    # Calculate preliminary equity (score + leave_value) for a better initial sort.
     for move in all_ai_moves:
         raw_score = move.get('score', 0)
         leave_val = evaluate_leave(move.get('leave', []), False, True)
         move['prelim_equity'] = raw_score + leave_val
 
-    # Sort by the new preliminary equity to get better candidates.
     all_ai_moves.sort(key=_sort_key_prelim_equity, reverse=True)
-    # --- MODIFICATION END ---
     
     top_ai_moves_candidates = all_ai_moves[:num_ai_candidates]
     
     simulation_results = []
     
+    # --- NEW: Convert unseen pool to a C array of counts ---
     unseen_pool_dict = get_remaining_tiles(ai_rack, tiles, blanks)
-    unseen_tiles_pool = []
+    unseen_pool_counts_c = [0] * 27
+    total_unseen_tiles = 0
     for tile, count in unseen_pool_dict.items():
-        unseen_tiles_pool.extend([tile] * count)
+        if tile == ' ':
+            tile_idx = 26
+        else:
+            tile_idx = ord(tile) - ord('A')
+        unseen_pool_counts_c[tile_idx] = count
+        total_unseen_tiles += count
 
     for i, ai_move in enumerate(top_ai_moves_candidates):
         total_opponent_score_for_this_move = 0.0
-        ai_score = ai_move.get('score', 0)
         newly_placed_count = len(ai_move.get('newly_placed', []))
 
         sim_tiles_after_ai = [row[:] for row in tiles]
@@ -1136,19 +1154,45 @@ cpdef list run_ai_simulation(list initial_ai_moves_list, list ai_rack, int oppon
         for _ in range(num_to_draw_ai):
             if sim_bag_after_ai: drawn_ai.append(sim_bag_after_ai.pop())
         
+        # --- NEW: Create opponent's pool by subtracting drawn_ai from unseen_pool C array ---
+        opponent_pool_counts_c = unseen_pool_counts_c[:] # C array copy
+        total_opponent_tiles = total_unseen_tiles
+        
+        temp_drawn_ai_counts = Counter(drawn_ai)
+        for tile, count in temp_drawn_ai_counts.items():
+            if tile == ' ':
+                tile_idx = 26
+            else:
+                tile_idx = ord(tile) - ord('A')
+            opponent_pool_counts_c[tile_idx] -= count
+            total_opponent_tiles -= count
+
         for sim_run in range(num_opponent_sims):
-            opponent_available_pool_for_this_sim = unseen_tiles_pool[:]
-            temp_drawn_ai_counts = Counter(drawn_ai)
+            # --- NEW: High-speed opponent rack generation from C array ---
+            sim_opponent_rack = []
+            temp_opp_pool_counts = opponent_pool_counts_c[:] # Copy counts for this simulation
+            temp_total_opp_tiles = total_opponent_tiles
             
-            temp_opponent_pool_copy = opponent_available_pool_for_this_sim[:]
-            for tile_in_pool in temp_opponent_pool_copy:
-                if temp_drawn_ai_counts.get(tile_in_pool, 0) > 0:
-                    temp_drawn_ai_counts[tile_in_pool] -= 1
-                    opponent_available_pool_for_this_sim.remove(tile_in_pool)
-            
-            random.shuffle(opponent_available_pool_for_this_sim)
-            actual_opponent_rack_len = min(opponent_rack_len, len(opponent_available_pool_for_this_sim))
-            sim_opponent_rack = opponent_available_pool_for_this_sim[:actual_opponent_rack_len]
+            actual_opponent_rack_len = min(opponent_rack_len, temp_total_opp_tiles)
+
+            for k in range(actual_opponent_rack_len):
+                if temp_total_opp_tiles == 0: break
+                
+                rand_idx = rand() % temp_total_opp_tiles
+                cumulative_count = 0
+                
+                for tile_idx in range(27):
+                    cumulative_count += temp_opp_pool_counts[tile_idx]
+                    if rand_idx < cumulative_count:
+                        if tile_idx == 26:
+                            sim_opponent_rack.append(' ')
+                        else:
+                            sim_opponent_rack.append(chr(ord('A') + tile_idx))
+                        
+                        temp_opp_pool_counts[tile_idx] -= 1
+                        temp_total_opp_tiles -= 1
+                        break
+            # --- END of new rack generation ---
             
             opponent_moves = generate_all_moves_gaddag(
                 sim_opponent_rack, sim_tiles_after_ai, board, sim_blanks_after_ai,
