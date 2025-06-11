@@ -1,5 +1,13 @@
 To-Do List
 
+-- Can the Lookup feature also serve as a word search, for ex., LO? returns LOG, LOT..., etc. Can it also return the probability of each word, within it's length? For ex, LOVED is 2880 w/in the fives.
+
+-- Wouldn't ai_turn and def handle_ai_turn_trigger be faster if in Cython?
+
+-- Replay/Loaded game should start with both initial racks shown...now it shows the racks at the end of the game when Replay is first started.
+
+-- Start up should show a landing screen, maybe with Scrabble quotes running across it?
+
 -- For BatchStats, see if playing <=3 unique letters on the opening move is more/less better than playing >3 unique letters. The theory is that less unique letters allows for less 8-letter bingo opportunities for your opponent.
 
 -- Allow what-if scenarios, where the main_branch_game_state is saved, but players can make different plays, choose different racks, explore endgames, etc., Have a reset button that backs the main_branch_game_state to continue play. 
@@ -13,8 +21,6 @@ To-Do List
 -- Need a way to gracefully stop endgame analysis, retaining the current best sequence.
 
 -- add code for more than a 2-ply look-ahead
-
--- sometimes game is non-responsive upon startup, or temporarily hands during gameplay, once per game. Is there a way to diagnose and fix this?
 
 -- ability to set up the board tiles in any configuration
 
@@ -217,3 +223,13 @@ ________________________________________________
 -- Add Simulate (Sim) button in Insights window
 
 -- Lookup button should be available in Replay Mode
+
+-- sometimes game is non-responsive upon startup, or temporarily hands during gameplay, once per game. Is there a way to diagnose and fix this?
+
+-- Why is Luck so consistently so bad? Wouldn't it be just as likely to be positive?
+
+-- Simulation results should show as many results as you sim, instead of just the top five.
+                                                                                                                                                             -- Simulation results should show as many results as you sim, instead of just the top five.
+-- On first move, how does the AI decide to play vertically or horizontally?
+
+                                                                                                                                                           
