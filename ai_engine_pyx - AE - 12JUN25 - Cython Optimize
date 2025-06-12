@@ -1,6 +1,6 @@
 # ai_engine.pyx
 
-#ai_engine_pyx - AE - 11JUN25 - Cythonize Optimize
+#ai_engine_pyx - AE - 12JUN25 - Cythonize Optimize
 
 
 
@@ -37,6 +37,9 @@ def _sort_key_final_eval(m):
 
 def _sort_key_prelim_equity(m):
     return m.get('prelim_equity', 0.0)
+
+def _sort_key_solve_endgame(line_data):
+    return line_data['score_diff']
 
 # --- Globals to be initialized from Python ---
 cdef int GRID_SIZE_C
@@ -88,20 +91,23 @@ cdef class Dawg:
         return node.is_end
 
 # --- New Initializer Function ---
+# In ai_engine_pyx - AE - 11JUN25 - Cython Optimize
+
+# --- New Initializer Function ---
 cpdef init_ai_engine(
     int grid_size, tuple center_square, Dawg dawg, object gaddag_root,
     object tile_distribution, str gaddag_separator, dict leave_lookup_table,
     str vc_valid, str vc_invalid_words, str vc_invalid_structure_placement,
     str vc_invalid_structure_no_words, str vc_invalid_structure_not_center,
     str vc_invalid_structure_not_connected, str vc_invalid_structure_empty_play,
-    tuple light_blue, tuple blue, tuple pink, tuple red
+    tuple light_blue, tuple blue, tuple pink, tuple red, str letters
 ):
     """
     Initializes the Cython module with constants and objects from the main Python script.
     This avoids slow cross-module calls during move generation.
     """
     global GRID_SIZE_C, CENTER_SQUARE_C, DAWG_C, GADDAG_ROOT_C, TILE_DISTRIBUTION_C
-    global GADDAG_SEPARATOR_C, LEAVE_LOOKUP_TABLE_C
+    global GADDAG_SEPARATOR_C, LEAVE_LOOKUP_TABLE_C, LETTERS_C
     global VC_VALID_C, VC_INVALID_WORDS_C, VC_INVALID_STRUCTURE_PLACEMENT_C
     global VC_INVALID_STRUCTURE_NO_WORDS_C, VC_INVALID_STRUCTURE_NOT_CENTER_C
     global VC_INVALID_STRUCTURE_NOT_CONNECTED_C, VC_INVALID_STRUCTURE_EMPTY_PLAY_C
@@ -114,6 +120,7 @@ cpdef init_ai_engine(
     TILE_DISTRIBUTION_C = tile_distribution
     GADDAG_SEPARATOR_C = gaddag_separator
     LEAVE_LOOKUP_TABLE_C = leave_lookup_table
+    LETTERS_C = letters
     
     VC_VALID_C = vc_valid
     VC_INVALID_WORDS_C = vc_invalid_words
@@ -171,6 +178,7 @@ cpdef set get_anchor_points(list tiles, bint is_first_play):
 
 
 
+
 @cython.cdivision(True)
 cdef _gaddag_traverse(
     object anchor_pos, int[27] rack_counts_c, list tiles, list board, set blanks, dict cross_check_sets, object gaddag_node,
@@ -218,7 +226,7 @@ cdef _gaddag_traverse(
                                 temp_blanks_for_validation.add((r_place, c_place))
                                 move_blanks_coords_for_this_play.add((r_place, c_place))
                 
-                validation_code, is_bingo_from_validation, detail = is_valid_play(
+                validation_code, is_bingo_from_validation, detail, all_words_formed_details = is_valid_play(
                     newly_placed_list_details,
                     temp_tiles_for_validation,
                     is_first_play,
@@ -231,7 +239,6 @@ cdef _gaddag_traverse(
                 if validation_code == VC_VALID_C:
                     unique_move_signatures.add(new_tiles_sig)
                     score = calculate_score(newly_placed_list_details, board, temp_tiles_for_validation, temp_blanks_for_validation)
-                    all_words_formed_details = find_all_words_formed(newly_placed_list_details, temp_tiles_for_validation)
                     
                     primary_word_tiles = []
                     primary_word_str = ""
@@ -777,6 +784,8 @@ cpdef find_all_words_formed(list new_tiles, list tiles):
 
 
 
+# In ai_engine_pyx - AE - 11JUN25 - Cython Optimize
+
 cpdef is_valid_play(list word_positions, list tiles_after_play, bint is_first_play_param, int initial_rack_size, list original_tiles_on_board, object rack_before_play, bint is_silent_batch_run_param=False):
     """Validate a potential play against game rules and dictionary. (Cythonized)"""
     cdef set newly_placed_positions_coords
@@ -789,7 +798,7 @@ cpdef is_valid_play(list word_positions, list tiles_after_play, bint is_first_pl
     cdef object dawg_search_result
 
     if not word_positions:
-        return VC_INVALID_STRUCTURE_EMPTY_PLAY_C, False, "No tiles placed."
+        return VC_INVALID_STRUCTURE_EMPTY_PLAY_C, False, "No tiles placed.", []
 
     newly_placed_coords_list = []
     for r_item, c_item, _ in word_positions:
@@ -810,7 +819,7 @@ cpdef is_valid_play(list word_positions, list tiles_after_play, bint is_first_pl
     is_vertical = len(cols_of_new_tiles) == 1
 
     if not (is_horizontal or is_vertical):
-        return VC_INVALID_STRUCTURE_PLACEMENT_C, is_bingo, "Tiles not in a single line."
+        return VC_INVALID_STRUCTURE_PLACEMENT_C, is_bingo, "Tiles not in a single line.", []
 
     if is_horizontal:
         r = rows_of_new_tiles[0]
@@ -833,7 +842,7 @@ cpdef is_valid_play(list word_positions, list tiles_after_play, bint is_first_pl
             
         for c_check in range(temp_min_c, temp_max_c + 1):
             if not tiles_after_play[r][c_check]:
-                return VC_INVALID_STRUCTURE_PLACEMENT_C, is_bingo, "Gap in horizontal play."
+                return VC_INVALID_STRUCTURE_PLACEMENT_C, is_bingo, "Gap in horizontal play.", []
     elif is_vertical:
         c = cols_of_new_tiles[0]
 
@@ -855,11 +864,11 @@ cpdef is_valid_play(list word_positions, list tiles_after_play, bint is_first_pl
 
         for r_check in range(temp_min_r, temp_max_r + 1):
             if not tiles_after_play[r_check][c]:
-                return VC_INVALID_STRUCTURE_PLACEMENT_C, is_bingo, "Gap in vertical play."
+                return VC_INVALID_STRUCTURE_PLACEMENT_C, is_bingo, "Gap in vertical play.", []
 
     all_words_details = find_all_words_formed(word_positions, tiles_after_play)
     if not all_words_details:
-        return VC_INVALID_STRUCTURE_NO_WORDS_C, is_bingo, "No scorable words formed."
+        return VC_INVALID_STRUCTURE_NO_WORDS_C, is_bingo, "No scorable words formed.", []
 
     formed_word_strings = []
     for word_detail in all_words_details:
@@ -870,7 +879,7 @@ cpdef is_valid_play(list word_positions, list tiles_after_play, bint is_first_pl
         formed_word_strings.append(word_str)
 
     if not formed_word_strings:
-        return VC_INVALID_STRUCTURE_NO_WORDS_C, is_bingo, "No scorable words formed (strings)."
+        return VC_INVALID_STRUCTURE_NO_WORDS_C, is_bingo, "No scorable words formed (strings).", []
 
     structurally_sound = True
     structural_error_reason = ""
@@ -881,7 +890,7 @@ cpdef is_valid_play(list word_positions, list tiles_after_play, bint is_first_pl
     else:
         connects = False
         if original_tiles_on_board is None: 
-             return VC_INVALID_STRUCTURE_NOT_CONNECTED_C, is_bingo, "Internal error: Board state missing for connection check."
+             return VC_INVALID_STRUCTURE_NOT_CONNECTED_C, is_bingo, "Internal error: Board state missing for connection check.", []
 
         for r_conn, c_conn in newly_placed_positions_coords:
             for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
@@ -897,11 +906,11 @@ cpdef is_valid_play(list word_positions, list tiles_after_play, bint is_first_pl
 
     if not structurally_sound:
         if structural_error_reason == "First play must be on center square.":
-             return VC_INVALID_STRUCTURE_NOT_CENTER_C, is_bingo, structural_error_reason
+             return VC_INVALID_STRUCTURE_NOT_CENTER_C, is_bingo, structural_error_reason, []
         elif structural_error_reason == "Play must connect to existing tiles.":
-             return VC_INVALID_STRUCTURE_NOT_CONNECTED_C, is_bingo, structural_error_reason
+             return VC_INVALID_STRUCTURE_NOT_CONNECTED_C, is_bingo, structural_error_reason, []
         else:
-             return VC_INVALID_STRUCTURE_PLACEMENT_C, is_bingo, structural_error_reason
+             return VC_INVALID_STRUCTURE_PLACEMENT_C, is_bingo, structural_error_reason, []
 
     invalid_words_found = []
     all_words_in_dawg = True
@@ -912,9 +921,9 @@ cpdef is_valid_play(list word_positions, list tiles_after_play, bint is_first_pl
             invalid_words_found.append(word_val_check)
 
     if not all_words_in_dawg:
-        return VC_INVALID_WORDS_C, is_bingo, invalid_words_found
+        return VC_INVALID_WORDS_C, is_bingo, invalid_words_found, []
 
-    return VC_VALID_C, is_bingo, None
+    return VC_VALID_C, is_bingo, None, all_words_details
 
 
 
@@ -1291,3 +1300,416 @@ cpdef list run_ai_simulation(list initial_ai_moves_list, list ai_rack, int oppon
     final_evaluated_moves.sort(key=_sort_key_final_eval, reverse=True)
 
     return final_evaluated_moves
+
+
+
+####Endgame Solver Helper Functions####
+
+
+cpdef str get_coord(tuple start, str direction, bint is_silent_batch_run_param=False):
+    """
+    Generate the coordinate string in GCG format. (Cythonized)
+    """
+    cdef int row, col
+    row, col = start
+    if not (0 <= row < GRID_SIZE_C and 0 <= col < GRID_SIZE_C):
+        return "???"
+
+    if direction == "right" or direction == 'H':
+        return f"{row + 1}{LETTERS_C[col]}"
+    elif direction == "down" or direction == 'V':
+        return f"{LETTERS_C[col]}{row + 1}"
+    else:
+        return "???"
+
+cpdef int get_rack_value(list rack):
+    """Calculates the sum of tile values in a rack. (Cythonized)"""
+    cdef int total_value = 0
+    cdef str tile
+    for tile in rack:
+        if tile != ' ':
+            total_value += TILE_DISTRIBUTION_C[tile][1]
+    return total_value
+
+cpdef int calculate_endgame_score_diff(list player_rack, list opponent_rack, int current_score_diff):
+    """
+    Calculates the final score difference from the perspective of the player
+    whose turn it *would* be, assuming the game just ended. (Cythonized)
+    """
+    cdef int player_val, opponent_val, final_diff
+
+    player_val = get_rack_value(player_rack)
+    opponent_val = get_rack_value(opponent_rack)
+
+    if not player_rack:
+        final_diff = current_score_diff + opponent_val
+    elif not opponent_rack:
+        final_diff = current_score_diff - player_val
+    else:
+        final_diff = current_score_diff - player_val + opponent_val
+
+    return final_diff
+
+cpdef int evaluate_endgame_heuristic(list rack_player, list rack_opponent, int current_score_diff):
+    """
+    Estimates the final score difference at a search depth limit. (Cythonized)
+    """
+    return calculate_endgame_score_diff(rack_player, rack_opponent, current_score_diff)
+
+
+
+
+
+cdef str format_single_move_for_print(object move_obj, bint is_silent_batch_run_param=False):
+    """
+    Formats a single move object (or PASS string) for endgame sequence printing. (Cythonized)
+    """
+    cdef str word, coord, leave_str
+    cdef int score
+    cdef list leave_list
+    cdef object l
+
+    if move_obj == "PASS":
+        return "[PASS]"
+    elif move_obj == "NO_MOVE_POSSIBLE":
+        return "[-]"
+    elif isinstance(move_obj, dict):
+        word = move_obj.get('word_with_blanks', move_obj.get('word', '?'))
+        coord = get_coord(move_obj.get('start', (0,0)), move_obj.get('direction', '?'), is_silent_batch_run_param)
+        score = move_obj.get('score',0)
+        leave_list = move_obj.get('leave', [])
+        leave_str = "".join(sorted(l if l != ' ' else '?' for l in leave_list))
+        if not leave_str:
+            leave_str = "-"
+        return f"[{word} {coord} {score} {leave_str}]"
+    else:
+        return "[?UNKNOWN_MOVE_FORMAT?]"
+
+
+
+
+
+
+
+cdef str format_end_state_for_print(list final_rack_p1_sim, list final_rack_p2_sim, bint last_player_to_move_was_p1, int pass_count_at_end):
+    """
+    Formats the [end RACK +/-ADJUSTMENT] part of the endgame sequence string. (Cythonized)
+    """
+    cdef str p1_rack_str, p2_rack_str
+    cdef int p1_rack_val, p2_rack_val
+    cdef object l
+
+    p1_rack_str = "".join(sorted(l if l != ' ' else '?' for l in final_rack_p1_sim))
+    if not p1_rack_str: p1_rack_str = "-"
+    p2_rack_str = "".join(sorted(l if l != ' ' else '?' for l in final_rack_p2_sim))
+    if not p2_rack_str: p2_rack_str = "-"
+
+    p1_rack_val = get_rack_value(final_rack_p1_sim)
+    p2_rack_val = get_rack_value(final_rack_p2_sim)
+
+    if pass_count_at_end >= 6:
+        return f"[end P1:{p1_rack_str} {-p1_rack_val:+} P2:{p2_rack_str} {-p2_rack_val:+}]"
+
+    if last_player_to_move_was_p1 and not final_rack_p1_sim:
+        return f"[end P2:{p2_rack_str} {+p2_rack_val:+}]"
+
+    if not last_player_to_move_was_p1 and not final_rack_p2_sim:
+        return f"[end P1:{p1_rack_str} {-p1_rack_val:+}]"
+
+    if not final_rack_p1_sim:
+         return f"[end P2:{p2_rack_str} {+p2_rack_val:+}]"
+    if not final_rack_p2_sim:
+         return f"[end P1:{p1_rack_str} {-p1_rack_val:+}]"
+
+    return "[end ?]"
+
+
+
+
+@cython.cdivision(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cpdef tuple negamax_endgame(list rack_player, list rack_opponent, list tiles, set blanks, list board,
+                            int current_score_diff, float alpha, float beta, int depth, int pass_count,
+                            int max_depth, int search_depth_limit, bint is_silent_batch_run_param=False):
+    """
+    Negamax solver for the endgame (empty bag) with depth limit. (Cythonized)
+    """
+    cdef float heuristic_score, value, best_value
+    cdef int final_diff, move_index, sim_pass_count, move_score
+    cdef list possible_moves, playout_moves, other_moves, ordered_moves, best_sequence, subsequent_sequence
+    cdef list sim_tiles, sim_rack_player, sim_rack_opponent, temp_rack, newly_placed_details
+    cdef set sim_blanks, move_blanks_coords
+    cdef bint can_pass, valid_placement
+    cdef object move, current_move_details
+    cdef int r_np, c_np
+    cdef str letter_np
+
+    if depth >= search_depth_limit:
+        heuristic_score = evaluate_endgame_heuristic(rack_player, rack_opponent, current_score_diff)
+        return heuristic_score, []
+
+    if not rack_player or not rack_opponent or pass_count >= 6:
+        final_diff = calculate_endgame_score_diff(rack_player, rack_opponent, current_score_diff)
+        return final_diff, []
+
+    possible_moves = generate_all_moves_gaddag(rack_player, tiles, board, blanks, None, True)
+
+    if possible_moves is None:
+        possible_moves = []
+
+    can_pass = True
+
+    best_value = -1000000.0
+    best_sequence = None
+
+    playout_moves = [m for m in possible_moves if len(m.get('leave', rack_player)) == 0]
+    other_moves = [m for m in possible_moves if len(m.get('leave', rack_player)) > 0]
+    other_moves.sort(key=_sort_key_raw_score, reverse=True)
+
+    ordered_moves = playout_moves + other_moves
+    if can_pass:
+        ordered_moves.append("PASS")
+
+    if not ordered_moves:
+        final_diff = calculate_endgame_score_diff(rack_player, rack_opponent, current_score_diff)
+        return final_diff, []
+
+    for move_index, move in enumerate(ordered_moves):
+        sim_tiles = [row[:] for row in tiles]
+        sim_blanks = blanks.copy()
+        sim_rack_player = rack_player[:]
+        sim_rack_opponent = rack_opponent[:]
+        sim_score_diff = current_score_diff
+        sim_pass_count = pass_count
+        current_move_details = move
+
+        if move == "PASS":
+            sim_pass_count += 1
+            value, subsequent_sequence = negamax_endgame(
+                sim_rack_opponent, sim_rack_player, sim_tiles, sim_blanks, board,
+                -sim_score_diff, -beta, -alpha, depth + 1, sim_pass_count, max_depth, search_depth_limit,
+                True)
+            value = -value
+        else:
+            sim_pass_count = 0
+            newly_placed_details = move.get('newly_placed', [])
+            move_blanks_coords = move.get('blanks', set())
+            move_score = move.get('score', 0)
+
+            temp_rack = sim_rack_player[:]
+            valid_placement = True
+            for r_np, c_np, letter_np in newly_placed_details:
+                if 0 <= r_np < GRID_SIZE_C and 0 <= c_np < GRID_SIZE_C:
+                    sim_tiles[r_np][c_np] = letter_np
+                    if (r_np, c_np) in move_blanks_coords:
+                        sim_blanks.add((r_np, c_np))
+                        if ' ' in temp_rack:
+                            temp_rack.remove(' ')
+                        else:
+                            valid_placement = False
+                            break
+                    else:
+                        if letter_np in temp_rack:
+                            temp_rack.remove(letter_np)
+                        else:
+                            valid_placement = False
+                            break
+                else:
+                    valid_placement = False
+                    break
+
+            if not valid_placement:
+                 continue
+
+            sim_rack_player = temp_rack
+            sim_score_diff += move_score
+
+            value, subsequent_sequence = negamax_endgame(
+                sim_rack_opponent, sim_rack_player, sim_tiles, sim_blanks, board,
+                -sim_score_diff, -beta, -alpha, depth + 1, sim_pass_count, max_depth, search_depth_limit,
+                True)
+            value = -value
+
+        if value > best_value:
+            best_value = value
+            best_sequence = [current_move_details] + subsequent_sequence
+
+        alpha = max(alpha, value)
+        if alpha >= beta:
+            break
+
+    if best_sequence is None:
+         final_diff = calculate_endgame_score_diff(rack_player, rack_opponent, current_score_diff)
+         return final_diff, []
+
+    return best_value, best_sequence
+
+
+
+# In ai_engine_pyx - AE - 11JUN25 - Cython Optimize
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cpdef object solve_endgame(list rack_player, list opponent_rack, list tiles, set blanks, list board, int current_score_diff, bint is_silent_batch_run_param=False):
+    """
+    Top-level function to initiate the endgame solver. (Cythonized)
+    """
+    cdef list initial_tiles_board_state, initial_rack_player_state, initial_rack_opponent_state
+    cdef list possible_ai_first_moves, candidate_first_moves, evaluated_lines
+    cdef list sim_tiles_after_ai_1, sim_rack_player_after_ai_1, sim_rack_opponent_after_ai_1, temp_rack_player_sim, newly_placed, opponent_sub_sequence, full_move_sequence_for_this_line
+    cdef set initial_blanks_board_state, sim_blanks_after_ai_1, move_blanks
+    cdef int search_depth_limit, max_possible_depth, actual_search_depth, sim_pass_count_for_opp, move_score, sim_score_diff_after_ai_1
+    cdef int i, rank, num_to_print
+    cdef float opp_perspective_score_diff, ai_final_score_diff_for_this_line, last_printed_score, current_score
+    cdef bint valid_placement_sim
+    cdef object ai_first_move_obj, line_data
+    cdef str sequence_str_parts_str
+    cdef int r, c
+    cdef str letter
+
+    initial_tiles_board_state = [row[:] for row in tiles]
+    initial_blanks_board_state = blanks.copy()
+    initial_rack_player_state = rack_player[:]
+    initial_rack_opponent_state = opponent_rack[:]
+    initial_score_diff_state = current_score_diff
+
+    search_depth_limit = 6
+    max_possible_depth = len(initial_rack_player_state) + len(initial_rack_opponent_state)
+    actual_search_depth = min(search_depth_limit, max_possible_depth)
+
+    possible_ai_first_moves = generate_all_moves_gaddag(
+        initial_rack_player_state, initial_tiles_board_state, board, initial_blanks_board_state,
+        None, True
+    )
+    if possible_ai_first_moves is None:
+        possible_ai_first_moves = []
+
+    candidate_first_moves = possible_ai_first_moves + ["PASS"]
+    if not candidate_first_moves:
+        return "PASS"
+
+    evaluated_lines = []
+
+    for ai_first_move_obj in candidate_first_moves:
+        sim_tiles_after_ai_1 = [row[:] for row in initial_tiles_board_state]
+        sim_blanks_after_ai_1 = initial_blanks_board_state.copy()
+        sim_rack_player_after_ai_1 = initial_rack_player_state[:]
+        sim_rack_opponent_after_ai_1 = initial_rack_opponent_state[:]
+        sim_score_diff_after_ai_1 = initial_score_diff_state
+        sim_pass_count_for_opp = 0
+
+        if ai_first_move_obj == "PASS":
+            sim_pass_count_for_opp = 1
+        elif isinstance(ai_first_move_obj, dict):
+            sim_pass_count_for_opp = 0
+            newly_placed = ai_first_move_obj.get('newly_placed', [])
+            move_blanks = ai_first_move_obj.get('blanks', set())
+            move_score = ai_first_move_obj.get('score', 0)
+
+            valid_placement_sim = True
+            temp_rack_player_sim = sim_rack_player_after_ai_1[:]
+            for r, c, letter in newly_placed:
+                if 0 <= r < GRID_SIZE_C and 0 <= c < GRID_SIZE_C:
+                    sim_tiles_after_ai_1[r][c] = letter
+                    if (r, c) in move_blanks:
+                        sim_blanks_after_ai_1.add((r,c))
+                        if ' ' in temp_rack_player_sim: temp_rack_player_sim.remove(' ')
+                        else: valid_placement_sim = False; break
+                    else:
+                        if letter in temp_rack_player_sim: temp_rack_player_sim.remove(letter)
+                        else: valid_placement_sim = False; break
+                else: valid_placement_sim = False; break
+
+            if not valid_placement_sim:
+                continue
+
+            sim_rack_player_after_ai_1 = temp_rack_player_sim
+            sim_score_diff_after_ai_1 += move_score
+        else:
+            continue
+
+        opp_perspective_score_diff, opponent_sub_sequence = negamax_endgame(
+            sim_rack_opponent_after_ai_1,
+            sim_rack_player_after_ai_1,
+            sim_tiles_after_ai_1,
+            sim_blanks_after_ai_1,
+            board,
+            -sim_score_diff_after_ai_1,
+            -1000000.0, 1000000.0,
+            depth=1,
+            pass_count=sim_pass_count_for_opp,
+            max_depth=max_possible_depth,
+            search_depth_limit=actual_search_depth,
+            is_silent_batch_run_param=True
+        )
+
+        ai_final_score_diff_for_this_line = -opp_perspective_score_diff
+
+        full_move_sequence_for_this_line = [ai_first_move_obj] + opponent_sub_sequence
+
+        evaluated_lines.append({
+            'score_diff': ai_final_score_diff_for_this_line,
+            'sequence': full_move_sequence_for_this_line
+        })
+
+    evaluated_lines.sort(key=_sort_key_solve_endgame, reverse=True)
+
+    if evaluated_lines:
+        print(f"Top Endgame Sequences Found (Score Diff for P1, Depth Limit: {actual_search_depth}):")
+
+        num_to_print = 0
+        last_printed_score = -999999.0
+        rank = 0
+
+        for i, line_data in enumerate(evaluated_lines):
+            current_score = line_data['score_diff']
+            if i < 10 or (last_printed_score is not None and current_score == last_printed_score):
+                num_to_print +=1
+                if last_printed_score is None or current_score != last_printed_score:
+                    rank = i + 1
+
+                sequence_str_parts = []
+                temp_sim_rack_p1 = initial_rack_player_state[:]
+                temp_sim_rack_o2 = initial_rack_opponent_state[:]
+                current_player_is_p1_in_print_sim = True
+                pass_count_for_print_sim = 0
+
+                for move_idx_in_seq, move_obj_in_seq in enumerate(line_data['sequence']):
+                    turn_indicator_in_seq = f"{move_idx_in_seq // 2 + 1}. "
+                    sequence_str_parts.append(turn_indicator_in_seq)
+
+                    formatted_move_str = format_single_move_for_print(move_obj_in_seq, True)
+                    sequence_str_parts.append(formatted_move_str)
+                    sequence_str_parts.append(" ")
+
+                    if move_obj_in_seq == "PASS":
+                        pass_count_for_print_sim +=1
+                    elif isinstance(move_obj_in_seq, dict):
+                        pass_count_for_print_sim = 0
+                        if current_player_is_p1_in_print_sim:
+                            temp_sim_rack_p1 = move_obj_in_seq.get('leave', [])
+                        else:
+                            temp_sim_rack_o2 = move_obj_in_seq.get('leave', [])
+
+                    current_player_is_p1_in_print_sim = not current_player_is_p1_in_print_sim
+
+                    if move_idx_in_seq == len(line_data['sequence']) - 1:
+                        end_state_str = format_end_state_for_print(
+                            temp_sim_rack_p1,
+                            temp_sim_rack_o2,
+                            not current_player_is_p1_in_print_sim,
+                            pass_count_for_print_sim
+                        )
+                        sequence_str_parts.append(end_state_str)
+                
+                sequence_str_parts_str = "".join(sequence_str_parts)
+                print(f"{rank}.\t{current_score:+.0f}\t{sequence_str_parts_str}")
+                last_printed_score = current_score
+            else:
+                break
+
+    if evaluated_lines:
+        return evaluated_lines[0]['sequence'][0]
+    else:
+        return "PASS"
