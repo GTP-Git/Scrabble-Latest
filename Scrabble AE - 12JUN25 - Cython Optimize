@@ -1,4 +1,5 @@
 
+
 #python
 #Scrabble AE
 #Cython - Cython Optimize
@@ -1480,27 +1481,6 @@ REPLAY_BUTTON_GAP = 10
 
 
 
-
-def get_coord(start, direction, is_silent_batch_run_param=False): # Added is_silent_batch_run_param
-    """
-    Generate the coordinate string in GCG format.
-    Accepts direction as "right", "down", 'H', or 'V'.
-    Horizontal: RowNumberColumnLetter (e.g., 8H)
-    Vertical:   ColumnLetterRowNumber (e.g., H8)
-    Warning print is now conditional.
-    """
-    row, col = start
-    if not (0 <= row < GRID_SIZE and 0 <= col < GRID_SIZE):
-        return "???" 
-
-    if direction == "right" or direction == 'H': 
-        return f"{row + 1}{LETTERS[col]}"
-    elif direction == "down" or direction == 'V': 
-        return f"{LETTERS[col]}{row + 1}"
-    else:
-        if not is_silent_batch_run_param: # Conditional print for warning
-            print(f"Warning: Unexpected direction '{direction}' in get_coord.")
-        return "???"
 
 
 
@@ -4534,7 +4514,7 @@ def draw_hint_dialog(screen, moves, selected_index, dialog_x, dialog_y, scroll_o
         direction = move.get('direction', 'right')
         leave = move.get('leave', [])
         word_display = move.get('word_with_blanks', word.upper())
-        coord = get_coord(start_pos, direction)
+        coord = ai_engine.get_coord(start_pos, direction)
         leave_str = ''.join(sorted(l if l != ' ' else '?' for l in leave))
         avg_opp_score = move.get('avg_opp_score', 0.0)
         leave_val = ai_engine.evaluate_leave(leave)
@@ -5729,49 +5709,6 @@ def estimate_draw_value(num_to_draw, expected_single_draw_value):
 
 
 
-
-# --- NEW Endgame Solver Functions ---
-
-def get_rack_value(rack):
-    """Calculates the sum of tile values in a rack."""
-    return sum(TILE_DISTRIBUTION[tile][1] for tile in rack if tile != ' ')
-
-def calculate_endgame_score_diff(player_rack, opponent_rack, current_score_diff):
-    """
-    Calculates the final score difference from the perspective of the player
-    whose turn it *would* be, assuming the game just ended.
-    """
-    player_val = get_rack_value(player_rack)
-    opponent_val = get_rack_value(opponent_rack)
-
-    if not player_rack: # Player went out
-        # Player gains opponent's remaining value, opponent loses nothing extra relative to player
-        final_diff = current_score_diff + opponent_val
-    elif not opponent_rack: # Opponent went out
-        # Player loses their own remaining value, opponent gains nothing extra relative to player
-        final_diff = current_score_diff - player_val
-    else: # Game ended via passes or other stalemate (treat as simultaneous deduction)
-        final_diff = current_score_diff - player_val + opponent_val
-
-    return final_diff
-
-def format_move_for_debug(move, rack_before):
-    """ Creates a concise string representation of a move for debug output. """
-    if move == "PASS":
-        return "PASS"
-    elif isinstance(move, dict):
-        word = move.get('word_with_blanks', move.get('word', '?'))
-        score = move.get('score', 0)
-        coord = get_coord(move.get('start', (0,0)), move.get('direction', '?'))
-        leave = move.get('leave', [])
-        leave_str = "".join(sorted(l if l != ' ' else '?' for l in leave))
-        # Rack before might be useful context, but keep it concise
-        # rack_before_str = "".join(sorted(l if l != ' ' else '?' for l in rack_before))
-        # return f"[{word} {coord} ({score:+}) L:{leave_str} R:{rack_before_str}]"
-        return f"[{word} {coord} ({score:+}) L:{leave_str}]"
-    else:
-        return "[INVALID MOVE]"
-
 # --- NEW Helper Function for Drawing Indicator ---
 
 
@@ -5903,422 +5840,6 @@ def draw_override_confirmation_dialog():
 
 
 
-# --- NEW Heuristic Evaluation Function ---
-def evaluate_endgame_heuristic(rack_player, rack_opponent, current_score_diff):
-    """
-    Estimates the final score difference at a search depth limit.
-    A simple heuristic: assumes the game ends now and calculates score diff.
-    More complex heuristics could consider tile values left, etc.
-    """
-    # For now, use the same logic as the terminal calculation.
-    # This assumes the player whose turn it is *might* go out or deductions happen.
-    # It's not perfect but provides a baseline evaluation.
-    return calculate_endgame_score_diff(rack_player, rack_opponent, current_score_diff)
-
-
-
-def negamax_endgame(rack_player, rack_opponent, tiles, blanks, board,
-                    current_score_diff, alpha, beta, depth, pass_count,
-                    max_depth, search_depth_limit, is_silent_batch_run_param=False):
-    """
-    Negamax solver for the endgame (empty bag) with depth limit.
-    Returns (best_score_diff_for_player, best_move_sequence).
-    Score difference is from the perspective of the player whose turn it is.
-    MODIFIED: All print statements removed/commented out.
-    """
-    # if not is_silent_batch_run_param: # Conditional print for function entry
-    #     if depth < 4: 
-    #         print(f"{'  ' * depth}DEBUG Depth {depth}: Enter Negamax. PlayerRack={''.join(sorted(rack_player))}, OppRack={''.join(sorted(rack_opponent))}, ScoreDiff={current_score_diff:.1f}, Alpha={alpha:.1f}, Beta={beta:.1f}, PassCount={pass_count}")
-
-    if depth >= search_depth_limit:
-        heuristic_score = evaluate_endgame_heuristic(rack_player, rack_opponent, current_score_diff)
-        # if not is_silent_batch_run_param: # Conditional print
-        #     if depth < 4: print(f"{'  ' * depth}DEBUG Depth {depth}: Depth Limit Reached. HeuristicScore={heuristic_score:.1f}")
-        return heuristic_score, [] 
-
-    if not rack_player or not rack_opponent or pass_count >= 6:
-        final_diff = calculate_endgame_score_diff(rack_player, rack_opponent, current_score_diff)
-        # if not is_silent_batch_run_param: # Conditional print
-        #     if depth < 4: print(f"{'  ' * depth}DEBUG Depth {depth}: Terminal Node. FinalDiff={final_diff:.1f}")
-        return final_diff, []
-
-    possible_moves = ai_engine.generate_all_moves_gaddag(rack_player, tiles, board, blanks, is_silent_batch_run_param=True) # Always silent for internal calls
-
-    if possible_moves is None:
-        possible_moves = []
-
-    can_pass = True
-
-    best_value = -float('inf')
-    best_sequence = None
-
-    playout_moves = [m for m in possible_moves if len(m.get('leave', rack_player)) == 0]
-    other_moves = [m for m in possible_moves if len(m.get('leave', rack_player)) > 0]
-    other_moves.sort(key=lambda m: m.get('score', 0), reverse=True)
-
-    ordered_moves = playout_moves + other_moves
-    if can_pass:
-        ordered_moves.append("PASS")
-
-    if not ordered_moves: 
-        final_diff = calculate_endgame_score_diff(rack_player, rack_opponent, current_score_diff)
-        # if not is_silent_batch_run_param: # Conditional print
-        #     if depth < 4: print(f"{'  ' * depth}DEBUG Depth {depth}: No moves possible. Terminal. FinalDiff={final_diff:.1f}")
-        return final_diff, []
-
-    for move_index, move in enumerate(ordered_moves):
-        sim_tiles = copy.deepcopy(tiles)
-        sim_blanks = blanks.copy()
-        sim_rack_player = rack_player[:]
-        sim_rack_opponent = rack_opponent[:]
-        sim_score_diff = current_score_diff
-        sim_pass_count = pass_count
-        current_move_details = move
-
-        # if not is_silent_batch_run_param: # Conditional print
-        #     if depth < 4: print(f"{'  ' * depth}DEBUG Depth {depth}: Trying move {move_index+1}/{len(ordered_moves)}: {format_move_for_debug(move, rack_player)}")
-
-        if move == "PASS":
-            sim_pass_count += 1
-            value, subsequent_sequence = negamax_endgame(
-                sim_rack_opponent, sim_rack_player, sim_tiles, sim_blanks, board,
-                -sim_score_diff, -beta, -alpha, depth + 1, sim_pass_count, max_depth, search_depth_limit,
-                is_silent_batch_run_param) 
-            value = -value 
-        else: 
-            sim_pass_count = 0
-            newly_placed_details = move.get('newly_placed', [])
-            move_blanks_coords = move.get('blanks', set()) # Renamed to avoid conflict
-            move_score = move.get('score', 0)
-
-            temp_rack = sim_rack_player[:]
-            valid_placement = True
-            for r_np, c_np, letter_np in newly_placed_details: # Renamed loop variables
-                if 0 <= r_np < GRID_SIZE and 0 <= c_np < GRID_SIZE:
-                    sim_tiles[r_np][c_np] = letter_np
-                    if (r_np, c_np) in move_blanks_coords:
-                        sim_blanks.add((r_np, c_np))
-                        if ' ' in temp_rack:
-                            temp_rack.remove(' ')
-                        else:
-                            valid_placement = False
-                            break
-                    else:
-                        if letter_np in temp_rack:
-                            temp_rack.remove(letter_np)
-                        else:
-                            valid_placement = False
-                            break
-                else:
-                    valid_placement = False
-                    break
-            
-            if not valid_placement:
-                 # if not is_silent_batch_run_param: # Conditional print
-                 #    if depth < 4: print(f"{'  ' * depth}DEBUG Depth {depth}: Skipping move due to simulation error.")
-                 continue 
-
-            sim_rack_player = temp_rack
-            sim_score_diff += move_score
-
-            value, subsequent_sequence = negamax_endgame(
-                sim_rack_opponent, sim_rack_player, sim_tiles, sim_blanks, board,
-                -sim_score_diff, -beta, -alpha, depth + 1, sim_pass_count, max_depth, search_depth_limit,
-                is_silent_batch_run_param) 
-            value = -value 
-
-        # if not is_silent_batch_run_param: # Conditional print
-        #     if depth < 4: print(f"{'  ' * depth}DEBUG Depth {depth}: Move {format_move_for_debug(move, rack_player)} resulted in value {value:.1f}")
-
-        if value > best_value:
-            # if not is_silent_batch_run_param: # Conditional print
-            #     if depth < 4: print(f"{'  ' * depth}DEBUG Depth {depth}: New best value! {value:.1f} > {best_value:.1f}")
-            best_value = value
-            best_sequence = [current_move_details] + subsequent_sequence
-
-        alpha = max(alpha, value)
-        if alpha >= beta:
-            # if not is_silent_batch_run_param: # Conditional print
-            #     if depth < 4: print(f"{'  ' * depth}DEBUG Depth {depth}: Pruning (alpha={alpha:.1f} >= beta={beta:.1f})")
-            break 
-
-    if best_sequence is None:
-         final_diff = calculate_endgame_score_diff(rack_player, rack_opponent, current_score_diff)
-         # if not is_silent_batch_run_param: # Conditional print
-         #    if depth < 4: print(f"{'  ' * depth}DEBUG Depth {depth}: No valid sequence found from this node. Returning terminal diff {final_diff:.1f}")
-         return final_diff, []
-
-    # if not is_silent_batch_run_param: # Conditional print
-    #     if depth < 4: print(f"{'  ' * depth}DEBUG Depth {depth}: Returning Best Value={best_value:.1f}, Seq Start={format_move_for_debug(best_sequence[0], rack_player) if best_sequence else 'None'}")
-
-    return best_value, best_sequence
-
-
-
-
-def solve_endgame(rack_player, rack_opponent, tiles, blanks, board, current_score_diff, is_silent_batch_run_param=False):
-    """
-    Top-level function to initiate the endgame solver.
-    Explores multiple first moves, calls negamax for opponent responses,
-    and prints the top N resulting sequences.
-    Returns the single best first move to make.
-    MODIFIED: Logic to find and print top N sequences. All other prints removed.
-              Final sequence print is now UNCONDITIONAL.
-    """
-    global is_solving_endgame, endgame_start_time # UI flags
-    global GADDAG_STRUCTURE # For move generation
-    # For printing control (batch vs interactive/visualized) - NOT USED FOR FINAL PRINT
-    # global is_batch_running, DEV_VISUALIZE_BATCH_ENABLED_SESSION
-
-
-    # is_solving_endgame is set by the caller (ai_turn)
-    # endgame_start_time is set by the caller (ai_turn)
-
-    # Make copies for simulation within this function
-    initial_tiles_board_state = copy.deepcopy(tiles)
-    initial_blanks_board_state = blanks.copy()
-    initial_rack_player_state = rack_player[:]
-    initial_rack_opponent_state = rack_opponent[:]
-    initial_score_diff_state = current_score_diff
-
-    search_depth_limit = 6 
-    max_possible_depth = len(initial_rack_player_state) + len(initial_rack_opponent_state)
-    actual_search_depth = min(search_depth_limit, max_possible_depth) 
-
-    # Generate all possible first moves for the current AI player
-    # Always use True for is_silent_batch_run_param for internal generate_all_moves_gaddag calls
-    # as we only want the final summary print from solve_endgame itself.
-    possible_ai_first_moves = ai_engine.generate_all_moves_gaddag(
-        initial_rack_player_state, initial_tiles_board_state, board, initial_blanks_board_state,
-        is_silent_batch_run_param=True # Internal call should be silent
-    )
-    if possible_ai_first_moves is None:
-        possible_ai_first_moves = []
-
-    # Add "PASS" as a potential first move for the AI
-    candidate_first_moves = possible_ai_first_moves + ["PASS"]
-    if not candidate_first_moves: # Should only happen if PASS was somehow excluded and no other moves
-        return "PASS" # No moves to evaluate
-
-    evaluated_lines = []
-
-    for ai_first_move_obj in candidate_first_moves:
-        # 1. Simulate AI's first move
-        sim_tiles_after_ai_1 = copy.deepcopy(initial_tiles_board_state)
-        sim_blanks_after_ai_1 = initial_blanks_board_state.copy()
-        sim_rack_player_after_ai_1 = initial_rack_player_state[:]
-        sim_rack_opponent_after_ai_1 = initial_rack_opponent_state[:] # Opponent's rack is unchanged by AI's move yet
-        sim_score_diff_after_ai_1 = initial_score_diff_state
-        sim_pass_count_for_opp = 0
-
-        if ai_first_move_obj == "PASS":
-            sim_pass_count_for_opp = 1 # AI passed, so opponent starts with pass_count = 1
-            # Player rack doesn't change, score diff doesn't change yet
-        elif isinstance(ai_first_move_obj, dict):
-            sim_pass_count_for_opp = 0
-            newly_placed = ai_first_move_obj.get('newly_placed', [])
-            move_blanks = ai_first_move_obj.get('blanks', set())
-            move_score = ai_first_move_obj.get('score', 0)
-            
-            valid_placement_sim = True
-            temp_rack_player_sim = sim_rack_player_after_ai_1[:]
-            for r, c, letter in newly_placed:
-                if 0 <= r < GRID_SIZE and 0 <= c < GRID_SIZE:
-                    sim_tiles_after_ai_1[r][c] = letter
-                    if (r, c) in move_blanks:
-                        sim_blanks_after_ai_1.add((r,c))
-                        if ' ' in temp_rack_player_sim: temp_rack_player_sim.remove(' ')
-                        else: valid_placement_sim = False; break
-                    else:
-                        if letter in temp_rack_player_sim: temp_rack_player_sim.remove(letter)
-                        else: valid_placement_sim = False; break
-                else: valid_placement_sim = False; break
-            
-            if not valid_placement_sim:
-                continue # Skip this ai_first_move_obj if it's invalid to simulate
-
-            sim_rack_player_after_ai_1 = temp_rack_player_sim
-            sim_score_diff_after_ai_1 += move_score
-        else: # Should not happen
-            continue
-
-        # 2. Call negamax for the opponent's turn
-        # Opponent (now current player) is sim_rack_opponent_after_ai_1
-        # Next player (after opp) is sim_rack_player_after_ai_1
-        # Score diff is from opponent's perspective, so -sim_score_diff_after_ai_1
-        opp_perspective_score_diff, opponent_sub_sequence = negamax_endgame(
-            sim_rack_opponent_after_ai_1, # Opponent is now the player
-            sim_rack_player_after_ai_1,   # AI is now the opponent
-            sim_tiles_after_ai_1,
-            sim_blanks_after_ai_1,
-            board,
-            -sim_score_diff_after_ai_1,   # Score diff from opponent's view
-            -float('inf'), float('inf'),  # Alpha, Beta for opponent
-            depth=1,                      # Opponent is at depth 1 relative to AI's first move
-            pass_count=sim_pass_count_for_opp,
-            max_depth=max_possible_depth,
-            search_depth_limit=actual_search_depth,
-            is_silent_batch_run_param=True # Internal negamax calls are silent
-        )
-
-        # Convert score back to AI's perspective
-        ai_final_score_diff_for_this_line = -opp_perspective_score_diff
-        
-        # Construct the full sequence of moves
-        full_move_sequence_for_this_line = [ai_first_move_obj] + opponent_sub_sequence
-        
-        evaluated_lines.append({
-            'score_diff': ai_final_score_diff_for_this_line,
-            'sequence': full_move_sequence_for_this_line
-        })
-
-    # Sort all evaluated lines by score_diff (descending for AI)
-    evaluated_lines.sort(key=lambda x: x['score_diff'], reverse=True)
-
-    # --- MODIFICATION: Print top N sequences UNCONDITIONALLY ---
-    if evaluated_lines:
-        print(f"Top Endgame Sequences Found (Score Diff for P1, Depth Limit: {actual_search_depth}):")
-        
-        num_to_print = 0
-        last_printed_score = None
-        rank = 0
-        
-        for i, line_data in enumerate(evaluated_lines):
-            current_score = line_data['score_diff']
-            if i < 10 or (last_printed_score is not None and current_score == last_printed_score):
-                num_to_print +=1
-                if last_printed_score is None or current_score != last_printed_score:
-                    rank = i + 1
-                
-                sequence_str_parts = []
-                
-                temp_sim_rack_p1 = initial_rack_player_state[:]
-                temp_sim_rack_o2 = initial_rack_opponent_state[:]
-                
-                current_player_is_p1_in_print_sim = True
-                pass_count_for_print_sim = 0
-                
-                for move_idx_in_seq, move_obj_in_seq in enumerate(line_data['sequence']):
-                    turn_indicator_in_seq = f"{move_idx_in_seq // 2 + 1}. "
-                    sequence_str_parts.append(turn_indicator_in_seq)
-                    
-                    formatted_move_str = format_single_move_for_print(move_obj_in_seq, is_silent_batch_run_param=True) 
-                    sequence_str_parts.append(formatted_move_str)
-                    sequence_str_parts.append(" ")
-
-                    if move_obj_in_seq == "PASS":
-                        pass_count_for_print_sim +=1
-                    elif isinstance(move_obj_in_seq, dict):
-                        pass_count_for_print_sim = 0
-                        if current_player_is_p1_in_print_sim:
-                            temp_sim_rack_p1 = move_obj_in_seq.get('leave', [])
-                        else:
-                            temp_sim_rack_o2 = move_obj_in_seq.get('leave', [])
-                    
-                    current_player_is_p1_in_print_sim = not current_player_is_p1_in_print_sim
-
-                    if move_idx_in_seq == len(line_data['sequence']) - 1:
-                        end_state_str = format_end_state_for_print(
-                            temp_sim_rack_p1, 
-                            temp_sim_rack_o2, 
-                            not current_player_is_p1_in_print_sim, 
-                            pass_count_for_print_sim
-                        )
-                        sequence_str_parts.append(end_state_str)
-
-                print(f"{rank}.\t{current_score:+.0f}\t{''.join(sequence_str_parts)}")
-                last_printed_score = current_score
-            else:
-                break 
-    # --- END MODIFICATION ---
-
-    # is_solving_endgame is reset by the caller (ai_turn)
-
-    if evaluated_lines:
-        return evaluated_lines[0]['sequence'][0] # Return the best *first move*
-    else:
-        return "PASS"
-
-
-
-
-def format_single_move_for_print(move_obj, is_silent_batch_run_param=False):
-    """
-    Formats a single move object (or PASS string) for endgame sequence printing.
-    Example: [WORD COORD SCORE LEAVE_STR] or [PASS] or [-]
-    """
-    if move_obj == "PASS":
-        return "[PASS]"
-    elif move_obj == "NO_MOVE_POSSIBLE": # Special marker for when a player has no moves
-        return "[-]"
-    elif isinstance(move_obj, dict):
-        word = move_obj.get('word_with_blanks', move_obj.get('word', '?'))
-        # Pass silent flag to get_coord if it has conditional prints
-        coord = get_coord(move_obj.get('start', (0,0)), move_obj.get('direction', '?'), is_silent_batch_run_param=is_silent_batch_run_param)
-        score = move_obj.get('score',0)
-        leave_list = move_obj.get('leave', []) 
-        leave_str = "".join(sorted(l if l != ' ' else '?' for l in leave_list))
-        if not leave_str: # If leave is empty
-            leave_str = "-" 
-        return f"[{word} {coord} {score} {leave_str}]"
-    else:
-        # Fallback for unexpected move_obj type
-        return "[?UNKNOWN_MOVE_FORMAT?]"
-
-
-
-
-
-def format_end_state_for_print(final_rack_p1_sim, final_rack_p2_sim, last_player_to_move_was_p1, pass_count_at_end):
-    """
-    Formats the [end RACK +/-ADJUSTMENT] part of the endgame sequence string.
-    The adjustment is from P1's perspective (positive is good for P1).
-    """
-    p1_rack_str = "".join(sorted(l if l != ' ' else '?' for l in final_rack_p1_sim))
-    if not p1_rack_str: p1_rack_str = "-"
-    p2_rack_str = "".join(sorted(l if l != ' ' else '?' for l in final_rack_p2_sim))
-    if not p2_rack_str: p2_rack_str = "-"
-
-    p1_rack_val = get_rack_value(final_rack_p1_sim)
-    p2_rack_val = get_rack_value(final_rack_p2_sim)
-
-    if pass_count_at_end >= 6:
-        # P1's score changes by -p1_rack_val (for their own tiles)
-        # P1's score also changes by +p2_rack_val (because P2 also loses their tiles, which is a relative gain for P1)
-        # This interpretation might be slightly different from the example's directness.
-        # The example "[end AII +6]" when P1 has AII and P2 went out is simpler: P1's rack, and the points P1 *gains* due to P2's tiles.
-        # Let's try to match the example's spirit: show the opponent's rack and the points P1 gains from it,
-        # or P1's rack and the points P1 loses from it.
-
-        # If game ends by passes, P1 loses points for their rack, P2 loses points for theirs.
-        # From P1's perspective, the change to score difference is -p1_rack_val (loss) - (-p2_rack_val) (opponent's loss, so relative gain)
-        # = p2_rack_val - p1_rack_val
-        # The example format is tricky here. Let's show both deductions.
-        return f"[end P1:{p1_rack_str} {-p1_rack_val:+} P2:{p2_rack_str} {-p2_rack_val:+}]" # Shows deductions for both
-
-    # If P1 made the last move and their rack is now empty
-    if last_player_to_move_was_p1 and not final_rack_p1_sim: # P1 went out
-        return f"[end P2:{p2_rack_str} {+p2_rack_val:+}]" # P1 gains value of P2's rack
-
-    # If P2 made the last move and their rack is now empty
-    if not last_player_to_move_was_p1 and not final_rack_p2_sim: # P2 went out
-        return f"[end P1:{p1_rack_str} {-p1_rack_val:+}]" # P1 loses value of their own rack
-    
-    # If one player has an empty rack, and the other player made the last move (but didn't empty their own rack)
-    # This implies the player with the empty rack went out on a previous turn, and the game continued.
-    # This case should be covered by negamax returning earlier.
-    # The [end ...] is for the *very final* adjustment.
-
-    # Fallback or if one player has tiles but no moves (e.g. P1 has tiles, P2 went out, P1 has no more moves)
-    # This state is usually when one player has gone out, and the other cannot make a move.
-    if not final_rack_p1_sim: # P1 went out (implicitly, P2 has tiles)
-         return f"[end P2:{p2_rack_str} {+p2_rack_val:+}]"
-    if not final_rack_p2_sim: # P2 went out (implicitly, P1 has tiles)
-         return f"[end P1:{p1_rack_str} {-p1_rack_val:+}]"
-
-    # Should not be reached if game ended properly by one of the above conditions.
-    return "[end ?]"
-
 
 
 
@@ -6401,6 +5922,8 @@ def draw_simulation_config_dialog(input_texts, active_input_index, state):
 
 
 
+# In Scrabble AE - 11JUN25 - Cython Optimize
+
 def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
             pass_count, exchange_count, consecutive_zero_point_turns, \
             player_names, dropdown_open, hinting, showing_all_words, letter_checks, \
@@ -6432,6 +5955,12 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
     global seven_letter_words, eight_letter_words
     global USE_AI_SIMULATION, USE_ENDGAME_SOLVER
     global game_mode
+
+    # --- FIX: Initialize local flags to default values ---
+    paused_for_power_tile_local_flag = False
+    paused_for_bingo_practice_local_flag = False
+    current_power_tile_local_val = None
+    # --- END FIX ---
 
     if 'seven_letter_words' not in globals() or not seven_letter_words:
         try:
@@ -6513,7 +6042,7 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
                             tile_rect = pygame.Rect(40 + c_draw * SQUARE_SIZE + 2, 40 + r_draw * SQUARE_SIZE + 2, SQUARE_SIZE - 4, SQUARE_SIZE - 4)
                             pygame.draw.rect(screen, tile_bg_color, tile_rect)
                             text_surf = font.render(tile_char, True, BLACK)
-                            text_rect = text_surf.get_rect(center=tile_rect.center)
+                            text_rect = text_surf.get_rect(center=center)
                             screen.blit(text_surf, text_rect)
             draw_board_labels(screen, ui_font)
             draw_rack(1, racks[0], scores, turn, player_names)
@@ -6538,7 +6067,7 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
             draw_endgame_solving_indicator(indicator_center_x_intermediate, sb_y_intermediate)
             pygame.display.flip()
 
-        best_first_move = solve_endgame(current_rack, opponent_rack, tiles, blanks, board, current_score_diff, is_silent_batch_run_param=is_silent_batch_run_param)
+        best_first_move = ai_engine.solve_endgame(current_rack, opponent_rack, tiles, blanks, board, current_score_diff, is_silent_batch_run_param=is_silent_batch_run_param)
         
         action_chosen = 'pass'
         best_play_move_endgame = None
@@ -6577,7 +6106,7 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
             blanks_used = best_play_move_endgame.get('blanks', set())
             start_pos_val = best_play_move_endgame.get('start', (0,0))
             direction_val = best_play_move_endgame.get('direction', 'right')
-            coord = get_coord(start_pos_val, direction_val, is_silent_batch_run_param=is_silent_batch_run_param)
+            coord = ai_engine.get_coord(start_pos_val, direction_val, is_silent_batch_run_param=is_silent_batch_run_param)
             word_with_blanks = best_play_move_endgame.get('word_with_blanks', '')
             is_bingo = best_play_move_endgame.get('is_bingo', False)
             leave_for_history_endgame = best_play_move_endgame.get('leave', [])
@@ -6614,13 +6143,6 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
         
         is_solving_endgame = False
         return next_turn_val, first_play, pass_count, exchange_count, consecutive_zero_point_turns, [], dropdown_open, hinting, showing_all_words, False, None, False, set(), move_data_for_turn
-
-    paused_for_power_tile_local_flag = False
-    paused_for_bingo_practice_local_flag = False
-    current_power_tile_local_val = None
-    best_play_move = None
-    action_chosen = 'pass'
-    tiles_consumed_from_rack_history = []
 
     if practice_mode_param == "power_tiles" and letter_checks:
         if not is_silent_batch_run_param:
@@ -6776,8 +6298,6 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
             best_simulated_play_candidate = None
 
     if can_exchange:
-        if not is_silent_batch_run_param:
-            print(f"AI {turn} evaluating exchange options...")
         best_exchange_tiles, best_exchange_evaluation = ai_engine.find_best_exchange_option(\
             current_rack, tiles, blanks, bag_count, is_silent_batch_run_param=is_silent_batch_run_param\
         )
@@ -6825,19 +6345,15 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
     is_bingo = False
     luck_factor = 0.0
     leave_for_history = []
+    turn_duration = 0.0 # Will be calculated at the end
 
     if action_chosen == 'play':
         if best_play_move:
-            # --- MODIFICATION START: Randomly orient the first move ---
             if first_play:
                 if random.choice([True, False]):
-                    # Flip the move to vertical
                     if not is_silent_batch_run_param:
                         print("AI is randomly orienting the first move to Vertical.")
                     best_play_move['direction'] = 'V'
-                    # The 'start' coordinate and 'positions' list are relative to the
-                    # main word. We need to recalculate them for the new orientation.
-                    # The simplest way is to re-center the word.
                     word_len = len(best_play_move.get('word', ''))
                     if word_len > 0:
                         new_start_row = CENTER_SQUARE[0] - (word_len // 2)
@@ -6846,16 +6362,13 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
                         
                         new_positions = []
                         for i, tile_details in enumerate(best_play_move.get('newly_placed', [])):
-                            # tile_details is (r, c, letter)
                             new_positions.append((new_start_row + i, new_start_col, tile_details[2]))
                         best_play_move['newly_placed'] = new_positions
                         best_play_move['positions'] = new_positions
-            # --- MODIFICATION END ---
-
             word_to_print = best_play_move.get('word', 'N/A')
             start_pos_print = best_play_move.get('start', (0,0))
             direction_print = best_play_move.get('direction', 'right')
-            coord_print = get_coord(start_pos_print, direction_print, is_silent_batch_run_param=is_silent_batch_run_param)
+            coord_print = ai_engine.get_coord(start_pos_print, direction_print, is_silent_batch_run_param=is_silent_batch_run_param)
             if not is_silent_batch_run_param:
                 print(f"AI {turn} playing move: '{word_to_print}' at {coord_print}")
             next_turn_val, drawn_tiles, newly_placed, tiles_consumed_from_rack_history = play_hint_move(best_play_move, tiles, racks, blanks, scores, turn, bag, board, is_ai_list_param, practice_mode_param, is_silent_batch_run_param=is_silent_batch_run_param)
@@ -6953,7 +6466,11 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
     else:
         luck_factor = 0.0
 
-    turn_duration = 0.0
+    turn_start_time = time.perf_counter()
+    if not is_silent_batch_run_param:
+        print(f"\n{'='*15} ai_turn START: Turn {turn} {'='*15}")
+    else:
+        turn_duration = 0.0
 
     move_data_for_turn = {
         'player': turn, 'move_type': move_type, 'rack': move_rack_before,
@@ -6975,8 +6492,6 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
         move_data_for_turn['exchanged_tiles'] = exchanged_tiles_for_history
 
     return next_turn_val, first_play, pass_count, exchange_count, consecutive_zero_point_turns, [], dropdown_open, hinting, showing_all_words, paused_for_power_tile_local_flag, current_power_tile_local_val, paused_for_bingo_practice_local_flag, set(), move_data_for_turn
-
-
 
 
 
@@ -9437,6 +8952,8 @@ def _handle_mouse_down_game_over_dialog(event, state, drawn_rects):
 
 
 
+# In Scrabble AE - 11JUN25 - Cython Optimize
+
 def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
     """
     Handles MOUSEBUTTONDOWN events when the Hint or All Words dialog is showing.
@@ -9504,7 +9021,7 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
             'blanks': selected_move_dict_param.get('blanks', set()),
             'score': selected_move_dict_param.get('score', 0),
             'word': selected_move_dict_param.get('word', 'N/A'), 'drawn': drawn_tiles_param,
-            'coord': get_coord(selected_move_dict_param.get('start', (0,0)), selected_move_dict_param.get('direction', 'right'), is_silent_batch_run_param=is_silent_run_local),
+            'coord': ai_engine.get_coord(selected_move_dict_param.get('start', (0,0)), selected_move_dict_param.get('direction', 'right'), is_silent_batch_run_param=is_silent_run_local),
             'word_with_blanks': selected_move_dict_param.get('word_with_blanks', ''),
             'is_bingo': selected_move_dict_param.get('is_bingo', False),
             'turn_duration': 0.0, 
@@ -9746,6 +9263,8 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
 
 
 
+# In Scrabble AE - 11JUN25 - Cython Optimize
+
 def _handle_keydown_typing_on_board(event, state):
     """
     Handles KEYDOWN events when a player is actively typing a word on the board.
@@ -9941,7 +9460,7 @@ def _handle_keydown_typing_on_board(event, state):
                 print(f"  First Play? {state['first_play']}")
                 print(f"  Calling is_valid_play with current state['tiles'] as tiles_after_play...")
             
-            validation_code, is_bingo, validation_detail = ai_engine.is_valid_play(
+            validation_code, is_bingo, validation_detail, _ = ai_engine.is_valid_play(
                 newly_placed_details,
                 temp_tiles_for_validation, # This is the board *after* typing
                 state['first_play'],
@@ -10176,7 +9695,7 @@ def _handle_keydown_typing_on_board(event, state):
                         'score': score_val_play, 'word': primary_word_str_final, 
                         'positions': [(t[0], t[1], t[2]) for t in primary_word_tiles_final] if primary_word_tiles_final else newly_placed_details, 
                         'blanks': set(state['blanks']), 'drawn': drawn_tiles, 
-                        'coord': get_coord(start_pos_final, orientation_final_for_history, is_silent_batch_run_param=is_silent_run), 
+                        'coord': ai_engine.get_coord(start_pos_final, orientation_final_for_history, is_silent_batch_run_param=is_silent_run), 
                         'word_with_blanks': word_with_blanks_final, 'is_bingo': is_bingo, 
                         'newly_placed': newly_placed_details, # Store the actual tiles placed from rack
                         'start': start_pos_final, 'direction': orientation_final_for_history, 'turn_duration': 0.0, # Placeholder
@@ -11672,6 +11191,7 @@ def handle_turn_start_updates(state):
 
 
 
+
 def handle_ai_turn_trigger(state):
     """
     Checks if it's the AI's turn and conditions are met, then executes the AI turn.
@@ -11713,9 +11233,6 @@ def handle_ai_turn_trigger(state):
     letter_checks = state['letter_checks']
     current_power_tile = state['current_power_tile'] 
     
-    # --- MODIFICATION: These flags are now read from globals inside ai_turn ---
-    # No need to get them from state here.
-    
     sim_cands = state.get('ai_sim_num_candidates_cfg', DEFAULT_AI_CANDIDATES)
     sim_opp_sims = state.get('ai_sim_num_opponent_sims_cfg', DEFAULT_OPPONENT_SIMULATIONS)
     sim_post_sims = state.get('ai_sim_num_post_sim_candidates_cfg', DEFAULT_POST_SIM_CANDIDATES)
@@ -11740,7 +11257,6 @@ def handle_ai_turn_trigger(state):
                 if all_moves_for_ai is None:
                     all_moves_for_ai = []
         
-        # --- MODIFICATION: Corrected call to ai_turn ---
         ai_result = ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
                             pass_count, exchange_count, consecutive_zero_point_turns, \
                             player_names, dropdown_open, hinting, showing_all_words, letter_checks,\
@@ -11749,7 +11265,6 @@ def handle_ai_turn_trigger(state):
                             sim_cands, sim_opp_sims, sim_post_sims,
                             all_moves_for_ai,
                             is_silent_batch_run_param=is_silent_run) 
-        # --- END MODIFICATION ---
         
         if len(ai_result) == 14: 
             (turn_after_ai, first_play_after_ai, pass_count_after_ai, \
@@ -12412,6 +11927,8 @@ def reset_for_play_again(is_ai, practice_mode):
 
 
 
+# In Scrabble AE - 11JUN25 - Cython Optimize
+
 def execute_game_session(is_initialized_from_outer_loop_param):
     # MODULE-LEVEL GLOBALS that this function and its helpers will use/modify
     global USE_AI_SIMULATION, USE_ENDGAME_SOLVER
@@ -12474,10 +11991,6 @@ def execute_game_session(is_initialized_from_outer_loop_param):
     if is_batch_running:
         print("Batch run started - hit CTRL-C to stop (or ESC during visualized game).")
 
-    # REMOVED DEBUG PRINT for execute_game_session entry
-    # if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
-    #     print(f"DEBUG execute_game_session Start: game_mode={game_mode}, is_batch={is_batch_running}, visualize={DEV_VISUALIZE_BATCH_ENABLED_SESSION}, loops={num_loops_exec}")
-
     previous_game_over_state_in_loop = False
 
     try:
@@ -12487,12 +12000,6 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                     print("--- Batch run stopping (module_level_batch_stop_requested at start of game loop) ---")
                 break
 
-            # Initialize current_state_dict for this game iteration
-            # Most of these will be directly from globals, which are either
-            # set by initialize_game (for the first game of a session)
-            # or reset by reset_game_state/reset_for_play_again.
-
-            # For batch runs, reset state for each new game
             if is_batch_running:
                 _current_batch_game_num_init_loop = game_num_loop_internal
                 if not DEV_VISUALIZE_BATCH_ENABLED_SESSION:
@@ -12501,76 +12008,74 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                 else:
                     print(f"\n--- Starting Batch Game {_current_batch_game_num_init_loop} of {total_batch_games} ---")
 
-                # reset_game_state modifies globals directly
                 reset_result = reset_game_state(initial_game_config, is_silent_batch_run_param=(not DEV_VISUALIZE_BATCH_ENABLED_SESSION))
                 if reset_result is None:
                      print(f"FATAL: Failed to reset state for game {game_num_loop_internal}. Stopping batch.")
                      _module_level_batch_stop_requested_internal = True
                      break
-                # Unpack just to be explicit, but globals are modified
                 (board, tiles, racks, blanks, scores,
                  turn, first_play, bag, move_history,
                  pass_count, exchange_count, consecutive_zero_point_turns,
                  last_played_highlight_coords, is_solving_endgame,
                  sgs_initial_bag) = reset_result
-                initial_racks = [r[:] for r in racks] # Save the initial racks for this specific game
+                initial_racks = [r[:] for r in racks] 
                 all_moves = []
                 practice_target_moves = []
                 practice_best_move = None
-                current_batch_game_num = _current_batch_game_num_init_loop # Update global
+                current_batch_game_num = _current_batch_game_num_init_loop 
 
-            elif is_initialized_from_outer_loop_param and not is_batch_running: # "Play Again"
-                if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION): # Should always be true here
+            elif is_initialized_from_outer_loop_param and not is_batch_running: 
+                if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION): 
                     print(f"DEBUG Play Again in execute_game_session: Using is_ai={is_ai}, practice_mode={practice_mode} for reset.")
-                # reset_for_play_again modifies globals directly
                 reset_result = reset_for_play_again(is_ai, practice_mode)
                 if reset_result is None:
                     print("Error resetting game for Play Again. Exiting.")
-                    _module_level_batch_stop_requested_internal = True # Treat as quit
+                    _module_level_batch_stop_requested_internal = True 
                     break
                 (board, tiles, scores, blanks, bag, racks, initial_racks,
-                 _, # current_game_initial_racks (same as initial_racks here)
+                 _, 
                  first_play, turn, replay_mode,
                  move_history, pass_count, exchange_count,
                  consecutive_zero_point_turns, last_played_highlight_coords,
                  is_solving_endgame, practice_target_moves, practice_best_move,
-                 all_moves, _, # gaddag_loading_status (already global)
+                 all_moves, _, 
                  sgs_initial_bag) = reset_result
-                # Ensure other relevant globals are reset for a new game
                 game_over_state = False
                 final_scores = None
                 current_replay_turn = 0
 
 
-            # For the very first game after mode selection (not batch, not play again),
-            # globals are already set by initialize_game.
-
-            # Reset UI and turn-specific state variables
             reset_vars_ui_local = reset_per_game_variables()
-            current_state_dict = {**globals(), **reset_vars_ui_local} # Combine all globals with UI resets
-            current_state_dict['running_inner'] = True # Ensure this is true at start of game
-            current_state_dict['visual_batch_esc_stop_pending'] = _visual_batch_esc_stop_pending_internal # Carry over from previous iteration if needed
+            current_state_dict = {**globals(), **reset_vars_ui_local} 
+            current_state_dict['running_inner'] = True 
+            current_state_dict['visual_batch_esc_stop_pending'] = _visual_batch_esc_stop_pending_internal 
 
-            # Ensure correct AI sim params are used for this game instance
             current_state_dict['ai_sim_num_candidates_cfg'] = ai_sim_num_candidates_global
             current_state_dict['ai_sim_num_opponent_sims_cfg'] = ai_sim_num_opponent_sims_global
             current_state_dict['ai_sim_num_post_sim_candidates_cfg'] = ai_sim_num_post_sim_candidates_global
 
+            # --- DIAGNOSTIC: Dead Man's Switch Initialization ---
+            last_turn_processed_time = time.perf_counter()
+            last_known_turn_number = current_state_dict.get('turn', -1)
+            hang_report_printed = False
+            HANG_DETECTION_SECONDS = 2.0
+            # --- END DIAGNOSTIC ---
 
             while current_state_dict['running_inner']:
                 if _module_level_batch_stop_requested_internal:
                     current_state_dict['running_inner'] = False
                     break
-
                 
-                current_state_dict['gaddag_loading_status'] = gaddag_loading_status # Ensure it's up-to-date
+                
+
+                current_state_dict['gaddag_loading_status'] = gaddag_loading_status 
                 current_state_dict['GADDAG_STRUCTURE'] = GADDAG_STRUCTURE
 
                 current_state_dict['bag_count'] = len(current_state_dict.get('bag', []))
 
                 current_state_dict = handle_deferred_practice_init(current_state_dict)
                 if not current_state_dict['running_inner']:
-                    if current_state_dict.get('batch_stop_requested', False): # Check if practice init wants to stop
+                    if current_state_dict.get('batch_stop_requested', False): 
                         _module_level_batch_stop_requested_internal = True
                     if current_state_dict.get('return_to_mode_selection', False):
                         _return_to_mode_selection_internal = True
@@ -12584,7 +12089,7 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                    (0 <= current_state_dict['turn'] - 1 < len(current_state_dict['is_ai']) and \
                     current_state_dict['is_ai'][current_state_dict['turn'] - 1]):
                     if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
-                        pygame.time.wait(100) # Allow GADDAG to load if AI is waiting
+                        pygame.time.wait(100) 
 
                 current_state_dict = handle_practice_messages(current_state_dict)
                 event_flags = process_game_events(current_state_dict, current_state_dict['drawn_rects'])
@@ -12602,11 +12107,10 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                     current_state_dict['running_inner'] = False
 
 
-                # Only check for game over if not in the middle of a turn action
                 if not current_state_dict.get('typing', False):
                     current_state_dict = check_and_handle_game_over(current_state_dict)
                 if current_state_dict['game_over_state'] and _local_start_new_game_same_mode_internal:
-                     current_state_dict['running_inner'] = False # End current game to allow "Play Again"
+                     current_state_dict['running_inner'] = False 
 
                 if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
                     if current_state_dict['game_over_state'] and not previous_game_over_state_in_loop:
@@ -12626,13 +12130,10 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                 if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
                     current_state_dict['drawn_rects'] = draw_game_screen(screen, current_state_dict)
                     pygame.display.flip()
-                elif is_batch_running: # Silent batch run
-                    pygame.time.wait(1) # Minimal delay to allow OS to process events like Ctrl+C
+                elif is_batch_running: 
+                    pygame.time.wait(1) 
 
 
-            # After a single game loop finishes (either naturally or by break)
-            # Update globals from the final state of current_state_dict for the next iteration or for "Play Again"
-            # This is important if the session was for a single game and "Play Again" is chosen.
             game_mode = current_state_dict['game_mode']
             is_ai = list(current_state_dict['is_ai'])
             player_names = list(current_state_dict['player_names'])
@@ -12643,7 +12144,6 @@ def execute_game_session(is_initialized_from_outer_loop_param):
             USE_ENDGAME_SOLVER = current_state_dict['USE_ENDGAME_SOLVER']
             USE_AI_SIMULATION = current_state_dict['USE_AI_SIMULATION']
             active_practice_state_data = current_state_dict['active_practice_state_data']
-            # Persist AI sim params if not a batch (batch uses its own config)
             if not is_batch_running:
                 ai_sim_num_candidates_global = current_state_dict.get('ai_sim_num_candidates_cfg', DEFAULT_AI_CANDIDATES)
                 ai_sim_num_opponent_sims_global = current_state_dict.get('ai_sim_num_opponent_sims_cfg', DEFAULT_OPPONENT_SIMULATIONS)
@@ -12653,7 +12153,6 @@ def execute_game_session(is_initialized_from_outer_loop_param):
 
 
             if is_batch_running:
-                # batch_results is already a global and updated by check_and_handle_game_over
                 if _visual_batch_esc_stop_pending_internal:
                     if not DEV_VISUALIZE_BATCH_ENABLED_SESSION:
                         print("Error: visual_batch_esc_stop_pending true in non-visualized batch.")
@@ -12664,9 +12163,9 @@ def execute_game_session(is_initialized_from_outer_loop_param):
 
 
             if _module_level_batch_stop_requested_internal or _return_to_mode_selection_internal:
-                break # Exit the outer game loop (for batch or single game session)
+                break 
             if _local_start_new_game_same_mode_internal and not is_batch_running:
-                break # Exit single game session to allow "Play Again" in main
+                break 
 
     except KeyboardInterrupt:
         if is_batch_running:
@@ -12674,14 +12173,13 @@ def execute_game_session(is_initialized_from_outer_loop_param):
             _module_level_batch_stop_requested_internal = True
         else:
             print("\n--- Game Interrupted by User (Ctrl+C) ---")
-            _module_level_batch_stop_requested_internal = True # Treat as quit
-            _return_to_mode_selection_internal = True # Or go to mode selection
+            _module_level_batch_stop_requested_internal = True 
+            _return_to_mode_selection_internal = True 
 
-    if is_batch_running and batch_results: # batch_results is global
+    if is_batch_running and batch_results: 
         total_batch_duration_seconds = time.perf_counter() - batch_start_time
         batch_summary_filename = f"{initial_game_config.get('batch_filename_prefix', 'UNKNOWN-BATCH')}.txt"
-        save_batch_statistics(batch_results, player_names, batch_summary_filename, total_batch_duration_seconds) # Pass the accurate duration
-        # If batch finished naturally or was stopped, and not already returning to mode selection
+        save_batch_statistics(batch_results, player_names, batch_summary_filename, total_batch_duration_seconds) 
         if not _module_level_batch_stop_requested_internal and \
            not _return_to_mode_selection_internal and \
            not _local_start_new_game_same_mode_internal:
@@ -12813,7 +12311,8 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
                 light_blue=LIGHT_BLUE,
                 blue=BLUE,
                 pink=PINK,
-                red=RED
+                red=RED,
+                letters=LETTERS
             )
             print("--- Cython AI Engine Initialized. ---")
 
@@ -12953,10 +12452,7 @@ if __name__ == "__main__":
     bbb_8l_max_prob_global = 1000 # Default integer value
 
 
-    #random.seed(12345)
-
-    main_called_for_initial_mode_selection = False
-
+    
     #random.seed(12345)
 
     main_called_for_initial_mode_selection = False
