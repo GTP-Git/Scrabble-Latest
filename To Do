@@ -1,5 +1,7 @@
 To-Do List
 
+-- Set up batch games to run in threads/cores.
+
 -- Can the Lookup feature also serve as a word search, for ex., LO? returns LOG, LOT..., etc. Can it also return the probability of each word, within it's length? For ex, LOVED is 2880 w/in the fives.
 
 -- Wouldn't ai_turn and def handle_ai_turn_trigger be faster if in Cython?
@@ -230,6 +232,6 @@ ________________________________________________
 
 -- Simulation results should show as many results as you sim, instead of just the top five.
                                                                                                                                                              -- Simulation results should show as many results as you sim, instead of just the top five.
--- On first move, how does the AI decide to play vertically or horizontally?
+-- Create a batch setting that runs games where the AI only picks move based on highest score and calculates nothing else. Call it Plaid. :)
 
                                                                                                                                                            
