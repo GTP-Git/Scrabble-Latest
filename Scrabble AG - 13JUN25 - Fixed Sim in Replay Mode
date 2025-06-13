@@ -2,7 +2,7 @@
 
 #python
 #Scrabble AG
-#Fixing Simulate in Replay Mode
+#Fixed Simulate in Replay Mode
 #13JUN25
 
 
@@ -7314,18 +7314,24 @@ def _handle_mouse_down_simulate_button(event, state, drawn_rects):
         # --- FIX START: Revert board state FIRST if in replay mode ---
         if replay_mode:
             if not is_silent_run_local:
-                print(f"Simulate clicked for Replay Turn {current_replay_turn}. Reverting board state.")
+                print(f"Simulate clicked for Replay Turn {current_replay_turn}. Reverting board to pre-move state.")
             
-            # Get the state as it was at the beginning of the turn we are viewing
-            target_turn_for_state_recon = current_replay_turn if current_replay_turn > 0 else 1
+            # Get the state as it was at the BEGINNING of the turn we are viewing.
+            # This is the state AFTER the PREVIOUS move was completed.
+            target_turn_for_board_recon = max(0, current_replay_turn - 1)
             sgs_data_for_sim = state.get('sgs_loaded_game_data', sgs_loaded_game_data)
             if sgs_data_for_sim:
-                sim_tiles, sim_blanks, _, _, _, _ = get_sgs_replay_state(sgs_data_for_sim, target_turn_for_state_recon, is_silent_batch_run_param=True)
+                # Get the board state from the previous turn
+                historical_tiles, historical_blanks, _, _, _, _ = get_sgs_replay_state(
+                    sgs_data_for_sim,
+                    target_turn_for_board_recon,
+                    is_silent_batch_run_param=True
+                )
                 
-                # Update the main state's board to reflect the historical state.
+                # Update the main state's board to reflect the correct pre-move state.
                 # This will cause the screen to redraw correctly on the next frame.
-                state['tiles'] = sim_tiles
-                state['blanks'] = sim_blanks
+                state['tiles'] = historical_tiles
+                state['blanks'] = historical_blanks
             else:
                 print("ERROR: Could not revert board state for simulation, SGS data missing.")
         # --- FIX END ---
@@ -9224,7 +9230,7 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
                         # --- FIX: Revert board to correct historical state before previewing ---
                         if replay_mode:
                             # Get the state BEFORE the current turn's move was made
-                            turn_to_reconstruct = state.get('current_replay_turn', 1)
+                            turn_to_reconstruct = max(0, state.get('current_replay_turn', 1) - 1)
                             sgs_data_for_preview = state.get('sgs_loaded_game_data')
                             if sgs_data_for_preview:
                                 historical_tiles, historical_blanks, _, _, _, _ = get_sgs_replay_state(
@@ -9333,6 +9339,19 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
                     state['selected_hint_index'] = idx_aw_item # Update state for highlighting
                     if idx_aw_item < len(current_moves_for_all_words):
                          move_to_preview_data = current_moves_for_all_words[idx_aw_item] # Use idx_aw_item directly
+                         # --- NEW FIX: Revert board state before previewing from All Words dialog ---
+                         if replay_mode:
+                             turn_to_reconstruct = max(0, state.get('current_replay_turn', 1) - 1)
+                             sgs_data_for_preview = state.get('sgs_loaded_game_data')
+                             if sgs_data_for_preview:
+                                 historical_tiles, historical_blanks, _, _, _, _ = get_sgs_replay_state(
+                                     sgs_data_for_preview,
+                                     turn_to_reconstruct,
+                                     is_silent_batch_run_param=True
+                                 )
+                                 state['tiles'] = historical_tiles
+                                 state['blanks'] = historical_blanks
+                         # --- END NEW FIX ---
                          state = apply_move_as_preview(state, move_to_preview_data)
                     else: 
                          state = clear_current_preview(state)
