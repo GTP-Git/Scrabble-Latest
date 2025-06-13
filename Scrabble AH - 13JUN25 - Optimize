@@ -1,8 +1,9 @@
 
 
 #python
-#Scrabble AG
-#Fixed Simulate in Replay Mode
+#Scrabble AH
+#Optimized tile screen redraw
+#Improved traversal
 #13JUN25
 
 
@@ -2042,92 +2043,6 @@ def draw_word_lookup_button_mode_select(screen_surf, button_rect_param):
 
 
 
-'''
-def find_main_word(new_tiles, tiles):
-    """Finds the primary word formed by newly placed tiles."""
-    if not new_tiles: return [], None
-    rows = set(r for r, c, _ in new_tiles); cols = set(c for r, c, _ in new_tiles)
-    if len(rows) == 1: # Potential horizontal word
-        orientation = "horizontal"; row = rows.pop(); min_col = min(c for r, c, _ in new_tiles if r == row); max_col = max(c for r, c, _ in new_tiles if r == row)
-        while min_col > 0 and tiles[row][min_col - 1]: min_col -= 1
-        while max_col < GRID_SIZE - 1 and tiles[row][max_col + 1]: max_col += 1
-        main_word = [(row, c, tiles[row][c]) for c in range(min_col, max_col + 1) if tiles[row][c]]
-        return (main_word, orientation) if len(main_word) > 1 else ([], None)
-    elif len(cols) == 1: # Potential vertical word
-        orientation = "vertical"; col = cols.pop(); min_row = min(r for r, c, _ in new_tiles if c == col); max_row = max(r for r, c, _ in new_tiles if c == col)
-        while min_row > 0 and tiles[min_row - 1][col]: min_row -= 1
-        while max_row < GRID_SIZE - 1 and tiles[max_row + 1][col]: max_row += 1
-        main_word = [(r, col, tiles[r][col]) for r in range(min_row, max_row + 1) if tiles[r][col]]
-        return (main_word, orientation) if len(main_word) > 1 else ([], None)
-    else: return [], None
-
-def find_cross_word(tile, tiles, main_orientation):
-    """Finds a cross word formed by a single tile perpendicular to the main word."""
-    r, c, _ = tile; cross_word = []
-    if main_orientation == "horizontal": # Check vertically
-        min_row = r;
-        while min_row > 0 and tiles[min_row - 1][c]: min_row -= 1
-        max_row = r;
-        while max_row < GRID_SIZE - 1 and tiles[max_row + 1][c]: max_row += 1
-        if max_row > min_row: cross_word = [(rr, c, tiles[rr][c]) for rr in range(min_row, max_row + 1) if tiles[rr][c]]
-    elif main_orientation == "vertical": # Check horizontally
-        min_col = c;
-        while min_col > 0 and tiles[r][min_col - 1]: min_col -= 1
-        max_col = c;
-        while max_col < GRID_SIZE - 1 and tiles[r][max_col + 1]: max_col += 1
-        if max_col > min_col: cross_word = [(r, cc, tiles[r][cc]) for cc in range(min_col, max_col + 1) if tiles[r][cc]]
-    return cross_word if len(cross_word) > 1 else []
-
-def find_all_words_formed(new_tiles, tiles):
-    """Finds all words (main and cross) formed by a play."""
-    words = [];
-    if not new_tiles: return words
-    new_positions_set = set((r, c) for r, c, _ in new_tiles)
-    main_word_tiles, orientation = find_main_word(new_tiles, tiles)
-    if main_word_tiles:
-        words.append(main_word_tiles)
-        for tile in new_tiles:
-            if (tile[0], tile[1]) in new_positions_set:
-                cross_word = find_cross_word(tile, tiles, orientation)
-                if cross_word: words.append(cross_word)
-    elif len(new_tiles) == 1: # Single tile placement check
-        tile = new_tiles[0]
-        cross_h = find_cross_word(tile, tiles, "vertical");   # Check H
-        if cross_h: words.append(cross_h)
-        cross_v = find_cross_word(tile, tiles, "horizontal"); # Check V
-        if cross_v: words.append(cross_v)
-    unique_word_tile_lists = []; seen_signatures = set()
-    for word_tile_list in words:
-        signature = tuple(sorted((r, c, l) for r, c, l in word_tile_list))
-        if signature not in seen_signatures: unique_word_tile_lists.append(word_tile_list); seen_signatures.add(signature)
-    return unique_word_tile_lists
-
-
-
-
-# calculate_score (Unchanged from Part 2 provided previously)
-def calculate_score(new_tiles, board, tiles, blanks):
-    """Calculates the score for a play based on newly placed tiles."""
-    total_score = 0; new_positions = set((r, c) for r, c, _ in new_tiles)
-    words_formed_details = find_all_words_formed(new_tiles, tiles)
-    for word_tiles in words_formed_details:
-        word_score = 0; word_multiplier = 1
-        for r, c, letter in word_tiles:
-            if letter not in TILE_DISTRIBUTION: print(f"Warning: Invalid letter '{letter}' found in word during scoring at ({r},{c}). Skipping."); continue
-            is_blank = (r, c) in blanks; letter_value = 0 if is_blank else TILE_DISTRIBUTION[letter][1]; letter_multiplier = 1
-            if (r, c) in new_positions:
-                square_color = board[r][c]
-                if square_color == LIGHT_BLUE: letter_multiplier = 2 # DL
-                elif square_color == BLUE: letter_multiplier = 3 # TL
-                elif square_color == PINK: word_multiplier *= 2 # DW (Center is also Pink)
-                elif square_color == RED: word_multiplier *= 3 # TW
-            word_score += letter_value * letter_multiplier
-        total_score += word_score * word_multiplier
-    if len(new_tiles) == 7: total_score += 50 # Bingo bonus
-    return total_score
-'''
-
-
 
 # select_seven_letter_word, eight_letter_practice, mode_selection_screen, draw_options_menu (Unchanged from Part 2 provided previously)
 def select_seven_letter_word(removed_letter, seven_letter_words):
@@ -3927,25 +3842,6 @@ def get_words_played(word_positions, tiles):
     return list(words_found)
 
 
-'''
-def get_remaining_tiles(rack, tiles, blanks):
-    """Calculate the remaining tiles (excluding those on board and current player's rack)."""
-    remaining = {letter: count for letter, (count, _) in TILE_DISTRIBUTION.items()}
-    rack_counter = Counter(rack)
-    for tile, count in rack_counter.items():
-        if tile in remaining: remaining[tile] -= count
-    for r in range(GRID_SIZE):
-        for c in range(GRID_SIZE):
-            if tiles[r][c]:
-                if (r, c) in blanks:
-                    if ' ' in remaining: remaining[' '] -= 1
-                else:
-                    letter = tiles[r][c]
-                    if letter in remaining: remaining[letter] -= 1
-    for letter in remaining: remaining[letter] = max(0, remaining[letter])
-    return remaining
-'''
-
 
     
 
@@ -3972,21 +3868,31 @@ def draw_remaining_tiles(unseen_tiles_dict, turn):
     last_drawn_y = 40 
     last_drawn_col_x = remaining_x 
 
+    # --- MODIFICATION START: Pre-render surfaces to optimize blitting ---
+    surfaces_to_blit = []
     for letter in sorted_letters:
         count = unseen_tiles_dict.get(letter, 0)
         if count > 0:
             display_letter = "?" if letter == " " else letter
             text_str = display_letter * count
             text = tile_count_font.render(text_str, True, BLACK)
+            
             if items_in_col >= max_items_per_col:
                 y_pos = 40 
                 current_col_x += col_width
                 items_in_col = 0
-            screen.blit(text, (current_col_x, y_pos))
+            
+            surfaces_to_blit.append((text, (current_col_x, y_pos)))
+            
             last_drawn_y = y_pos 
             last_drawn_col_x = current_col_x 
             y_pos += 20
             items_in_col += 1
+
+    # Now blit all at once
+    for surf, pos in surfaces_to_blit:
+        screen.blit(surf, pos)
+    # --- MODIFICATION END ---
 
     summary_y_start = last_drawn_y + 20 + 5
     summary_y_start = min(summary_y_start, max_y + 40) 
@@ -4017,148 +3923,6 @@ def draw_arrow(row, col, direction):
 
 
 
-
-'''
-def is_valid_play(word_positions, tiles_after_play, is_first_play_param, initial_rack_size, original_tiles_on_board, rack_before_play, is_silent_batch_run_param=False):
-    """
-    Validate a potential play against game rules and dictionary.
-    Returns: (validation_code, is_bingo, detail)
-        validation_code (str): 'VALID', 'INVALID_WORDS', or 'INVALID_STRUCTURE_*'.
-        is_bingo (bool): True if the play is a bingo.
-        detail (list or str): List of invalid words if code is 'INVALID_WORDS',
-                              otherwise a string reason for invalid structure.
-    """
-    # Added for debugging this specific issue:
-    if not is_silent_batch_run_param:
-        print(f"  DEBUG is_valid_play: Received is_first_play_param = {is_first_play_param}")
-
-    if not word_positions:
-        return VC_INVALID_STRUCTURE_EMPTY_PLAY, False, "No tiles placed."
-
-    newly_placed_positions_coords = set((r, c) for r, c, _ in word_positions)
-    is_bingo = (initial_rack_size == 7 and len(newly_placed_positions_coords) == 7)
-
-    rows_of_new_tiles = sorted(list(set(r for r, _, _ in word_positions)))
-    cols_of_new_tiles = sorted(list(set(c for _, c, _ in word_positions)))
-    is_horizontal = len(rows_of_new_tiles) == 1
-    is_vertical = len(cols_of_new_tiles) == 1
-
-    if not (is_horizontal or is_vertical):
-        return VC_INVALID_STRUCTURE_PLACEMENT, is_bingo, "Tiles not in a single line."
-
-    if is_horizontal:
-        r = rows_of_new_tiles[0]
-        min_col_new_tiles = min(c_wp for r_wp, c_wp, l_wp in word_positions if r_wp == r)
-        max_col_new_tiles = max(c_wp for r_wp, c_wp, l_wp in word_positions if r_wp == r)
-        
-        temp_min_c = min_col_new_tiles
-        while temp_min_c > 0 and tiles_after_play[r][temp_min_c - 1]:
-            temp_min_c -= 1
-        temp_max_c = max_col_new_tiles
-        while temp_max_c < GRID_SIZE - 1 and tiles_after_play[r][temp_max_c + 1]:
-            temp_max_c += 1
-            
-        for c_check in range(temp_min_c, temp_max_c + 1):
-            if not tiles_after_play[r][c_check]:
-                return VC_INVALID_STRUCTURE_PLACEMENT, is_bingo, "Gap in horizontal play."
-    elif is_vertical:
-        c = cols_of_new_tiles[0]
-        min_row_new_tiles = min(r_wp for r_wp, c_wp, l_wp in word_positions if c_wp == c)
-        max_row_new_tiles = max(r_wp for r_wp, c_wp, l_wp in word_positions if c_wp == c)
-
-        temp_min_r = min_row_new_tiles
-        while temp_min_r > 0 and tiles_after_play[temp_min_r - 1][c]:
-            temp_min_r -= 1
-        temp_max_r = max_row_new_tiles
-        while temp_max_r < GRID_SIZE - 1 and tiles_after_play[temp_max_r + 1][c]:
-            temp_max_r += 1
-
-        for r_check in range(temp_min_r, temp_max_r + 1):
-            if not tiles_after_play[r_check][c]:
-                return VC_INVALID_STRUCTURE_PLACEMENT, is_bingo, "Gap in vertical play."
-
-    all_words_details = find_all_words_formed(word_positions, tiles_after_play)
-    if not all_words_details:
-        return VC_INVALID_STRUCTURE_NO_WORDS, is_bingo, "No scorable words formed."
-
-    formed_word_strings = ["".join(tile[2] for tile in word_detail) for word_detail in all_words_details]
-    if not formed_word_strings:
-        return VC_INVALID_STRUCTURE_NO_WORDS, is_bingo, "No scorable words formed (strings)."
-
-    structurally_sound = True
-    structural_error_reason = ""
-    # USE THE PARAMETER is_first_play_param
-    if is_first_play_param:
-        if CENTER_SQUARE not in newly_placed_positions_coords:
-            structurally_sound = False
-            structural_error_reason = "First play must be on center square."
-    else:
-        connects = False
-        if original_tiles_on_board is None: 
-             print("is_valid_play: CRITICAL ERROR - original_tiles_on_board is None during connection check!")
-             return VC_INVALID_STRUCTURE_NOT_CONNECTED, is_bingo, "Internal error: Board state missing for connection check."
-
-        for r_conn, c_conn in newly_placed_positions_coords:
-            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                nr, nc = r_conn + dr, c_conn + dc
-                if 0 <= nr < GRID_SIZE and 0 <= nc < GRID_SIZE and original_tiles_on_board[nr][nc]:
-                    connects = True
-                    break
-            if connects:
-                break
-        if not connects:
-            structurally_sound = False
-            structural_error_reason = "Play must connect to existing tiles."
-
-    if not structurally_sound:
-        # Correctly use the specific error codes based on the reason
-        if structural_error_reason == "First play must be on center square.":
-             return VC_INVALID_STRUCTURE_NOT_CENTER, is_bingo, structural_error_reason
-        elif structural_error_reason == "Play must connect to existing tiles.":
-             return VC_INVALID_STRUCTURE_NOT_CONNECTED, is_bingo, structural_error_reason
-        else: # Fallback for other structural issues caught by the above.
-             return VC_INVALID_STRUCTURE_PLACEMENT, is_bingo, structural_error_reason
-
-
-    invalid_words_found = []
-    all_words_in_dawg = True
-    for word_val_check in formed_word_strings:
-        dawg_search_result = DAWG.search(word_val_check)
-        if not is_silent_batch_run_param:
-            pass 
-        if not dawg_search_result:
-            all_words_in_dawg = False
-            invalid_words_found.append(word_val_check)
-
-    if not all_words_in_dawg:
-        return VC_INVALID_WORDS, is_bingo, invalid_words_found
-
-    return VC_VALID, is_bingo, None
-'''
-
-
-
-    
-
-
-'''
-def get_anchor_points(tiles, is_first_play):
-    """Get anchor points (empty squares adjacent to existing tiles) for valid moves."""
-    anchors = set()
-    if is_first_play: anchors.add(CENTER_SQUARE); return anchors
-    has_tiles = False
-    for r in range(GRID_SIZE):
-        for c in range(GRID_SIZE):
-            if tiles[r][c]: has_tiles = True # Check if board has any tiles
-            if not tiles[r][c]: # Must be an empty square
-                 is_anchor = False
-                 for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                     nr, nc = r + dr, c + dc
-                     if 0 <= nr < GRID_SIZE and 0 <= nc < GRID_SIZE and tiles[nr][nc]: is_anchor = True; break
-                 if is_anchor: anchors.add((r, c))
-    if not has_tiles and not is_first_play: anchors.add(CENTER_SQUARE) # Fallback if board empty but not first play
-    return anchors
-'''
 
 
 
@@ -5935,16 +5699,6 @@ def draw_simulation_config_dialog(input_texts, active_input_index, state):
     # Return all clickable rects, including the new checkbox
     return input_rects, simulate_rect, cancel_rect, profile_checkbox_rect
 
-
-
-
-
-
-
-
-
-
-    
 
 
 
@@ -8217,15 +7971,6 @@ def does_move_form_five_letter_word(move, current_tiles, current_blanks):
 
 
 
-
-
-
-
-
-
-
-
-
 def _handle_mouse_down_simulation_config(event, state, drawn_rects):
     """
     Handles MOUSEBUTTONDOWN events specifically when the simulation config dialog is showing.
@@ -8331,8 +8076,15 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
                         sim_ai_rack = sim_racks[sim_player_idx]
                         sim_opponent_rack_len = len(sim_racks[sim_opponent_idx])
                         
-                        # Generate moves using the now-correct state['tiles'] and ['blanks']
-                        all_moves_for_sim = ai_engine.generate_all_moves_gaddag(sim_ai_rack, state['tiles'], state['board'], state['blanks'], is_silent_batch_run_param=True)
+                        # --- MODIFICATION START: Generate moves using the now-correct state ---
+                        all_moves_for_sim = ai_engine.generate_all_moves_gaddag(
+                            sim_ai_rack, 
+                            state['tiles'], # Use the reverted board state
+                            state['board'], 
+                            state['blanks'], # Use the reverted blanks state
+                            is_silent_batch_run_param=True
+                        )
+                        # --- MODIFICATION END ---
 
                         # Run simulation
                         simulation_results = ai_engine.run_ai_simulation(
@@ -12040,8 +11792,6 @@ def reset_for_play_again(is_ai, practice_mode):
 
 
 
-# In Scrabble AE - 11JUN25 - Cython Optimize
-
 def execute_game_session(is_initialized_from_outer_loop_param):
     # MODULE-LEVEL GLOBALS that this function and its helpers will use/modify
     global USE_AI_SIMULATION, USE_ENDGAME_SOLVER
@@ -12069,7 +11819,6 @@ def execute_game_session(is_initialized_from_outer_loop_param):
     global current_turn_pool_quality_score
     global specifying_rack, confirming_override, specify_rack_inputs
     global specify_rack_active_input, specify_rack_original_racks, specify_rack_proposed_racks
-    global preview_score_enabled, current_preview_score
     global showing_simulation_config, simulation_config_inputs, simulation_config_active_input
     global letter_checks
     global practice_target_moves, practice_best_move, all_moves
@@ -12105,6 +11854,10 @@ def execute_game_session(is_initialized_from_outer_loop_param):
         print("Batch run started - hit CTRL-C to stop (or ESC during visualized game).")
 
     previous_game_over_state_in_loop = False
+    
+    # --- MODIFICATION START: Add Pygame Clock ---
+    clock = pygame.time.Clock()
+    # --- MODIFICATION END ---
 
     try:
         for game_num_loop_internal in range(1, num_loops_exec + 1):
@@ -12243,6 +11996,9 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                 if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
                     current_state_dict['drawn_rects'] = draw_game_screen(screen, current_state_dict)
                     pygame.display.flip()
+                    # --- MODIFICATION START: Tick the clock ---
+                    clock.tick(60)
+                    # --- MODIFICATION END ---
                 elif is_batch_running: 
                     pygame.time.wait(1) 
 
