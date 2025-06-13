@@ -1,8 +1,8 @@
 
 
 #python
-#Scrabble AE
-#Plaid mode
+#Scrabble AG
+#Fixing Simulate in Replay Mode
 #13JUN25
 
 
@@ -1414,35 +1414,6 @@ def create_standard_bag():
 
 
 
-
-'''
-# --- Trie/DAWG Setup ---
-class TrieNode: # Keeping simple Trie for now, can replace with minimized DAWG later
-    def __init__(self):
-        self.children = {}
-        self.is_end = False
-
-class Dawg: # Renaming our existing Trie to Dawg for conceptual clarity
-    def __init__(self):
-        self.root = TrieNode()
-
-    def insert(self, word):
-        node = self.root
-        for char in word:
-            if char not in node.children:
-                node.children[char] = TrieNode()
-            node = node.children[char]
-        node.is_end = True
-
-    def search(self, word):
-        """Check if a word exists in the DAWG."""
-        node = self.root
-        for char in word:
-            if char not in node.children:
-                return False
-            node = node.children[char]
-        return node.is_end
-'''
 
 
 
@@ -5611,71 +5582,108 @@ def save_batch_statistics(batch_results, player_names, batch_summary_filename, t
 
 # --- AI Strategy Helper Functions ---
 
-# --- Static Leave Values & Constants (Assumed to be defined elsewhere in the full code) ---
-'''
-GOOD_LEAVE_BONUS = {' ': 25.6, 'S': 8.0, 'Z': 5.1, 'X': 3.3, 'E': 0.3, 'A': 0.6, 'R': 1.1, 'N': 0.2,'H': 1.1, 'C': 0.9, 'M': 0.6, 'D': 0.5}
-BAD_LEAVE_PENALTY = {'T': -0.1, 'I': -2.1, 'L': -0.2, 'Q': -6.8, 'J': -1.5, 'V': -5.5, 'W': -3.8, 'K': -0.5, 'F': -2.2, 'Y': -0.6, 'U': -5.1, 'B': -2.0, 'G': -2.9, 'P': -0.5, 'O': -2.5}
-DUPLICATE_PENALTY = -4.2 # Applied for each duplicate beyond the first
-VOWELS = "AEIOU"
-BALANCE_PENALTY_FACTOR = -4.0 # Penalty per vowel count away from ideal range
-'''
 
 
 
 
-
-'''
-def ai_engine.evaluate_leave(rack, verbose=False, is_silent_batch_run_param=False): # Added is_silent_batch_run_param
+def find_best_move(state, is_plaid_mode):
     """
-    Retrieves the pre-calculated leave value (float) from the LEAVE_LOOKUP_TABLE.
-    Handles leaves of length 1-6. Returns 0.0 for empty leaves or leaves > 6 tiles.
-    Converts blanks (' ') to '?' before sorting for lookup key generation.
-    Verbose print statements are now also conditional on not being a silent batch run.
-
-    Args:
-        rack (list): A list of characters representing the tiles left (blanks as ' ').
-        verbose (bool): If True, print lookup details (optional).
-        is_silent_batch_run_param (bool): If True and verbose is True, suppress prints.
+    The new AI brain. It determines the best action (play, exchange, or pass)
+    based on the selected strategy (Plaid or standard).
 
     Returns:
-        float: The score adjustment from the lookup table, or 0.0.
+        tuple: (action_chosen, move_details)
+               - action_chosen (str): 'play', 'exchange', or 'pass'
+               - move_details (dict or list): The move dictionary if playing,
+                 the list of tiles to exchange, or None if passing.
     """
-    num_tiles = len(rack)
+    is_silent_run = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
     
-    # Determine if printing should occur based on verbosity and silent batch mode
-    can_print_verbose = verbose and not is_silent_batch_run_param
-
-    if num_tiles == 0:
-        if can_print_verbose: print("--- Evaluating Leave: Empty rack -> 0.0")
-        return 0.0 
-    if num_tiles > 6:
-        if can_print_verbose: print(f"--- Evaluating Leave: Rack length {num_tiles} > 6 -> 0.0")
-        return 0.0 
-
-    rack_with_question_marks = ['?' if tile == ' ' else tile for tile in rack]
-    leave_key = "".join(sorted(rack_with_question_marks))
-
-    try:
-        value = LEAVE_LOOKUP_TABLE.get(leave_key)
-
-        if value is not None:
-            leave_float = float(value) 
-            if can_print_verbose: print(f"--- Evaluating Leave: Found '{leave_key}' -> {leave_float:.2f}") 
-            return leave_float
-            
+    # Unpack necessary state
+    current_rack = state['racks'][state['turn'] - 1]
+    
+    if is_plaid_mode:
+        # --- PLAID MODE LOGIC ---
+        if not is_silent_run:
+            print("AI is in Plaid Mode (Highest Score Only).")
+        
+        # Generate moves but only keep track of the highest scoring one.
+        # This is still using the full generator for now, but the principle is what matters.
+        # A true optimization would be a new cython function find_highest_scoring_move.
+        all_moves = ai_engine.generate_all_moves_gaddag(
+            current_rack, state['tiles'], state['board'], state['blanks'],
+            is_silent_batch_run_param=is_silent_run
+        )
+        if not all_moves:
+            return 'pass', None
         else:
-            # This is a warning about missing data, should probably always print or log prominently.
-            # For now, making it conditional on verbose to match existing behavior.
-            if can_print_verbose: # Or simply: if verbose: print(...) if this warning is critical
-                print(f"Warning: Leave key '{leave_key}' not found in LEAVE_LOOKUP_TABLE. Returning 0.0.")
-            return 0.0 
-    except Exception as e:
-        # This is an error, should probably always print or log.
-        # For now, making it conditional on verbose.
-        if can_print_verbose: # Or simply: if verbose: print(...)
-            print(f"Error during leave table lookup for key '{leave_key}': {e}. Returning 0.0.")
-        return 0.0
-'''
+            # Find the best move by score without sorting the whole list
+            best_move = max(all_moves, key=lambda m: m.get('score', 0))
+            if not is_silent_run:
+                print(f"  Plaid AI selecting: '{best_move.get('word', 'N/A')}' with score {best_move.get('score', 0)}")
+            return 'play', best_move
+
+    else:
+        # --- STANDARD AI LOGIC (moved from ai_turn) ---
+        all_moves_gen = ai_engine.generate_all_moves_gaddag(
+            current_rack, state['tiles'], state['board'], state['blanks'],
+            is_silent_batch_run_param=is_silent_run
+        )
+        if all_moves_gen is None:
+            all_moves_gen = []
+
+        # (The entire complex decision block from the old ai_turn goes here)
+        expected_single_draw_value_for_turn = ai_engine.get_expected_single_draw_value(current_rack, state['tiles'], state['blanks'])
+
+        best_raw_plus_leave_play_candidate = None
+        best_raw_plus_leave_evaluation = -float('inf')
+        best_simulated_play_candidate = None
+        best_simulated_play_final_score = -float('inf')
+        best_exchange_tiles = []
+        best_exchange_evaluation = -float('inf')
+
+        can_play = bool(all_moves_gen)
+        can_exchange = len(state['bag']) > 0
+
+        if can_play:
+            for move in all_moves_gen:
+                raw_score = move.get('score', 0)
+                leave_value = ai_engine.evaluate_leave(move.get('leave', []), is_silent_batch_run_param=is_silent_run)
+                current_move_raw_plus_leave_eval = raw_score + leave_value
+                if current_move_raw_plus_leave_eval > best_raw_plus_leave_evaluation:
+                    best_raw_plus_leave_evaluation = current_move_raw_plus_leave_eval
+                    best_raw_plus_leave_play_candidate = move
+
+        if state.get('USE_AI_SIMULATION') and can_play:
+            opponent_idx = 1 - (state['turn'] - 1)
+            opponent_rack_len_sim = len(state['racks'][opponent_idx]) if 0 <= opponent_idx < len(state['racks']) and state['racks'][opponent_idx] is not None else 7
+            simulation_results = ai_engine.run_ai_simulation(
+                all_moves_gen, current_rack, opponent_rack_len_sim, state['tiles'], state['blanks'], state['board'], state['bag'],
+                state.get('ai_sim_num_candidates_cfg', DEFAULT_AI_CANDIDATES),
+                state.get('ai_sim_num_opponent_sims_cfg', DEFAULT_OPPONENT_SIMULATIONS),
+                state.get('ai_sim_num_post_sim_candidates_cfg', DEFAULT_POST_SIM_CANDIDATES),
+                is_silent_batch_run_param=is_silent_run
+            )
+            if simulation_results:
+                best_simulated_play_candidate = simulation_results[0]['move']
+
+        if can_exchange:
+            best_exchange_tiles, best_exchange_evaluation = ai_engine.find_best_exchange_option(
+                current_rack, state['tiles'], state['blanks'], len(state['bag']), is_silent_batch_run_param=is_silent_run
+            )
+
+        if can_play and best_raw_plus_leave_play_candidate:
+            if best_exchange_tiles and (best_exchange_evaluation > best_raw_plus_leave_evaluation + EXCHANGE_PREFERENCE_THRESHOLD):
+                return 'exchange', best_exchange_tiles
+            else:
+                if state.get('USE_AI_SIMULATION') and best_simulated_play_candidate:
+                    return 'play', best_simulated_play_candidate
+                else:
+                    return 'play', best_raw_plus_leave_play_candidate
+        elif best_exchange_tiles:
+            return 'exchange', best_exchange_tiles
+        else:
+            return 'pass', None
 
 
 
@@ -6017,8 +6025,16 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
 
 
     move_data_for_turn = None
+    
+    # --- FIX START: Initialize variables needed by the final return dictionary ---
+    # These were previously only calculated in the 'else' (standard mode) block.
+    expected_single_draw_value_for_turn = 0.0
+    total_expected_value_of_this_draw = 0.0
+    luck_factor = 0.0
+    best_play_move = None
+    action_chosen = 'pass' # Default action
+    # --- FIX END ---
 
-    # --- NEW: Plaid Mode Logic ---
     if is_plaid_mode:
         if not is_silent_batch_run_param:
             print("AI is in Plaid Mode (Highest Score Only).")
@@ -6033,7 +6049,6 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
             action_chosen = 'play'
             if not is_silent_batch_run_param:
                 print(f"  Plaid AI selecting: '{best_play_move.get('word', 'N/A')}' with score {best_play_move.get('score', 0)}")
-    # --- END NEW ---
     else:
         # --- EXISTING LOGIC MOVED INTO AN ELSE BLOCK ---
         expected_single_draw_value_for_turn = ai_engine.get_expected_single_draw_value(current_rack, tiles, blanks)
@@ -6383,9 +6398,10 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
     coord = ''
     word_with_blanks = ''
     is_bingo = False
-    luck_factor = 0.0
     leave_for_history = []
-    turn_duration = 0.0 # Will be calculated at the end
+    turn_duration = 0.0
+    exchanged_tiles_for_history = []
+    tiles_consumed_from_rack_history = []
 
     if action_chosen == 'play':
         if best_play_move:
@@ -6495,7 +6511,6 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
         last_played_highlight_coords = set()
         tiles_consumed_from_rack_history = []
 
-    total_expected_value_of_this_draw = 0.0
     if drawn_tiles:
         actual_drawn_leave_value = ai_engine.evaluate_leave(drawn_tiles, is_silent_batch_run_param=is_silent_batch_run_param)
         total_expected_value_of_this_draw = expected_single_draw_value_for_turn * len(drawn_tiles)
@@ -6503,9 +6518,7 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
         if not is_silent_batch_run_param:
             drawn_tiles_str = "".join(sorted(t if t != ' ' else '?' for t in drawn_tiles))
             print(f"  Drew: {drawn_tiles_str}, ActualLeaveVal: {actual_drawn_leave_value:.2f}, ExpectedSingleDrawVal: {expected_single_draw_value_for_turn:.2f}, TotalExpectedForDraw: {total_expected_value_of_this_draw:.2f}, LuckFactor: {luck_factor:+.2f}")
-    else:
-        luck_factor = 0.0
-
+    
     turn_start_time = time.perf_counter()
     if not is_silent_batch_run_param:
         print(f"\n{'='*15} ai_turn START: Turn {turn} {'='*15}")
@@ -6532,8 +6545,6 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
         move_data_for_turn['exchanged_tiles'] = exchanged_tiles_for_history
 
     return next_turn_val, first_play, pass_count, exchange_count, consecutive_zero_point_turns, [], dropdown_open, hinting, showing_all_words, paused_for_power_tile_local_flag, current_power_tile_local_val, paused_for_bingo_practice_local_flag, set(), move_data_for_turn
-
-
 
 
 
@@ -6845,7 +6856,7 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                     loading_text_surf = ui_font.render("Generating Insights for Loaded Game...", True, BLUE) # Changed color
                     screen.blit(loading_text_surf, ( (WINDOW_WIDTH - loading_text_surf.get_width()) // 2, (WINDOW_HEIGHT - loading_text_surf.get_height()) // 2))
                     pygame.display.flip()
-                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_batch_run_param=is_silent_run_for_init)
+                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_run_param=is_silent_run_for_init)
             else:
                 insights_data_for_replay = [] 
                 if not is_silent_run_for_init and gaddag_loading_status == 'loading': # Should be 'idle' or 'error' if not loaded
@@ -6873,7 +6884,7 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                     loading_text_surf = ui_font.render("Generating Insights...", True, BLUE) # Changed color
                     screen.blit(loading_text_surf, ( (WINDOW_WIDTH - loading_text_surf.get_width()) // 2, (WINDOW_HEIGHT - loading_text_surf.get_height()) // 2))
                     pygame.display.flip()
-                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_batch_run_param=is_silent_run_for_init)
+                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_run_param=is_silent_run_for_init)
             else:
                 insights_data_for_replay = []
                 if not is_silent_run_for_init and gaddag_loading_status == 'loading':
@@ -7270,7 +7281,8 @@ def _handle_mouse_down_simulate_button(event, state, drawn_rects):
     """
     Handles MOUSEBUTTONDOWN events specifically for the "Simulate" button.
     Modifies state to show the simulation configuration dialog.
-    Returns True if the simulate button click was handled, False otherwise.
+    MODIFIED: In replay mode, this now reverts the board state to the pre-move
+    state IMMEDIATELY upon being clicked, before showing the config dialog.
     """
     global GADDAG_STRUCTURE, DEV_VISUALIZE_BATCH_ENABLED_SESSION # For GADDAG access and conditional printing
     global DEFAULT_AI_CANDIDATES, DEFAULT_OPPONENT_SIMULATIONS, DEFAULT_POST_SIM_CANDIDATES # For sim defaults
@@ -7299,6 +7311,25 @@ def _handle_mouse_down_simulate_button(event, state, drawn_rects):
             show_message_dialog("Cannot simulate: AI data is not loaded or available.", "Loading")
             return True # Event handled (by showing message)
 
+        # --- FIX START: Revert board state FIRST if in replay mode ---
+        if replay_mode:
+            if not is_silent_run_local:
+                print(f"Simulate clicked for Replay Turn {current_replay_turn}. Reverting board state.")
+            
+            # Get the state as it was at the beginning of the turn we are viewing
+            target_turn_for_state_recon = current_replay_turn if current_replay_turn > 0 else 1
+            sgs_data_for_sim = state.get('sgs_loaded_game_data', sgs_loaded_game_data)
+            if sgs_data_for_sim:
+                sim_tiles, sim_blanks, _, _, _, _ = get_sgs_replay_state(sgs_data_for_sim, target_turn_for_state_recon, is_silent_batch_run_param=True)
+                
+                # Update the main state's board to reflect the historical state.
+                # This will cause the screen to redraw correctly on the next frame.
+                state['tiles'] = sim_tiles
+                state['blanks'] = sim_blanks
+            else:
+                print("ERROR: Could not revert board state for simulation, SGS data missing.")
+        # --- FIX END ---
+
         # Clear any active typing state if in a live game
         if not replay_mode and state.get('typing'):
             if state.get('original_tiles') and state.get('original_rack'):
@@ -7321,8 +7352,7 @@ def _handle_mouse_down_simulate_button(event, state, drawn_rects):
         
         state = clear_current_preview(state) # Clear any visual preview
 
-        # For both live and replay mode, just show the config dialog.
-        # The logic to run the simulation will be in the dialog's handler.
+        # Now, proceed to show the configuration dialog. The board is now visually correct.
         if not is_silent_run_local:
             mode_str = "Replay Mode" if replay_mode else "Live Game"
             print(f"Simulate button clicked (UI in {mode_str}). Showing config dialog.")
@@ -8194,7 +8224,7 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
     """
     Handles MOUSEBUTTONDOWN events specifically when the simulation config dialog is showing.
     Updates state with validated simulation parameters and triggers the simulation.
-    MODIFIED: Shows an error dialog if post-sim candidates > initial candidates.
+    MODIFIED: No longer handles state reconstruction; assumes the state is correct when called.
     """
     # Ensure global GADDAG_STRUCTURE is accessible if not passed via state explicitly
     global GADDAG_STRUCTURE, DEFAULT_AI_CANDIDATES, DEFAULT_OPPONENT_SIMULATIONS, DEFAULT_POST_SIM_CANDIDATES
@@ -8250,14 +8280,12 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
                 if num_ai_cand <= 0 or num_opp_sim <= 0 or num_post_sim <= 0:
                     raise ValueError("Values must be positive.")
 
-                # --- MODIFICATION START: Stricter validation with user feedback ---
                 if num_post_sim > num_ai_cand:
                     show_message_dialog(
                         f"Post-Sim Candidates ({num_post_sim}) cannot be greater than Initial Candidates ({num_ai_cand}).\n\nPlease correct the values.",
                         "Invalid Parameters"
                     )
                     return state # Stop processing and keep the dialog open
-                # --- MODIFICATION END ---
 
                 # Update state with new config parameters
                 state['ai_sim_num_candidates_cfg'] = num_ai_cand
@@ -8284,27 +8312,26 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
                         profiler.enable()
 
                     if replay_mode:
+                        # The state['tiles'] and state['blanks'] are now already correct.
+                        # We just need to get the correct rack and bag for the simulation.
                         target_turn_for_state_recon = current_replay_turn if current_replay_turn > 0 else 1
                         sgs_data_for_sim = state.get('sgs_loaded_game_data', sgs_loaded_game_data)
-                        if not sgs_data_for_sim:
-                            sgs_data_for_sim = {
-                                'sgs_initial_bag': state.get('sgs_initial_bag', []),
-                                'initial_racks_sgs': state.get('initial_racks', [[], []]),
-                                'full_move_history': state.get('move_history', [])
-                            }
-                        if not sgs_data_for_sim.get('full_move_history'):
-                            show_message_dialog("Cannot simulate replay: Game history data is missing.", "Error")
-                            return state
                         
-                        sim_tiles, sim_blanks, _, sim_racks, sim_bag, sim_turn = get_sgs_replay_state(sgs_data_for_sim, target_turn_for_state_recon, is_silent_batch_run_param=True)
+                        # We only need racks and bag from this call now.
+                        _, _, _, sim_racks, sim_bag, sim_turn = get_sgs_replay_state(sgs_data_for_sim, target_turn_for_state_recon, is_silent_batch_run_param=True)
+                        
                         sim_player_idx = sim_turn - 1
                         sim_opponent_idx = 1 - sim_player_idx
                         sim_ai_rack = sim_racks[sim_player_idx]
                         sim_opponent_rack_len = len(sim_racks[sim_opponent_idx])
                         
+                        # Generate moves using the now-correct state['tiles'] and ['blanks']
+                        all_moves_for_sim = ai_engine.generate_all_moves_gaddag(sim_ai_rack, state['tiles'], state['board'], state['blanks'], is_silent_batch_run_param=True)
+
+                        # Run simulation
                         simulation_results = ai_engine.run_ai_simulation(
-                            ai_engine.generate_all_moves_gaddag(sim_ai_rack, sim_tiles, state['board'], sim_blanks, is_silent_batch_run_param=True),
-                            sim_ai_rack, sim_opponent_rack_len, sim_tiles, sim_blanks, state['board'], sim_bag,
+                            all_moves_for_sim,
+                            sim_ai_rack, sim_opponent_rack_len, state['tiles'], state['blanks'], state['board'], sim_bag,
                             num_ai_cand, num_opp_sim, num_post_sim,
                             is_silent_batch_run_param=is_silent_run_local
                         )
@@ -9000,8 +9027,6 @@ def _handle_mouse_down_game_over_dialog(event, state, drawn_rects):
 
 
 
-# In Scrabble AE - 11JUN25 - Cython Optimize
-
 def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
     """
     Handles MOUSEBUTTONDOWN events when the Hint or All Words dialog is showing.
@@ -9009,6 +9034,7 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
     MODIFIED: Adds drag initiation for All Words dialog and preview for its items.
     MODIFIED: Sets state['first_play'] = False after a successful hint/all_words play.
     MODIFIED: Correctly calculates clicked index in scrollable hint dialog.
+    MODIFIED: Reverts board to correct historical state before applying preview in replay mode.
     NO CODE OMITTED.
     """
     global DEV_VISUALIZE_BATCH_ENABLED_SESSION, WINDOW_WIDTH, WINDOW_HEIGHT, ALL_WORDS_DIALOG_WIDTH, ALL_WORDS_DIALOG_HEIGHT, BUTTON_HEIGHT, BUTTON_GAP
@@ -9193,7 +9219,23 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
                         move_to_preview_data = hint_moves[clicked_index].get('move')
                     else:
                         move_to_preview_data = hint_moves[clicked_index]
-                    if move_to_preview_data: 
+                    
+                    if move_to_preview_data:
+                        # --- FIX: Revert board to correct historical state before previewing ---
+                        if replay_mode:
+                            # Get the state BEFORE the current turn's move was made
+                            turn_to_reconstruct = state.get('current_replay_turn', 1)
+                            sgs_data_for_preview = state.get('sgs_loaded_game_data')
+                            if sgs_data_for_preview:
+                                historical_tiles, historical_blanks, _, _, _, _ = get_sgs_replay_state(
+                                    sgs_data_for_preview,
+                                    turn_to_reconstruct,
+                                    is_silent_batch_run_param=True
+                                )
+                                # Set the main board state to this historical state before applying the preview
+                                state['tiles'] = historical_tiles
+                                state['blanks'] = historical_blanks
+                        # --- END FIX ---
                         state = apply_move_as_preview(state, move_to_preview_data)
                     else: 
                         state = clear_current_preview(state)
