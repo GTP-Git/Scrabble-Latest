@@ -2,8 +2,8 @@
 
 #python
 #Scrabble AH
-#Optimized tile screen redraw
-#Improved traversal
+#Fixed No Moves Available bug in Replay after BBB practice mode
+#Fixed All Words bug in Replay after BBB practice mode
 #13JUN25
 
 
@@ -23,6 +23,10 @@ from collections import Counter
 import copy
 import threading
 import ai_engine
+
+
+
+
 
 try:
     import pyperclip
@@ -7976,6 +7980,8 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
     Handles MOUSEBUTTONDOWN events specifically when the simulation config dialog is showing.
     Updates state with validated simulation parameters and triggers the simulation.
     MODIFIED: No longer handles state reconstruction; assumes the state is correct when called.
+    MODIFIED: Now saves the generated move list to state['all_moves'] for both replay and live modes.
+    This is a full and complete function with no code omitted.
     """
     # Ensure global GADDAG_STRUCTURE is accessible if not passed via state explicitly
     global GADDAG_STRUCTURE, DEFAULT_AI_CANDIDATES, DEFAULT_OPPONENT_SIMULATIONS, DEFAULT_POST_SIM_CANDIDATES
@@ -8076,7 +8082,6 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
                         sim_ai_rack = sim_racks[sim_player_idx]
                         sim_opponent_rack_len = len(sim_racks[sim_opponent_idx])
                         
-                        # --- MODIFICATION START: Generate moves using the now-correct state ---
                         all_moves_for_sim = ai_engine.generate_all_moves_gaddag(
                             sim_ai_rack, 
                             state['tiles'], # Use the reverted board state
@@ -8084,6 +8089,8 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
                             state['blanks'], # Use the reverted blanks state
                             is_silent_batch_run_param=True
                         )
+                        # --- MODIFICATION START ---
+                        state['all_moves'] = all_moves_for_sim # Store the generated moves
                         # --- MODIFICATION END ---
 
                         # Run simulation
@@ -8100,7 +8107,16 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
                         current_player_rack = state['racks'][player_idx] if 0 <= player_idx < len(state['racks']) and state['racks'][player_idx] is not None else []
                         
                         state = clear_current_preview(state)                        
-                        current_player_all_moves = state.get('all_moves', [])
+                        
+                        # --- MODIFICATION START ---
+                        # Generate moves here to ensure they are fresh and store them
+                        current_player_all_moves = ai_engine.generate_all_moves_gaddag(
+                            current_player_rack,
+                            state['tiles'], state['board'], state['blanks'],
+                            is_silent_batch_run_param=True
+                        )
+                        state['all_moves'] = current_player_all_moves
+                        # --- MODIFICATION END ---
                         
                         simulation_results = ai_engine.run_ai_simulation(
                             current_player_all_moves,
@@ -8613,7 +8629,8 @@ def _handle_mouse_down_game_over_dialog(event, state, drawn_rects):
     MODIFIED: Defined is_silent_run locally.
     MODIFIED: Displays "Generating Insights..." message.
     MODIFIED: Ensures save_game_sgs is called with show_success_dialog=True.
-    NO CODE OMITTED.
+    MODIFIED: Constructs in-memory SGS data when entering replay from a live game.
+    This is a full and complete function with no code omitted.
     """
     global DEV_VISUALIZE_BATCH_ENABLED_SESSION 
     global insights_data_for_replay 
@@ -8700,11 +8717,9 @@ def _handle_mouse_down_game_over_dialog(event, state, drawn_rects):
                 except OSError as e_os_err:
                     print(f"Warning: Error listing directory for SGS save sequence number: {e_os_err}")
                 save_filename_sgs = f"{date_str}-{time_str}-SGSGAME-{seq_num}.sgs"
-                # --- MODIFICATION: Ensure show_success_dialog is True ---
                 save_game_sgs(save_filename_sgs, game_data_for_sgs,
                                   show_success_dialog=True, 
                                   is_silent_batch_run_param=is_silent_run)
-                # --- END MODIFICATION ---
             else:
                 print("Error: Missing data required for SGS saving.")
                 missing_parts = []
@@ -8722,15 +8737,22 @@ def _handle_mouse_down_game_over_dialog(event, state, drawn_rects):
                 if not is_silent_run:
                     print("Entering Replay Mode (from Game Over Dialog)...")
                 
-                game_data_for_insights = None
-                if sgs_loaded_game_data_local: 
-                    game_data_for_insights = sgs_loaded_game_data_local
-                else: 
+                # --- MODIFICATION START: Construct SGS data if not already loaded ---
+                game_data_for_insights = sgs_loaded_game_data_local
+                if not game_data_for_insights:
+                    if not is_silent_run:
+                        print("  Constructing in-memory SGS data for replay from live game...")
                     game_data_for_insights = {
                         'sgs_initial_bag': state.get('sgs_initial_bag', []),
                         'initial_racks_sgs': state.get('initial_racks', [[],[]]),
                         'full_move_history': state.get('move_history', []),
+                        'player_names': state.get('player_names', ["P1", "P2"]),
+                        'final_scores_adjusted': state.get('final_scores', [0,0])
+                        # Add other necessary keys if get_sgs_replay_state needs them
                     }
+                    # Store this constructed data back into the main state
+                    state['sgs_loaded_game_data'] = game_data_for_insights
+                # --- MODIFICATION END ---
 
                 if gaddag_loading_status == 'loaded' and GADDAG_STRUCTURE is not None:
                     if not is_silent_run:
@@ -8741,8 +8763,6 @@ def _handle_mouse_down_game_over_dialog(event, state, drawn_rects):
                     
                     insights_data_for_replay = generate_turn_insights_data(game_data_for_insights, is_silent_run_param=is_silent_run)
                     
-                    # The "DEBUG _handle_mouse_down_game_over_dialog..." print block that was here has been removed.
-
                 else:
                     insights_data_for_replay = [] 
                     if not is_silent_run:
@@ -10372,7 +10392,7 @@ def draw_all_words_dialog(moves, selected_index, current_scroll_offset, dialog_x
         direction = move.get('direction', 'right')
         leave = move.get('leave', [])
         word_display = move.get('word_with_blanks', word.upper())
-        coord = get_coord(start_pos, direction) 
+        coord = ai_engine.get_coord(start_pos, direction) 
         leave_str = ''.join(sorted(l if l != ' ' else '?' for l in leave))
         
         # THIS IS THE SECOND KEY FIX: Use i+1 for numbering and int(score) for display.
