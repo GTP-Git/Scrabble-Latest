@@ -13,8 +13,8 @@ from itertools import permutations, combinations
 import cython
 from collections import Counter
 import random
-from libc.stdlib cimport rand, srand, RAND_MAX
-from libc.time cimport time
+from cython.cimports.libc.stdlib cimport rand, srand, RAND_MAX
+from cython.cimports.libc.time cimport time
 
 # Seed the C random number generator once when the module is imported
 srand(<unsigned int>time(NULL))
