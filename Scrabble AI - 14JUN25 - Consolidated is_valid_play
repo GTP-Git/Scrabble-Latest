@@ -1,10 +1,9 @@
 
 
 #python
-#Scrabble AH
-#Fixed No Moves Available bug in Replay after BBB practice mode
-#Fixed All Words bug in Replay after BBB practice mode
-#13JUN25
+#Scrabble AI
+#Consolidated is_valid_play
+#14JUN25
 
 
 
@@ -3805,10 +3804,8 @@ def draw_practice_end_dialog(message):
 
 
 
-# End of Part 3
 
-# Part 4 (Includes game logic helpers: get_words_played, remaining tiles, validation, anchors)
-# get_words_played, get_remaining_tiles, draw_remaining_tiles, draw_arrow, is_valid_play, get_anchor_points (Unchanged from Part 4 provided previously)
+
 def get_words_played(word_positions, tiles):
     """Get all word strings formed by a play based on tile positions."""
     if not word_positions: return []
@@ -5506,6 +5503,11 @@ def estimate_draw_value(num_to_draw, expected_single_draw_value):
 
 
 
+
+
+
+
+
 # --- NEW Helper Function for Drawing Indicator ---
 
 
@@ -5996,7 +5998,7 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
                         temp_tiles_filter[r_filter][c_filter] = letter_filter
                         if (r_filter, c_filter) in move.get('blanks', set()):
                             temp_blanks_filter.add((r_filter, c_filter))
-                words_formed_details = ai_engine.find_all_words_formed(newly_placed_details_filter, temp_tiles_filter)
+                words_formed_details = ai_engine.get_words_formed_for_python(newly_placed_details_filter, temp_tiles_filter)
                 if any(len("".join(t[2] for t in word_detail)) == 5 for word_detail in words_formed_details):
                     filtered_moves.append(move)
             all_moves_gen = filtered_moves
@@ -7958,7 +7960,7 @@ def does_move_form_five_letter_word(move, current_tiles, current_blanks):
             return False
 
     # Find all words formed by this simulated placement
-    words_formed_details = ai_engine.find_all_words_formed(newly_placed_details, temp_tiles)
+    words_formed_details = ai_engine.get_words_formed_for_python(newly_placed_details, temp_tiles)
 
     # Check if any formed word has length 5
     for word_detail in words_formed_details:
@@ -9341,7 +9343,7 @@ def _handle_keydown_typing_on_board(event, state):
                 print(f"  First Play? {state['first_play']}")
                 print(f"  Calling is_valid_play with current state['tiles'] as tiles_after_play...")
             
-            validation_code, is_bingo, validation_detail, _ = ai_engine.is_valid_play(
+            validation_code, is_bingo, validation_detail, all_words_details = ai_engine.is_valid_play(
                 newly_placed_details,
                 temp_tiles_for_validation, # This is the board *after* typing
                 state['first_play'],
@@ -9359,7 +9361,7 @@ def _handle_keydown_typing_on_board(event, state):
 
             if validation_code == VC_VALID:
                 proceed_with_play = True
-                score_val_play = ai_engine.calculate_score(newly_placed_details, state['board'], temp_tiles_for_validation, state['blanks'])
+                score_val_play = ai_engine.calculate_score(newly_placed_details, state['board'], temp_tiles_for_validation, state['blanks'], all_words_details)
             elif validation_code == VC_INVALID_WORDS:
                 invalid_words_list = validation_detail
                 allow_anyway = show_allow_invalid_word_dialog(invalid_words_list)
@@ -9491,7 +9493,7 @@ def _handle_keydown_typing_on_board(event, state):
                     state['last_played_highlight_coords'] = set((r_lp, c_lp) for r_lp, c_lp, _ in newly_placed_details)
                     
                     # Determine primary word and its details for history
-                    all_words_formed_details_final = ai_engine.find_all_words_formed(newly_placed_details, temp_tiles_for_validation)
+                    all_words_formed_details_final = all_words_details
                     primary_word_tiles_final = []
                     primary_word_str_final = ""
                     start_pos_final = state.get('typing_start', (0,0)) # Default to typing start
@@ -11889,7 +11891,7 @@ def execute_game_session(is_initialized_from_outer_loop_param):
             if is_batch_running:
                 _current_batch_game_num_init_loop = game_num_loop_internal
                 if not DEV_VISUALIZE_BATCH_ENABLED_SESSION:
-                    if game_num_loop_internal == 1 or game_num_loop_internal % 10 == 0 or game_num_loop_internal == total_batch_games:
+                    if game_num_loop_internal == 1 or game_num_loop_internal % 100 == 0 or game_num_loop_internal == total_batch_games:
                          print(f"--- Starting Batch Game {_current_batch_game_num_init_loop} of {total_batch_games} ---")
                 else:
                     print(f"\n--- Starting Batch Game {_current_batch_game_num_init_loop} of {total_batch_games} ---")
