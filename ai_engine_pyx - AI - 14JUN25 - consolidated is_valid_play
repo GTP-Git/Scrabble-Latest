@@ -1,6 +1,6 @@
 # ai_engine.pyx
 
-#ai_engine_pyx - AH - 13JUN25
+#ai_engine_pyx - AI - 14JUN25
 #
 
 
@@ -239,7 +239,7 @@ cdef _gaddag_traverse(
 
                 if validation_code == VC_VALID_C:
                     unique_move_signatures.add(new_tiles_sig)
-                    score = calculate_score(newly_placed_list_details, board, temp_tiles_for_validation, temp_blanks_for_validation)
+                    score = calculate_score(newly_placed_list_details, board, temp_tiles_for_validation, temp_blanks_for_validation, all_words_formed_details)
                     
                     primary_word_tiles = []
                     primary_word_str = ""
@@ -481,7 +481,7 @@ cdef _gaddag_traverse_for_max_score(
     cdef str letter, existing_tile
     cdef object next_node, validation_code
     cdef bint just_crossed_separator
-    cdef list newly_placed_list_details
+    cdef list newly_placed_list_details, all_words_details
     cdef set temp_blanks_for_validation, move_blanks_coords_for_this_play
     cdef tuple new_tiles_sig, next_pos, last_tile_tuple
     cdef int score
@@ -508,7 +508,7 @@ cdef _gaddag_traverse_for_max_score(
                             if is_blank_in_gaddag_path:
                                 temp_blanks_for_validation.add((r_place, c_place))
                 
-                validation_code, _, _, _ = is_valid_play(
+                validation_code, _, _, all_words_details = is_valid_play(
                     newly_placed_list_details,
                     temp_tiles_for_validation,
                     is_first_play,
@@ -520,7 +520,7 @@ cdef _gaddag_traverse_for_max_score(
 
                 if validation_code == VC_VALID_C:
                     unique_move_signatures.add(new_tiles_sig)
-                    score = calculate_score(newly_placed_list_details, board, temp_tiles_for_validation, temp_blanks_for_validation)
+                    score = calculate_score(newly_placed_list_details, board, temp_tiles_for_validation, temp_blanks_for_validation, all_words_details)
                     if score > max_score_ref[0]:
                         max_score_ref[0] = score
 
@@ -1013,70 +1013,110 @@ cdef find_cross_word(tuple tile, list tiles, str main_orientation):
     else:
         return []
 
-cpdef find_all_words_formed(list new_tiles, list tiles):
-    """Finds all words (main and cross) formed by a play. (Cythonized)"""
-    cdef list words = []
-    cdef set new_positions_set, seen_signatures
-    cdef list main_word_tiles, cross_word, unique_word_tile_lists
-    cdef str orientation
-    cdef tuple tile, signature
-    cdef int r, c
-    cdef str l
-    
-    if not new_tiles:
-        return words
-        
-    new_positions_set = set()
-    for r_item, c_item, l_item in new_tiles:
-        new_positions_set.add((r_item,c_item))
 
+
+
+
+
+
+cdef _validate_and_get_words_formed(list new_tiles, list tiles):
+    """
+    Finds all words, validates them against the DAWG, and returns them.
+    Short-circuits on the first invalid word. Also handles de-duplication.
+    Returns: (bool is_valid, list invalid_words, list valid_word_details)
+    """
+    cdef list valid_words_details = []
+    cdef set new_positions_set, seen_signatures
+    cdef list main_word_tiles, cross_word
+    cdef str orientation, word_str
+    cdef tuple tile, signature
+
+    if not new_tiles:
+        return True, [], []
+
+    new_positions_set = set((r_item, c_item) for r_item, c_item, _ in new_tiles)
+    seen_signatures = set()
+
+    # Find and validate main word
     main_word_tiles, orientation = find_main_word(new_tiles, tiles)
-    
     if main_word_tiles:
-        words.append(main_word_tiles)
+        word_str = "".join(t[2] for t in main_word_tiles)
+        if not DAWG_C.search(word_str):
+            return False, [word_str], []
+
+        signature = tuple(sorted([(t[0], t[1], t[2]) for t in main_word_tiles]))
+        if signature not in seen_signatures:
+            valid_words_details.append(main_word_tiles)
+            seen_signatures.add(signature)
+
+    # Find and validate cross words
+    if main_word_tiles:  # Standard play with a main word
         for tile in new_tiles:
             if (tile[0], tile[1]) in new_positions_set:
                 cross_word = find_cross_word(tile, tiles, orientation)
                 if cross_word:
-                    words.append(cross_word)
-    elif len(new_tiles) == 1:
+                    word_str = "".join(t[2] for t in cross_word)
+                    if not DAWG_C.search(word_str):
+                        return False, [word_str], []
+                    
+                    signature = tuple(sorted([(t[0], t[1], t[2]) for t in cross_word]))
+                    if signature not in seen_signatures:
+                        valid_words_details.append(cross_word)
+                        seen_signatures.add(signature)
+    elif len(new_tiles) == 1:  # Single tile play, can form two words
         tile = new_tiles[0]
+        # Horizontal word check
         cross_h = find_cross_word(tile, tiles, "vertical")
         if cross_h:
-            words.append(cross_h)
+            word_str = "".join(t[2] for t in cross_h)
+            if not DAWG_C.search(word_str):
+                return False, [word_str], []
+            signature = tuple(sorted([(t[0], t[1], t[2]) for t in cross_h]))
+            if signature not in seen_signatures:
+                valid_words_details.append(cross_h)
+                seen_signatures.add(signature)
+        # Vertical word check
         cross_v = find_cross_word(tile, tiles, "horizontal")
         if cross_v:
-            words.append(cross_v)
-            
-    unique_word_tile_lists = []
-    seen_signatures = set()
-    for word_tile_list in words:
-        
-        temp_sig_list = []
-        for r_sig, c_sig, l_sig in word_tile_list:
-            temp_sig_list.append((r_sig,c_sig,l_sig))
-        signature = tuple(sorted(temp_sig_list))
+            word_str = "".join(t[2] for t in cross_v)
+            if not DAWG_C.search(word_str):
+                return False, [word_str], []
+            signature = tuple(sorted([(t[0], t[1], t[2]) for t in cross_v]))
+            if signature not in seen_signatures:
+                valid_words_details.append(cross_v)
+                seen_signatures.add(signature)
 
-        if signature not in seen_signatures:
-            unique_word_tile_lists.append(word_tile_list)
-            seen_signatures.add(signature)
-            
-    return unique_word_tile_lists
+    return True, [], valid_words_details
 
 
 
-# In ai_engine_pyx - AE - 11JUN25 - Cython Optimize
+
+
+cpdef get_words_formed_for_python(list new_tiles, list tiles):
+    """
+    A Python-callable wrapper for the internal word-finding and validation logic.
+    This is intended for non-performance-critical paths like UI or specific practice modes.
+    It only returns the list of valid word details.
+    """
+    is_valid, invalid_words, valid_word_details = _validate_and_get_words_formed(new_tiles, tiles)
+    # For this specific use case, we only care about the list of valid words found.
+    # The caller (ai_turn) doesn't need to know if they were valid, as it's just checking length.
+    return valid_word_details
+
+
+
+
+
 
 cpdef is_valid_play(list word_positions, list tiles_after_play, bint is_first_play_param, int initial_rack_size, list original_tiles_on_board, object rack_before_play, bint is_silent_batch_run_param=False):
     """Validate a potential play against game rules and dictionary. (Cythonized)"""
     cdef set newly_placed_positions_coords
-    cdef bint is_bingo, is_horizontal, is_vertical, structurally_sound, connects, all_words_in_dawg
-    cdef list rows_of_new_tiles, cols_of_new_tiles, all_words_details, formed_word_strings, invalid_words_found
-    cdef str structural_error_reason, word_val_check
+    cdef bint is_bingo, is_horizontal, is_vertical, structurally_sound, connects
+    cdef list rows_of_new_tiles, cols_of_new_tiles, all_words_details, invalid_words_found
+    cdef str structural_error_reason
     cdef int r, c, min_col_new_tiles, max_col_new_tiles, temp_min_c, temp_max_c, c_check
     cdef int min_row_new_tiles, max_row_new_tiles, temp_min_r, temp_max_r, r_check
     cdef int r_conn, c_conn, dr, dc, nr, nc
-    cdef object dawg_search_result
 
     if not word_positions:
         return VC_INVALID_STRUCTURE_EMPTY_PLAY_C, False, "No tiles placed.", []
@@ -1147,20 +1187,13 @@ cpdef is_valid_play(list word_positions, list tiles_after_play, bint is_first_pl
             if not tiles_after_play[r_check][c]:
                 return VC_INVALID_STRUCTURE_PLACEMENT_C, is_bingo, "Gap in vertical play.", []
 
-    all_words_details = find_all_words_formed(word_positions, tiles_after_play)
+    all_words_are_valid, invalid_words_found, all_words_details = _validate_and_get_words_formed(word_positions, tiles_after_play)
+
+    if not all_words_are_valid:
+        return VC_INVALID_WORDS_C, is_bingo, invalid_words_found, []
+
     if not all_words_details:
         return VC_INVALID_STRUCTURE_NO_WORDS_C, is_bingo, "No scorable words formed.", []
-
-    formed_word_strings = []
-    for word_detail in all_words_details:
-        temp_word_list = []
-        for tile in word_detail:
-            temp_word_list.append(tile[2])
-        word_str = "".join(temp_word_list)
-        formed_word_strings.append(word_str)
-
-    if not formed_word_strings:
-        return VC_INVALID_STRUCTURE_NO_WORDS_C, is_bingo, "No scorable words formed (strings).", []
 
     structurally_sound = True
     structural_error_reason = ""
@@ -1193,22 +1226,13 @@ cpdef is_valid_play(list word_positions, list tiles_after_play, bint is_first_pl
         else:
              return VC_INVALID_STRUCTURE_PLACEMENT_C, is_bingo, structural_error_reason, []
 
-    invalid_words_found = []
-    all_words_in_dawg = True
-    for word_val_check in formed_word_strings:
-        dawg_search_result = DAWG_C.search(word_val_check)
-        if not dawg_search_result:
-            all_words_in_dawg = False
-            invalid_words_found.append(word_val_check)
-
-    if not all_words_in_dawg:
-        return VC_INVALID_WORDS_C, is_bingo, invalid_words_found, []
-
     return VC_VALID_C, is_bingo, None, all_words_details
 
 
 
-cpdef calculate_score(list new_tiles, list board, list tiles, set blanks):
+
+
+cpdef calculate_score(list new_tiles, list board, list tiles, set blanks, list words_formed_details):
     """Calculates the score for a play. (Cythonized)"""
     cdef int total_score = 0
     cdef int word_score, word_multiplier, letter_value, letter_multiplier
@@ -1216,14 +1240,12 @@ cpdef calculate_score(list new_tiles, list board, list tiles, set blanks):
     cdef str letter, l_item
     cdef bint is_blank
     cdef tuple square_color
-    cdef list words_formed_details, word_tiles
+    cdef list word_tiles
     cdef set new_positions
 
     new_positions = set()
     for r_item, c_item, l_item in new_tiles:
         new_positions.add((r_item, c_item))
-
-    words_formed_details = find_all_words_formed(new_tiles, tiles)
 
     for word_tiles in words_formed_details:
         word_score = 0
@@ -1251,6 +1273,11 @@ cpdef calculate_score(list new_tiles, list board, list tiles, set blanks):
         total_score += 50
         
     return total_score
+
+
+
+
+
 
 # --- NEW: Cythonized Leave Evaluation Functions ---
 
