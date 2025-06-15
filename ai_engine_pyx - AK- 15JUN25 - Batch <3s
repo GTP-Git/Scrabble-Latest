@@ -1,7 +1,8 @@
 # ai_engine.pyx
 
 #ai_engine_pyx - AK - 15JUN25
-#
+#<3s batch
+#Ready for multithreading
 
 
 
@@ -50,6 +51,7 @@ cdef object GADDAG_ROOT_C
 cdef object TILE_DISTRIBUTION_C
 cdef str GADDAG_SEPARATOR_C
 cdef dict LEAVE_LOOKUP_TABLE_C
+cdef str LETTERS_C
 
 # Validation Codes
 cdef str VC_VALID_C, VC_INVALID_WORDS_C, VC_INVALID_STRUCTURE_PLACEMENT_C
@@ -90,9 +92,6 @@ cdef class Dawg:
                 return False
             node = node.children[char]
         return node.is_end
-
-# --- New Initializer Function ---
-# In ai_engine_pyx - AE - 11JUN25 - Cython Optimize
 
 # --- New Initializer Function ---
 cpdef init_ai_engine(
@@ -170,16 +169,6 @@ cpdef set get_anchor_points(list tiles, bint is_first_play):
         
     return anchors
 
-
-
-
-
-
-
-
-
-
-
 @cython.cdivision(True)
 cdef _gaddag_traverse(
     object anchor_pos, int[27] rack_counts_c, list tiles, list board, set blanks, dict cross_check_sets, object gaddag_node,
@@ -250,25 +239,14 @@ cdef _gaddag_traverse(
                         found_primary = False
                         for word_detail_item in all_words_formed_details:
                             is_along_axis = False
-                            
-                            temp_r_set = set()
-                            for r_w, c_w, l_w in word_detail_item:
-                                temp_r_set.add(r_w)
-                            
-                            temp_c_set = set()
-                            for r_w, c_w, l_w in word_detail_item:
-                                temp_c_set.add(c_w)
-
+                            temp_r_set = set(t[0] for t in word_detail_item)
+                            temp_c_set = set(t[1] for t in word_detail_item)
                             if current_axis == 'H' and len(temp_r_set) == 1:
                                 is_along_axis = True
                             elif current_axis == 'V' and len(temp_c_set) == 1:
                                 is_along_axis = True
                             
-                            found_in_newly_placed = False
-                            for t_item in word_detail_item:
-                                if (t_item[0], t_item[1]) in newly_placed_coords_for_this_play:
-                                    found_in_newly_placed = True
-                                    break
+                            found_in_newly_placed = any((t[0], t[1]) in newly_placed_coords_for_this_play for t in word_detail_item)
                             
                             if is_along_axis and found_in_newly_placed:
                                 primary_word_tiles = word_detail_item
@@ -461,10 +439,6 @@ cdef _gaddag_traverse(
             )
             current_word_tiles.pop()
 
-
-
-
-
 @cython.cdivision(True)
 cdef _gaddag_traverse_for_max_score(
     object anchor_pos, int[27] rack_counts_c, list tiles, list board, set blanks, dict cross_check_sets, object gaddag_node,
@@ -605,16 +579,6 @@ cdef _gaddag_traverse_for_max_score(
             )
             current_word_tiles.pop()
 
-
-
-
-
-
-
-
-
-
-
 @cython.boundscheck(False)
 @cython.wraparound(False)
 cpdef int find_best_score_gaddag(
@@ -739,125 +703,6 @@ cpdef int find_best_score_gaddag(
                             _gaddag_traverse_for_max_score(anchor_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, start_axis, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, 0)
 
     return max_score
-
-
-
-
-
-cpdef object find_best_move_gaddag(
-    list rack, list tiles, list board, set blanks,
-    object cross_check_sets_precomputed=None
-):
-    """
-    Generates moves using GADDAG but only returns the dictionary of the single best move.
-    """
-    cdef set unique_move_signatures, anchors, processed_adjacent_starts
-    cdef bint is_first_play
-    cdef int full_rack_size, r, c, rr, cc, r_anchor, c_anchor, dr, dc, nr, nc, tile_count, letter_idx
-    cdef str up_word, down_word, left_word, right_word, letter, existing_tile_letter, start_axis
-    cdef dict cross_check_sets, best_move_dict
-    cdef tuple anchor_pos, adj_pos
-    cdef object next_node
-    cdef int[27] rack_counts_c
-    cdef list initial_tiles, original_tiles_state
-    cdef int max_score = -1 # Start with -1 to ensure any valid move is chosen
-
-    unique_move_signatures = set()
-    best_move_dict = {}
-    
-    rack_counts_c = [0] * 27
-    for tile_char in rack:
-        if tile_char == ' ': rack_counts_c[26] += 1
-        else: rack_counts_c[ord(tile_char) - ord('A')] += 1
-    
-    tile_count = 0
-    for row_idx in range(GRID_SIZE_C):
-        for col_idx in range(GRID_SIZE_C):
-            if tiles[row_idx][col_idx]: tile_count += 1
-    is_first_play = (tile_count == 0)
-
-    original_tiles_state = [row[:] for row in tiles]
-    full_rack_size = len(rack)
-    anchors = get_anchor_points(tiles, is_first_play)
-    
-    if cross_check_sets_precomputed is not None:
-        cross_check_sets = cross_check_sets_precomputed
-    else:
-        cross_check_sets = {}
-        for r in range(GRID_SIZE_C):
-            for c in range(GRID_SIZE_C):
-                if not tiles[r][c]:
-                    up_word = ""; rr = r - 1
-                    while rr >= 0 and tiles[rr][c]: up_word = tiles[rr][c] + up_word; rr -= 1
-                    down_word = ""; rr = r + 1
-                    while rr < GRID_SIZE_C and tiles[rr][c]: down_word += tiles[rr][c]; rr += 1
-                    allowed_letters_v = set()
-                    if not up_word and not down_word: allowed_letters_v = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ ')
-                    else:
-                        for letter_char in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
-                            if DAWG_C.search(up_word + letter_char + down_word): allowed_letters_v.add(letter_char)
-                        if allowed_letters_v: allowed_letters_v.add(' ')
-                    left_word = ""; cc = c - 1
-                    while cc >= 0 and tiles[r][cc]: left_word = tiles[r][cc] + left_word; cc -= 1
-                    right_word = ""; cc = c + 1
-                    while cc < GRID_SIZE_C and tiles[r][cc]: right_word += tiles[r][cc]; cc += 1
-                    allowed_letters_h = set()
-                    if not left_word and not right_word: allowed_letters_h = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ ')
-                    else:
-                        for letter_char in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
-                            if DAWG_C.search(left_word + letter_char + right_word): allowed_letters_h.add(letter_char)
-                        if allowed_letters_h: allowed_letters_h.add(' ')
-                    cross_check_sets[(r, c)] = {'V': allowed_letters_v, 'H': allowed_letters_h}
-
-    processed_adjacent_starts = set()
-    for r_anchor, c_anchor in anchors:
-        anchor_pos = (r_anchor, c_anchor)
-        allowed_h = cross_check_sets.get(anchor_pos, {}).get('H', set())
-        allowed_v = cross_check_sets.get(anchor_pos, {}).get('V', set())
-
-        for letter, next_node in GADDAG_ROOT_C.children.items():
-            letter_idx = ord(letter) - ord('A')
-            if rack_counts_c[letter_idx] > 0 and (letter in allowed_v or letter in allowed_h):
-                rack_counts_c[letter_idx] -= 1
-                initial_tiles = [(r_anchor, c_anchor, letter, False, True)]
-                if is_first_play:
-                    _gaddag_traverse_for_best_move(anchor_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, 'H', unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, best_move_dict, 0)
-                else:
-                    if letter in allowed_v: _gaddag_traverse_for_best_move(anchor_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, 'H', unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, best_move_dict, 0)
-                    if letter in allowed_h: _gaddag_traverse_for_best_move(anchor_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, 'V', unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, best_move_dict, 0)
-                rack_counts_c[letter_idx] += 1
-
-            if rack_counts_c[26] > 0 and (letter in allowed_v or letter in allowed_h or ' ' in allowed_v or ' ' in allowed_h):
-                rack_counts_c[26] -= 1
-                initial_tiles = [(r_anchor, c_anchor, letter, True, True)]
-                if is_first_play:
-                    _gaddag_traverse_for_best_move(anchor_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, 'H', unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, best_move_dict, 0)
-                else:
-                    if letter in allowed_v or ' ' in allowed_v: _gaddag_traverse_for_best_move(anchor_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, 'H', unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, best_move_dict, 0)
-                    if letter in allowed_h or ' ' in allowed_h: _gaddag_traverse_for_best_move(anchor_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, 'V', unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, best_move_dict, 0)
-                rack_counts_c[26] += 1
-
-        if not is_first_play:
-            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                nr, nc = r_anchor + dr, c_anchor + dc
-                adj_pos = (nr, nc)
-                if 0 <= nr < GRID_SIZE_C and 0 <= nc < GRID_SIZE_C:
-                    existing_tile_letter = tiles[nr][nc]
-                    if existing_tile_letter and adj_pos not in processed_adjacent_starts:
-                         processed_adjacent_starts.add(adj_pos)
-                         if GADDAG_ROOT_C.children.get(existing_tile_letter):
-                            next_node = GADDAG_ROOT_C.children[existing_tile_letter]
-                            initial_tiles = [(nr, nc, existing_tile_letter, False, False)]
-                            start_axis = 'V' if dr != 0 else 'H'
-                            _gaddag_traverse_for_best_move(anchor_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], False, start_axis, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, best_move_dict, 0)
-                            _gaddag_traverse_for_best_move(anchor_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, start_axis, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, best_move_dict, 0)
-
-    return best_move_dict if best_move_dict else None
-
-
-
-
-
 
 cdef _gaddag_traverse_for_best_move(
     object anchor_pos, int[27] rack_counts_c, list tiles, list board, set blanks, dict cross_check_sets, object gaddag_node,
@@ -1059,13 +904,115 @@ cdef _gaddag_traverse_for_best_move(
             )
             current_word_tiles.pop()
 
+cpdef object find_best_move_gaddag(
+    list rack, list tiles, list board, set blanks,
+    object cross_check_sets_precomputed=None
+):
+    """
+    Generates moves using GADDAG but only returns the dictionary of the single best move.
+    """
+    cdef set unique_move_signatures, anchors, processed_adjacent_starts
+    cdef bint is_first_play
+    cdef int full_rack_size, r, c, rr, cc, r_anchor, c_anchor, dr, dc, nr, nc, tile_count, letter_idx
+    cdef str up_word, down_word, left_word, right_word, letter, existing_tile_letter, start_axis
+    cdef dict cross_check_sets, best_move_dict
+    cdef tuple anchor_pos, adj_pos
+    cdef object next_node
+    cdef int[27] rack_counts_c
+    cdef list initial_tiles, original_tiles_state
+    cdef int max_score = -1 # Start with -1 to ensure any valid move is chosen
 
-            
+    unique_move_signatures = set()
+    best_move_dict = {}
+    
+    rack_counts_c = [0] * 27
+    for tile_char in rack:
+        if tile_char == ' ': rack_counts_c[26] += 1
+        else: rack_counts_c[ord(tile_char) - ord('A')] += 1
+    
+    tile_count = 0
+    for row_idx in range(GRID_SIZE_C):
+        for col_idx in range(GRID_SIZE_C):
+            if tiles[row_idx][col_idx]: tile_count += 1
+    is_first_play = (tile_count == 0)
 
+    original_tiles_state = [row[:] for row in tiles]
+    full_rack_size = len(rack)
+    anchors = get_anchor_points(tiles, is_first_play)
+    
+    if cross_check_sets_precomputed is not None:
+        cross_check_sets = cross_check_sets_precomputed
+    else:
+        cross_check_sets = {}
+        for r in range(GRID_SIZE_C):
+            for c in range(GRID_SIZE_C):
+                if not tiles[r][c]:
+                    up_word = ""; rr = r - 1
+                    while rr >= 0 and tiles[rr][c]: up_word = tiles[rr][c] + up_word; rr -= 1
+                    down_word = ""; rr = r + 1
+                    while rr < GRID_SIZE_C and tiles[rr][c]: down_word += tiles[rr][c]; rr += 1
+                    allowed_letters_v = set()
+                    if not up_word and not down_word: allowed_letters_v = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ ')
+                    else:
+                        for letter_char in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
+                            if DAWG_C.search(up_word + letter_char + down_word): allowed_letters_v.add(letter_char)
+                        if allowed_letters_v: allowed_letters_v.add(' ')
+                    left_word = ""; cc = c - 1
+                    while cc >= 0 and tiles[r][cc]: left_word = tiles[r][cc] + left_word; cc -= 1
+                    right_word = ""; cc = c + 1
+                    while cc < GRID_SIZE_C and tiles[r][cc]: right_word += tiles[r][cc]; cc += 1
+                    allowed_letters_h = set()
+                    if not left_word and not right_word: allowed_letters_h = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ ')
+                    else:
+                        for letter_char in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
+                            if DAWG_C.search(left_word + letter_char + right_word): allowed_letters_h.add(letter_char)
+                        if allowed_letters_h: allowed_letters_h.add(' ')
+                    cross_check_sets[(r, c)] = {'V': allowed_letters_v, 'H': allowed_letters_h}
 
+    processed_adjacent_starts = set()
+    for r_anchor, c_anchor in anchors:
+        anchor_pos = (r_anchor, c_anchor)
+        allowed_h = cross_check_sets.get(anchor_pos, {}).get('H', set())
+        allowed_v = cross_check_sets.get(anchor_pos, {}).get('V', set())
 
+        for letter, next_node in GADDAG_ROOT_C.children.items():
+            letter_idx = ord(letter) - ord('A')
+            if rack_counts_c[letter_idx] > 0 and (letter in allowed_v or letter in allowed_h):
+                rack_counts_c[letter_idx] -= 1
+                initial_tiles = [(r_anchor, c_anchor, letter, False, True)]
+                if is_first_play:
+                    _gaddag_traverse_for_best_move(anchor_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, 'H', unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, best_move_dict, 0)
+                else:
+                    if letter in allowed_v: _gaddag_traverse_for_best_move(anchor_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, 'H', unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, best_move_dict, 0)
+                    if letter in allowed_h: _gaddag_traverse_for_best_move(anchor_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, 'V', unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, best_move_dict, 0)
+                rack_counts_c[letter_idx] += 1
 
+            if rack_counts_c[26] > 0 and (letter in allowed_v or letter in allowed_h or ' ' in allowed_v or ' ' in allowed_h):
+                rack_counts_c[26] -= 1
+                initial_tiles = [(r_anchor, c_anchor, letter, True, True)]
+                if is_first_play:
+                    _gaddag_traverse_for_best_move(anchor_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, 'H', unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, best_move_dict, 0)
+                else:
+                    if letter in allowed_v or ' ' in allowed_v: _gaddag_traverse_for_best_move(anchor_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, 'H', unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, best_move_dict, 0)
+                    if letter in allowed_h or ' ' in allowed_h: _gaddag_traverse_for_best_move(anchor_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, 'V', unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, best_move_dict, 0)
+                rack_counts_c[26] += 1
 
+        if not is_first_play:
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = r_anchor + dr, c_anchor + dc
+                adj_pos = (nr, nc)
+                if 0 <= nr < GRID_SIZE_C and 0 <= nc < GRID_SIZE_C:
+                    existing_tile_letter = tiles[nr][nc]
+                    if existing_tile_letter and adj_pos not in processed_adjacent_starts:
+                         processed_adjacent_starts.add(adj_pos)
+                         if GADDAG_ROOT_C.children.get(existing_tile_letter):
+                            next_node = GADDAG_ROOT_C.children[existing_tile_letter]
+                            initial_tiles = [(nr, nc, existing_tile_letter, False, False)]
+                            start_axis = 'V' if dr != 0 else 'H'
+                            _gaddag_traverse_for_best_move(anchor_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], False, start_axis, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, best_move_dict, 0)
+                            _gaddag_traverse_for_best_move(anchor_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, start_axis, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, best_move_dict, 0)
+
+    return best_move_dict if best_move_dict else None
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
@@ -1220,9 +1167,6 @@ cpdef list generate_all_moves_gaddag(
 
     return final_unique_moves
 
-
-
-
 # --- NEW CYTHONIZED VALIDATION FUNCTIONS ---
 
 cpdef find_main_word(list new_tiles, list tiles):
@@ -1337,12 +1281,6 @@ cdef find_cross_word(tuple tile, list tiles, str main_orientation):
     else:
         return []
 
-
-
-
-
-
-
 cdef _validate_and_get_words_formed(list new_tiles, list tiles):
     """
     Finds all words, validates them against the DAWG, and returns them.
@@ -1412,10 +1350,6 @@ cdef _validate_and_get_words_formed(list new_tiles, list tiles):
 
     return True, [], valid_words_details
 
-
-
-
-
 cpdef get_words_formed_for_python(list new_tiles, list tiles):
     """
     A Python-callable wrapper for the internal word-finding and validation logic.
@@ -1426,11 +1360,6 @@ cpdef get_words_formed_for_python(list new_tiles, list tiles):
     # For this specific use case, we only care about the list of valid words found.
     # The caller (ai_turn) doesn't need to know if they were valid, as it's just checking length.
     return valid_word_details
-
-
-
-
-
 
 cpdef is_valid_play(list word_positions, list tiles_after_play, bint is_first_play_param, int initial_rack_size, list original_tiles_on_board, object rack_before_play, bint is_silent_batch_run_param=False):
     """Validate a potential play against game rules and dictionary. (Cythonized)"""
@@ -1552,10 +1481,6 @@ cpdef is_valid_play(list word_positions, list tiles_after_play, bint is_first_pl
 
     return VC_VALID_C, is_bingo, None, all_words_details
 
-
-
-
-
 cpdef calculate_score(list new_tiles, list board, list tiles, set blanks, list words_formed_details):
     """Calculates the score for a play. (Cythonized)"""
     cdef int total_score = 0
@@ -1597,11 +1522,6 @@ cpdef calculate_score(list new_tiles, list board, list tiles, set blanks, list w
         total_score += 50
         
     return total_score
-
-
-
-
-
 
 # --- NEW: Cythonized Leave Evaluation Functions ---
 
@@ -1773,13 +1693,7 @@ cpdef list run_ai_simulation(list initial_ai_moves_list, list ai_rack, int oppon
     if not all_ai_moves:
         return []
 
-    for move in all_ai_moves:
-        raw_score = move.get('score', 0)
-        leave_val = evaluate_leave(move.get('leave', []), False, True)
-        move['prelim_equity'] = raw_score + leave_val
-
-    all_ai_moves.sort(key=_sort_key_prelim_equity, reverse=True)
-    
+    # This function assumes the incoming list is already sorted by prelim_equity
     top_ai_moves_candidates = all_ai_moves[:num_ai_candidates]
     
     simulation_results = []
@@ -1889,12 +1803,10 @@ cpdef list run_ai_simulation(list initial_ai_moves_list, list ai_rack, int oppon
                         temp_total_opp_tiles -= 1
                         break
             
-            # --- MODIFICATION START: Call the new, faster function ---
             best_opponent_score = find_best_score_gaddag(
                 sim_opponent_rack, sim_tiles_after_ai, board, sim_blanks_after_ai,
                 sim_cross_check_sets
             )
-            # --- MODIFICATION END ---
             
             total_opponent_score_for_this_move += best_opponent_score
         
@@ -1923,7 +1835,140 @@ cpdef list run_ai_simulation(list initial_ai_moves_list, list ai_rack, int oppon
 
     return final_evaluated_moves
 
+cpdef tuple determine_best_action(
+    list rack, list tiles, list board, set blanks, list bag, bint first_play,
+    bint use_simulation, bint use_endgame_solver, bint is_plaid_mode,
+    int opponent_rack_len, int num_ai_candidates, int num_opponent_sims, int num_post_sim_candidates,
+    int current_score_diff_for_endgame,
+    str practice_mode, list letter_checks, object bbb_thresholds, # New practice mode params
+    bint is_silent_batch_run_param=False
+):
+    """
+    The consolidated AI brain, fully in Cython. It handles all modes and determines
+    the best action (play, exchange, pass, or pause for practice).
+    Returns: tuple (action_chosen_str, move_details_obj_or_metadata)
+    """
+    cdef list all_moves, best_exchange_tiles, bingo_plays
+    cdef object best_raw_plus_leave_play_candidate, best_simulated_play_candidate, best_first_move_endgame, best_plaid_move
+    cdef float best_raw_plus_leave_evaluation, best_exchange_evaluation, best_simulated_play_final_score
+    cdef bint can_play, can_exchange
+    cdef int bag_count, total_tiles_on_racks, player_rack_len, i
+    cdef float raw_score, leave_value, current_move_raw_plus_leave_eval
+    cdef object move, sim_results, checked_power_tiles, power_tiles_on_rack, bingo_move, word_list_to_check
+    cdef str word_str
+    cdef int word_len, current_index, most_probable_playable_bingo_index, threshold_to_use, bingo_len
+    cdef dict most_probable_bingo_details
 
+    # --- Initial Checks (Endgame, Plaid) that might not need full move list ---
+    bag_count = len(bag)
+    player_rack_len = len(rack)
+    total_tiles_on_racks = player_rack_len + opponent_rack_len
+
+    if use_endgame_solver and bag_count == 0 and total_tiles_on_racks <= 10:
+        best_first_move_endgame = solve_endgame(
+            rack, [], tiles, blanks, board, current_score_diff_for_endgame, True
+        )
+        if best_first_move_endgame == "PASS": return 'pass', None
+        elif isinstance(best_first_move_endgame, dict): return 'play', best_first_move_endgame
+        else: return 'pass', None
+
+    if is_plaid_mode:
+        best_plaid_move = find_best_move_gaddag(rack, tiles, board, blanks, None)
+        if best_plaid_move:
+            return 'play', best_plaid_move
+        else:
+            best_exchange_tiles, _ = find_best_exchange_option(rack, tiles, blanks, bag_count, True)
+            if best_exchange_tiles: return 'exchange', best_exchange_tiles
+            else: return 'pass', None
+
+    # --- Practice Mode Checks ---
+    if practice_mode == "power_tiles":
+        checked_power_tiles = {letter_checks[i] for i in range(4)}
+        power_tiles_on_rack = [tile for tile in rack if tile in checked_power_tiles]
+        if power_tiles_on_rack:
+            # Return a PAUSE action with the specific tile to practice
+            return 'PAUSE', {'type': 'power_tile', 'tile': power_tiles_on_rack[0]}
+
+    # --- Generate moves ONCE for standard and BBB modes ---
+    all_moves = generate_all_moves_gaddag(rack, tiles, board, blanks, None, is_silent_batch_run_param)
+    if all_moves is None: all_moves = []
+
+    if practice_mode == "bingo_bango_bongo":
+        bingo_plays = [m for m in all_moves if m.get('is_bingo', False)]
+        if bingo_plays:
+            most_probable_playable_bingo_index = 999999
+            most_probable_bingo_details = None
+            for bingo_move in bingo_plays:
+                word_str = bingo_move.get('word', '').upper()
+                word_len = len(word_str)
+                current_index = 999999
+                if word_len == 7: word_list_to_check = bbb_thresholds.get('7L_words', [])
+                elif word_len == 8: word_list_to_check = bbb_thresholds.get('8L_words', [])
+                else: word_list_to_check = None
+                if word_list_to_check:
+                    try: current_index = word_list_to_check.index(word_str) + 1
+                    except ValueError: pass
+                if current_index < most_probable_playable_bingo_index:
+                    most_probable_playable_bingo_index = current_index
+                    most_probable_bingo_details = bingo_move
+            if most_probable_bingo_details:
+                threshold_to_use = 999999
+                bingo_len = len(most_probable_bingo_details.get('word', ''))
+                if bingo_len == 7: threshold_to_use = bbb_thresholds.get('7L_max', 999999)
+                elif bingo_len == 8: threshold_to_use = bbb_thresholds.get('8L_max', 999999)
+                if most_probable_playable_bingo_index <= threshold_to_use:
+                    return 'PAUSE', {'type': 'bingo_bango_bongo', 'moves': all_moves}
+
+    # --- Standard AI Logic (Equity & Simulation) ---
+    best_raw_plus_leave_play_candidate = None
+    best_raw_plus_leave_evaluation = -1000000.0
+    best_simulated_play_candidate = None
+    best_exchange_tiles = []
+    best_exchange_evaluation = -1000000.0
+
+    can_play = bool(all_moves)
+    can_exchange = bag_count > 0
+
+    if can_play:
+        # Calculate preliminary equity (score + leave) for all moves once.
+        for move in all_moves:
+            raw_score = move.get('score', 0)
+            leave_value = evaluate_leave(move.get('leave', []), True)
+            move['prelim_equity'] = raw_score + leave_value
+        
+        # Sort all moves by this equity.
+        all_moves.sort(key=_sort_key_prelim_equity, reverse=True)
+        
+        # The best non-simulation move is now the first in the list.
+        best_raw_plus_leave_play_candidate = all_moves[0]
+        best_raw_plus_leave_evaluation = best_raw_plus_leave_play_candidate.get('prelim_equity', -1000000.0)
+
+    if use_simulation and can_play:
+        # Pass the pre-sorted list to the simulation function.
+        sim_results = run_ai_simulation(
+            all_moves, rack, opponent_rack_len, tiles, blanks, board, bag,
+            num_ai_candidates, num_opponent_sims, num_post_sim_candidates, True
+        )
+        if sim_results:
+            best_simulated_play_candidate = sim_results[0]['move']
+
+    if can_exchange:
+        best_exchange_tiles, best_exchange_evaluation = find_best_exchange_option(
+            rack, tiles, blanks, bag_count, True
+        )
+
+    if can_play and best_raw_plus_leave_play_candidate:
+        if best_exchange_tiles and (best_exchange_evaluation > best_raw_plus_leave_evaluation + 10.0):
+            return 'exchange', best_exchange_tiles
+        else:
+            if use_simulation and best_simulated_play_candidate:
+                return 'play', best_simulated_play_candidate
+            else:
+                return 'play', best_raw_plus_leave_play_candidate
+    elif best_exchange_tiles:
+        return 'exchange', best_exchange_tiles
+    else:
+        return 'pass', None
 
 ####Endgame Solver Helper Functions####
 
@@ -1978,10 +2023,6 @@ cpdef int evaluate_endgame_heuristic(list rack_player, list rack_opponent, int c
     """
     return calculate_endgame_score_diff(rack_player, rack_opponent, current_score_diff)
 
-
-
-
-
 cdef str format_single_move_for_print(object move_obj, bint is_silent_batch_run_param=False):
     """
     Formats a single move object (or PASS string) for endgame sequence printing. (Cythonized)
@@ -2006,12 +2047,6 @@ cdef str format_single_move_for_print(object move_obj, bint is_silent_batch_run_
         return f"[{word} {coord} {score} {leave_str}]"
     else:
         return "[?UNKNOWN_MOVE_FORMAT?]"
-
-
-
-
-
-
 
 cdef str format_end_state_for_print(list final_rack_p1_sim, list final_rack_p2_sim, bint last_player_to_move_was_p1, int pass_count_at_end):
     """
@@ -2044,9 +2079,6 @@ cdef str format_end_state_for_print(list final_rack_p1_sim, list final_rack_p2_s
          return f"[end P1:{p1_rack_str} {-p1_rack_val:+}]"
 
     return "[end ?]"
-
-
-
 
 @cython.cdivision(True)
 @cython.boundscheck(False)
@@ -2166,10 +2198,6 @@ cpdef tuple negamax_endgame(list rack_player, list rack_opponent, list tiles, se
          return final_diff, []
 
     return best_value, best_sequence
-
-
-
-# In ai_engine_pyx - AE - 11JUN25 - Cython Optimize
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
@@ -2335,136 +2363,3 @@ cpdef object solve_endgame(list rack_player, list opponent_rack, list tiles, set
         return evaluated_lines[0]['sequence'][0]
     else:
         return "PASS"
-
-
-
-
-
-cpdef tuple determine_best_action(
-    list rack, list tiles, list board, set blanks, list bag, bint first_play,
-    bint use_simulation, bint use_endgame_solver, bint is_plaid_mode,
-    int opponent_rack_len, int num_ai_candidates, int num_opponent_sims, int num_post_sim_candidates,
-    int current_score_diff_for_endgame,
-    str practice_mode, list letter_checks, object bbb_thresholds, # New practice mode params
-    bint is_silent_batch_run_param=False
-):
-    """
-    The consolidated AI brain, fully in Cython. It handles all modes and determines
-    the best action (play, exchange, pass, or pause for practice).
-    Returns: tuple (action_chosen_str, move_details_obj_or_metadata)
-    """
-    cdef list all_moves, best_exchange_tiles, bingo_plays
-    cdef object best_raw_plus_leave_play_candidate, best_simulated_play_candidate, best_first_move_endgame, best_plaid_move
-    cdef float best_raw_plus_leave_evaluation, best_exchange_evaluation, best_simulated_play_final_score
-    cdef bint can_play, can_exchange
-    cdef int bag_count, total_tiles_on_racks, player_rack_len, i
-    cdef float raw_score, leave_value, current_move_raw_plus_leave_eval
-    cdef object move, sim_results, checked_power_tiles, power_tiles_on_rack, bingo_move, word_list_to_check
-    cdef str word_str
-    cdef int word_len, current_index, most_probable_playable_bingo_index, threshold_to_use, bingo_len
-    cdef dict most_probable_bingo_details
-
-    # --- Initial Checks (Endgame, Plaid) that might not need full move list ---
-    bag_count = len(bag)
-    player_rack_len = len(rack)
-    total_tiles_on_racks = player_rack_len + opponent_rack_len
-
-    if use_endgame_solver and bag_count == 0 and total_tiles_on_racks <= 10:
-        best_first_move_endgame = solve_endgame(
-            rack, [], tiles, blanks, board, current_score_diff_for_endgame, True
-        )
-        if best_first_move_endgame == "PASS": return 'pass', None
-        elif isinstance(best_first_move_endgame, dict): return 'play', best_first_move_endgame
-        else: return 'pass', None
-
-    if is_plaid_mode:
-        best_plaid_move = find_best_move_gaddag(rack, tiles, board, blanks, None)
-        if best_plaid_move:
-            return 'play', best_plaid_move
-        else:
-            best_exchange_tiles, _ = find_best_exchange_option(rack, tiles, blanks, bag_count, True)
-            if best_exchange_tiles: return 'exchange', best_exchange_tiles
-            else: return 'pass', None
-
-    # --- Practice Mode Checks ---
-    if practice_mode == "power_tiles":
-        checked_power_tiles = {letter_checks[i] for i in range(4)}
-        power_tiles_on_rack = [tile for tile in rack if tile in checked_power_tiles]
-        if power_tiles_on_rack:
-            # Return a PAUSE action with the specific tile to practice
-            return 'PAUSE', {'type': 'power_tile', 'tile': power_tiles_on_rack[0]}
-
-    # --- Generate moves ONCE for standard and BBB modes ---
-    all_moves = generate_all_moves_gaddag(rack, tiles, board, blanks, None, is_silent_batch_run_param)
-    if all_moves is None: all_moves = []
-
-    if practice_mode == "bingo_bango_bongo":
-        bingo_plays = [m for m in all_moves if m.get('is_bingo', False)]
-        if bingo_plays:
-            most_probable_playable_bingo_index = 999999
-            most_probable_bingo_details = None
-            for bingo_move in bingo_plays:
-                word_str = bingo_move.get('word', '').upper()
-                word_len = len(word_str)
-                current_index = 999999
-                if word_len == 7: word_list_to_check = bbb_thresholds.get('7L_words', [])
-                elif word_len == 8: word_list_to_check = bbb_thresholds.get('8L_words', [])
-                else: word_list_to_check = None
-                if word_list_to_check:
-                    try: current_index = word_list_to_check.index(word_str) + 1
-                    except ValueError: pass
-                if current_index < most_probable_playable_bingo_index:
-                    most_probable_playable_bingo_index = current_index
-                    most_probable_bingo_details = bingo_move
-            if most_probable_bingo_details:
-                threshold_to_use = 999999
-                bingo_len = len(most_probable_bingo_details.get('word', ''))
-                if bingo_len == 7: threshold_to_use = bbb_thresholds.get('7L_max', 999999)
-                elif bingo_len == 8: threshold_to_use = bbb_thresholds.get('8L_max', 999999)
-                if most_probable_playable_bingo_index <= threshold_to_use:
-                    return 'PAUSE', {'type': 'bingo_bango_bongo', 'moves': all_moves}
-
-    # --- Standard AI Logic (Equity & Simulation) ---
-    best_raw_plus_leave_play_candidate = None
-    best_raw_plus_leave_evaluation = -1000000.0
-    best_simulated_play_candidate = None
-    best_exchange_tiles = []
-    best_exchange_evaluation = -1000000.0
-
-    can_play = bool(all_moves)
-    can_exchange = bag_count > 0
-
-    if can_play:
-        for move in all_moves:
-            raw_score = move.get('score', 0)
-            leave_value = evaluate_leave(move.get('leave', []), True)
-            current_move_raw_plus_leave_eval = raw_score + leave_value
-            if current_move_raw_plus_leave_eval > best_raw_plus_leave_evaluation:
-                best_raw_plus_leave_evaluation = current_move_raw_plus_leave_eval
-                best_raw_plus_leave_play_candidate = move
-
-    if use_simulation and can_play:
-        sim_results = run_ai_simulation(
-            all_moves, rack, opponent_rack_len, tiles, blanks, board, bag,
-            num_ai_candidates, num_opponent_sims, num_post_sim_candidates, True
-        )
-        if sim_results:
-            best_simulated_play_candidate = sim_results[0]['move']
-
-    if can_exchange:
-        best_exchange_tiles, best_exchange_evaluation = find_best_exchange_option(
-            rack, tiles, blanks, bag_count, True
-        )
-
-    if can_play and best_raw_plus_leave_play_candidate:
-        if best_exchange_tiles and (best_exchange_evaluation > best_raw_plus_leave_evaluation + 10.0):
-            return 'exchange', best_exchange_tiles
-        else:
-            if use_simulation and best_simulated_play_candidate:
-                return 'play', best_simulated_play_candidate
-            else:
-                return 'play', best_raw_plus_leave_play_candidate
-    elif best_exchange_tiles:
-        return 'exchange', best_exchange_tiles
-    else:
-        return 'pass', None
