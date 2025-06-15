@@ -1,8 +1,8 @@
 
 
 #python
-#Scrabble AI
-#Consolidated is_valid_play
+#Scrabble AJ
+#Optimizations
 #14JUN25
 
 
@@ -270,6 +270,36 @@ def _load_gaddag_background():
         GADDAG_STRUCTURE = None
         gaddag_loading_status = 'error'
         # Optionally: sys.exit() or raise an exception if this is critical even in background
+
+
+
+
+
+# --- Load Word Lists for Practice Modes ---
+seven_letter_words = []
+eight_letter_words = []
+try:
+    with open("7-letter-list.txt", "r") as f_7l:
+        seven_letter_words = [line.strip().upper() for line in f_7l]
+    if 'DEV_VISUALIZE_BATCH_ENABLED_SESSION' in globals() and DEV_VISUALIZE_BATCH_ENABLED_SESSION:
+        print("7-letter word list loaded successfully.")
+    elif 'DEV_VISUALIZE_BATCH_ENABLED_SESSION' not in globals():
+        print("7-letter word list loaded successfully.")
+except FileNotFoundError:
+    print("Warning: 7-letter-list.txt not found. BBB practice mode may not function correctly.")
+
+try:
+    with open("8-letter-list.txt", "r") as f_8l:
+        eight_letter_words = [line.strip().upper() for line in f_8l]
+    if 'DEV_VISUALIZE_BATCH_ENABLED_SESSION' in globals() and DEV_VISUALIZE_BATCH_ENABLED_SESSION:
+        print("8-letter word list loaded successfully.")
+    elif 'DEV_VISUALIZE_BATCH_ENABLED_SESSION' not in globals():
+        print("8-letter word list loaded successfully.")
+except FileNotFoundError:
+    print("Warning: 8-letter-list.txt not found. BBB practice mode may not function correctly.")
+
+
+# --- Mode Selection Constants ---
 
 
 
@@ -5711,8 +5741,6 @@ def draw_simulation_config_dialog(input_texts, active_input_index, state):
 
 
 
-# In Scrabble AE - 12JUN25 - Cython Optimize
-
 def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
             pass_count, exchange_count, consecutive_zero_point_turns, \
             player_names, dropdown_open, hinting, showing_all_words, letter_checks, \
@@ -5721,432 +5749,47 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
             sim_config_num_candidates, \
             sim_config_num_opponent_sims,\
             sim_config_num_post_sim_candidates,\
-            all_moves_gen, # NEW PARAMETER
+            all_moves_gen,
             is_silent_batch_run_param,
             is_plaid_mode=False):
     """
-    Handles the AI's turn.
-    MODIFIED: Randomly orients the first move of the game.
+    Handles the AI's turn by calling the Cythonized decision-making function
+    or using a simplified Plaid Mode logic, then executing the returned action.
     """
-    global last_word
-    global last_score
-    global last_start
-    global last_direction
-    global current_replay_turn
-    global GADDAG_STRUCTURE
-    global last_played_highlight_coords
-    global is_solving_endgame
-    global paused_for_bingo_practice
-    global gaddag_loading_status
-    global scroll_offset
-    global move_history
-    global screen
-    global bbb_7l_max_prob_global, bbb_8l_max_prob_global
-    global seven_letter_words, eight_letter_words
+    global last_played_highlight_coords, is_solving_endgame
     global USE_AI_SIMULATION, USE_ENDGAME_SOLVER
-    global game_mode
-
-    # --- FIX: Initialize local flags to default values ---
-    paused_for_power_tile_local_flag = False
-    paused_for_bingo_practice_local_flag = False
-    current_power_tile_local_val = None
-    # --- END FIX ---
-
-    if 'seven_letter_words' not in globals() or not seven_letter_words:
-        try:
-            with open("7-letter-list.txt", "r") as f_7l:
-                seven_letter_words = [line.strip().upper() for line in f_7l]
-        except FileNotFoundError:
-            seven_letter_words = []
-            if not is_silent_batch_run_param:
-                print("Warning (ai_turn): 7-letter-list.txt not found for BBB.")
-    if 'eight_letter_words' not in globals() or not eight_letter_words:
-        try:
-            with open("8-letter-list.txt", "r") as f_8l:
-                eight_letter_words = [line.strip().upper() for line in f_8l]
-        except FileNotFoundError:
-            eight_letter_words = []
-            if not is_silent_batch_run_param:
-                print("Warning (ai_turn): 8-letter-list.txt not found for BBB.")
-
 
     player_idx = turn - 1
-    opponent_idx = 1 - player_idx
     current_rack = racks[player_idx][:] if 0 <= player_idx < len(racks) and racks[player_idx] is not None else []
-    bag_count = len(bag)
-    if not is_silent_batch_run_param:
-        print(f"AI Player {turn} turn started. Rack: {''.join(sorted(current_rack))}, Bag: {bag_count}, Practice: {practice_mode_param}, Sim: {USE_AI_SIMULATION}")
-        if USE_AI_SIMULATION:
-             print(f"  Sim Params: Cands={sim_config_num_candidates}, OppSims={sim_config_num_opponent_sims}, PostSimCands={sim_config_num_post_sim_candidates}")
-        if practice_mode_param == "power_tiles":
-            print(f"  DEBUG PowerTiles: practice_mode_param='{practice_mode_param}', letter_checks={letter_checks}")
-        if practice_mode_param == "bingo_bango_bongo":
-            print(f"  DEBUG BBB: Thresholds 7L={bbb_7l_max_prob_global}, 8L={bbb_8l_max_prob_global}")
-
-
-    move_data_for_turn = None
     
-    # --- FIX START: Initialize variables needed by the final return dictionary ---
-    # These were previously only calculated in the 'else' (standard mode) block.
-    expected_single_draw_value_for_turn = 0.0
-    total_expected_value_of_this_draw = 0.0
-    luck_factor = 0.0
-    best_play_move = None
-    action_chosen = 'pass' # Default action
-    # --- FIX END ---
+    action_chosen = 'pass'
+    move_details = None
 
     if is_plaid_mode:
-        if not is_silent_batch_run_param:
-            print("AI is in Plaid Mode (Highest Score Only).")
-        
         if not all_moves_gen:
             action_chosen = 'pass'
-            best_play_move = None
         else:
-            # Sort moves by score only, descending.
-            all_moves_gen.sort(key=lambda m: m.get('score', 0), reverse=True)
-            best_play_move = all_moves_gen[0]
             action_chosen = 'play'
-            if not is_silent_batch_run_param:
-                print(f"  Plaid AI selecting: '{best_play_move.get('word', 'N/A')}' with score {best_play_move.get('score', 0)}")
+            # Find the best move by score without sorting the whole list
+            move_details = max(all_moves_gen, key=lambda m: m.get('score', 0))
     else:
-        # --- EXISTING LOGIC MOVED INTO AN ELSE BLOCK ---
-        expected_single_draw_value_for_turn = ai_engine.get_expected_single_draw_value(current_rack, tiles, blanks)
+        # Standard Mode: Call the full Cython brain
+        opponent_idx = 1 - player_idx
+        opponent_rack_len = len(racks[opponent_idx]) if 0 <= opponent_idx < len(racks) and racks[opponent_idx] is not None else 7
+        current_score_diff = scores[player_idx] - scores[opponent_idx]
 
-        if not is_silent_batch_run_param:
-            print(f"  AI Turn {turn}: Calculated expected_single_draw_value_for_turn = {expected_single_draw_value_for_turn:.2f}")
+        # This call is now redundant as the logic is in determine_best_action, but we keep it for structure
+        # In a future refactor, ai_turn could be merged more tightly with the Cython call
+        action_chosen, move_details = ai_engine.determine_best_action(
+            current_rack, tiles, board, blanks, bag, first_play,
+            USE_AI_SIMULATION, USE_ENDGAME_SOLVER, is_plaid_mode,
+            opponent_rack_len, sim_config_num_candidates, sim_config_num_opponent_sims, sim_config_num_post_sim_candidates,
+            current_score_diff,
+            is_silent_batch_run_param=is_silent_batch_run_param
+        )
 
-        player_rack_len = len(racks[player_idx]) if 0 <= player_idx < len(racks) and racks[player_idx] is not None else 0
-        opponent_rack_len = len(racks[opponent_idx]) if 0 <= opponent_idx < len(racks) and racks[opponent_idx] is not None else 0
-        total_tiles_on_racks = player_rack_len + opponent_rack_len
-
-        if USE_ENDGAME_SOLVER and bag_count == 0 and total_tiles_on_racks <= 10 and practice_mode_param != "eight_letter" and not is_solving_endgame:
-            if not is_silent_batch_run_param:
-                print(f"AI: Endgame condition met (Bag empty, {total_tiles_on_racks} tiles on racks <= 10). Entering solver...")
-            
-            opponent_rack = []
-            if 0 <= opponent_idx < len(racks) and racks[opponent_idx] is not None:
-                opponent_rack = racks[opponent_idx][:]
-            else:
-                if not is_silent_batch_run_param:
-                    print(f"Warning: Opponent rack for index {opponent_idx} is not available for endgame solver. Assuming empty.")
-            
-            current_score_diff = scores[player_idx] - scores[opponent_idx]
-            
-            is_solving_endgame = True
-
-            if not is_silent_batch_run_param: # Draw intermediate screen
-                screen.fill(WHITE)
-                for r_draw in range(GRID_SIZE):
-                    for c_draw in range(GRID_SIZE):
-                        pygame.draw.rect(screen, board[r_draw][c_draw], (40 + c_draw * SQUARE_SIZE, 40 + r_draw * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE))
-                        pygame.draw.rect(screen, BLACK, (40 + c_draw * SQUARE_SIZE, 40 + r_draw * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE), 1)
-                        if tiles[r_draw][c_draw]:
-                            tile_char = tiles[r_draw][c_draw]
-                            is_blank_on_board_val = (r_draw, c_draw) in blanks
-                            tile_bg_color = GREEN
-                            if is_blank_on_board_val:
-                                center = (40 + c_draw * SQUARE_SIZE + SQUARE_SIZE // 2, 40 + r_draw * SQUARE_SIZE + SQUARE_SIZE // 2)
-                                radius = SQUARE_SIZE // 2 - 3
-                                pygame.draw.rect(screen, tile_bg_color, pygame.Rect(40 + c_draw * SQUARE_SIZE + 2, 40 + r_draw * SQUARE_SIZE + 2, SQUARE_SIZE - 4, SQUARE_SIZE - 4))
-                                pygame.draw.circle(screen, BLACK, center, radius)
-                                text_surf = font.render(tile_char, True, WHITE)
-                                text_rect = text_surf.get_rect(center=center)
-                                screen.blit(text_surf, text_rect)
-                            else:
-                                tile_rect = pygame.Rect(40 + c_draw * SQUARE_SIZE + 2, 40 + r_draw * SQUARE_SIZE + 2, SQUARE_SIZE - 4, SQUARE_SIZE - 4)
-                                pygame.draw.rect(screen, tile_bg_color, tile_rect)
-                                text_surf = font.render(tile_char, True, BLACK)
-                                text_rect = text_surf.get_rect(center=center)
-                                screen.blit(text_surf, text_rect)
-                draw_board_labels(screen, ui_font)
-                draw_rack(1, racks[0], scores, turn, player_names)
-                if practice_mode_param != "eight_letter":
-                    draw_rack(2, racks[1], scores, turn, player_names)
-                if practice_mode_param != "eight_letter":
-                    actual_opponent_rack_for_display = []
-                    if 0 <= opponent_idx < len(racks) and racks[opponent_idx] is not None:
-                        actual_opponent_rack_for_display = racks[opponent_idx]
-                    unseen_for_solve_indicator = Counter(actual_opponent_rack_for_display)
-                    draw_remaining_tiles(unseen_for_solve_indicator, turn)
-                sb_x_intermediate = BOARD_SIZE + 275
-                sb_y_intermediate = 40
-                sb_w_intermediate = max(200, WINDOW_WIDTH - sb_x_intermediate - 20)
-                if sb_x_intermediate + sb_w_intermediate > WINDOW_WIDTH - 10:
-                    sb_w_intermediate = WINDOW_WIDTH - sb_x_intermediate - 10
-                if sb_w_intermediate < 150:
-                    sb_x_intermediate = WINDOW_WIDTH - 160
-                    sb_w_intermediate = 150
-                draw_scoreboard(screen, move_history, scroll_offset, scores, is_ai_list_param, player_names)
-                indicator_center_x_intermediate = sb_x_intermediate + sb_w_intermediate // 2
-                draw_endgame_solving_indicator(indicator_center_x_intermediate, sb_y_intermediate)
-                pygame.display.flip()
-
-            best_first_move = ai_engine.solve_endgame(current_rack, opponent_rack, tiles, blanks, board, current_score_diff, is_silent_batch_run_param=is_silent_batch_run_param)
-            
-            action_chosen = 'pass'
-            best_play_move_endgame = None
-            if best_first_move == "PASS":
-                action_chosen = 'pass'
-            elif isinstance(best_first_move, dict):
-                action_chosen = 'play'
-                best_play_move_endgame = best_first_move
-            else:
-                action_chosen = 'pass'
-                if not is_silent_batch_run_param:
-                    print(f"Warning: solve_endgame returned unexpected type: {type(best_first_move)}")
-
-            move_rack_before = racks[player_idx][:] if 0 <= player_idx < len(racks) and racks[player_idx] is not None else []
-            exchanged_tiles_for_history = []
-            next_turn_val = turn
-            drawn_tiles = []
-            newly_placed = []
-            move_type = ''
-            score_val = 0
-            word = ''
-            positions = []
-            blanks_used = set()
-            coord = ''
-            word_with_blanks = ''
-            is_bingo = False
-            tiles_consumed_from_rack_history = []
-            leave_for_history_endgame = []
-
-            if action_chosen == 'play' and best_play_move_endgame:
-                next_turn_val, drawn_tiles, newly_placed, tiles_consumed_from_rack_history = play_hint_move(best_play_move_endgame, tiles, racks, blanks, scores, turn, bag, board, is_ai_list_param, practice_mode_param, is_silent_batch_run_param=is_silent_batch_run_param)
-                move_type = 'place'
-                score_val = best_play_move_endgame.get('score', 0)
-                word = best_play_move_endgame.get('word', 'N/A')
-                positions = best_play_move_endgame.get('positions', [])
-                blanks_used = best_play_move_endgame.get('blanks', set())
-                start_pos_val = best_play_move_endgame.get('start', (0,0))
-                direction_val = best_play_move_endgame.get('direction', 'right')
-                coord = ai_engine.get_coord(start_pos_val, direction_val, is_silent_batch_run_param=is_silent_batch_run_param)
-                word_with_blanks = best_play_move_endgame.get('word_with_blanks', '')
-                is_bingo = best_play_move_endgame.get('is_bingo', False)
-                leave_for_history_endgame = best_play_move_endgame.get('leave', [])
-                first_play = False
-                consecutive_zero_point_turns = 0
-                pass_count = 0
-                exchange_count = 0
-                last_played_highlight_coords = set((pos[0], pos[1]) for pos in positions)
-            elif action_chosen == 'pass':
-                move_type = 'pass'
-                score_val = 0
-                leave_for_history_endgame = racks[player_idx][:] if 0 <= player_idx < len(racks) and racks[player_idx] is not None else []
-                consecutive_zero_point_turns += 1
-                pass_count += 1
-                exchange_count = 0
-                next_turn_val = 3 - turn
-                last_played_highlight_coords = set()
-
-            turn_duration = 0.0
-            move_data_for_turn = {
-                'player': turn, 'move_type': move_type, 'rack': move_rack_before,
-                'score': score_val, 'word': word, 'positions': positions, 'blanks': blanks_used,
-                'drawn': drawn_tiles, 'coord': coord, 'word_with_blanks': word_with_blanks,
-                'is_bingo': is_bingo, 'turn_duration': turn_duration,
-                'total_expected_draw_value': 0.0,
-                'luck_factor': 0.0,
-                'tiles_played_from_rack': tiles_consumed_from_rack_history,
-                'leave': leave_for_history_endgame
-            }
-            if move_type == 'place' and best_play_move_endgame:
-                move_data_for_turn['newly_placed'] = newly_placed
-                move_data_for_turn['start'] = best_play_move_endgame.get('start', (0,0))
-                move_data_for_turn['direction'] = best_play_move_endgame.get('direction', 'right')
-            
-            is_solving_endgame = False
-            return next_turn_val, first_play, pass_count, exchange_count, consecutive_zero_point_turns, [], dropdown_open, hinting, showing_all_words, False, None, False, set(), move_data_for_turn
-
-        if practice_mode_param == "power_tiles" and letter_checks:
-            if not is_silent_batch_run_param:
-                print(f"  DEBUG PowerTiles: Entering practice_mode_param block. current_rack='{''.join(sorted(current_rack))}'")
-                checked_power_tiles = {letter_pt for i_pt, letter_pt in enumerate(['J', 'Q', 'X', 'Z']) if letter_checks[i_pt]}
-                print(f"  DEBUG PowerTiles: checked_power_tiles={checked_power_tiles}")
-                power_tiles_on_rack = sorted([tile_val for tile_val in current_rack if tile_val in checked_power_tiles])
-                print(f"  DEBUG PowerTiles: power_tiles_on_rack={power_tiles_on_rack}")
-            else:
-                checked_power_tiles = {letter_pt for i_pt, letter_pt in enumerate(['J', 'Q', 'X', 'Z']) if letter_checks[i_pt]}
-                power_tiles_on_rack = sorted([tile_val for tile_val in current_rack if tile_val in checked_power_tiles])
-
-
-            if power_tiles_on_rack:
-                current_power_tile_local_val = power_tiles_on_rack[0]
-                paused_for_power_tile_local_flag = True
-                if not is_silent_batch_run_param:
-                    print(f"AI turn PAUSING for power tile practice. Target: {current_power_tile_local_val}")
-                turn_duration = 0.0
-                
-                return turn, first_play, pass_count, exchange_count, consecutive_zero_point_turns, all_moves_gen, dropdown_open, hinting, showing_all_words, paused_for_power_tile_local_flag, current_power_tile_local_val, False, set(), None
-
-        if not is_silent_batch_run_param:
-            print(f"AI Player {turn} received {len(all_moves_gen)} raw moves.")
-
-        if practice_mode_param == "only_fives":
-            original_tiles_copy = [row[:] for row in tiles]
-            original_blanks_copy = blanks.copy()
-            filtered_moves = []
-            for move in all_moves_gen:
-                temp_tiles_filter = [row[:] for row in original_tiles_copy]
-                temp_blanks_filter = original_blanks_copy.copy()
-                newly_placed_details_filter = move.get('newly_placed', [])
-                if not newly_placed_details_filter:
-                    continue
-                for r_filter, c_filter, letter_filter in newly_placed_details_filter:
-                    if 0 <= r_filter < GRID_SIZE and 0 <= c_filter < GRID_SIZE:
-                        temp_tiles_filter[r_filter][c_filter] = letter_filter
-                        if (r_filter, c_filter) in move.get('blanks', set()):
-                            temp_blanks_filter.add((r_filter, c_filter))
-                words_formed_details = ai_engine.get_words_formed_for_python(newly_placed_details_filter, temp_tiles_filter)
-                if any(len("".join(t[2] for t in word_detail)) == 5 for word_detail in words_formed_details):
-                    filtered_moves.append(move)
-            all_moves_gen = filtered_moves
-            if not is_silent_batch_run_param:
-                print(f"AI Player {turn} filtered moves for 'Only Fives'. Remaining: {len(all_moves_gen)}")
-        elif practice_mode_param == "bingo_bango_bongo":
-            bingo_plays = [m for m in all_moves_gen if m.get('is_bingo', False)]
-            if bingo_plays:
-                most_probable_playable_bingo_index = float('inf')
-                most_probable_bingo_details = None
-                for bingo_move in bingo_plays:
-                    word_str = bingo_move.get('word', '').upper()
-                    word_len = len(word_str)
-                    current_index = float('inf')
-                    word_list_to_check = None
-
-                    if word_len == 7:
-                        word_list_to_check = seven_letter_words
-                    elif word_len == 8:
-                        word_list_to_check = eight_letter_words
-                    
-                    if word_list_to_check:
-                        try:
-                            current_index = word_list_to_check.index(word_str) + 1
-                        except ValueError:
-                            current_index = float('inf') 
-                    
-                    if current_index < most_probable_playable_bingo_index:
-                        most_probable_playable_bingo_index = current_index
-                        most_probable_bingo_details = bingo_move
-
-                if most_probable_bingo_details:
-                    threshold_to_use = float('inf')
-                    bingo_len = len(most_probable_bingo_details.get('word', ''))
-                    if bingo_len == 7:
-                        threshold_to_use = bbb_7l_max_prob_global
-                    elif bingo_len == 8:
-                        threshold_to_use = bbb_8l_max_prob_global
-                    
-                    if not is_silent_batch_run_param:
-                        print(f"  BBB Check: Most probable playable bingo='{most_probable_bingo_details.get('word')}', Index={most_probable_playable_bingo_index}, Threshold={threshold_to_use}")
-
-                    if most_probable_playable_bingo_index <= threshold_to_use:
-                        paused_for_bingo_practice_local_flag = True
-                        if not is_silent_batch_run_param:
-                            print(f"AI turn PAUSING for Bingo, Bango, Bongo. Probable bingo found within threshold.")
-                        turn_duration = 0.0
-                        return turn, first_play, pass_count, exchange_count, consecutive_zero_point_turns, all_moves_gen, dropdown_open, hinting, showing_all_words, False, None, paused_for_bingo_practice_local_flag, set(), None
-                    elif not is_silent_batch_run_param:
-                         print(f"  BBB Check: Most probable bingo index {most_probable_playable_bingo_index} > threshold {threshold_to_use}. Not pausing.")
-                elif not is_silent_batch_run_param:
-                     print("  BBB Check: No playable bingos found with a valid index, or no bingos at all. Not pausing.")
-            elif not is_silent_batch_run_param:
-                print("  BBB Check: No initial bingos found on rack. Not pausing.")
-
-
-        move_rack_before = racks[player_idx][:] if 0 <= player_idx < len(racks) and racks[player_idx] is not None else []
-        exchanged_tiles_for_history = []
-
-        best_raw_plus_leave_play_candidate = None
-        best_raw_plus_leave_evaluation = -float('inf')
-
-        best_simulated_play_candidate = None
-        best_simulated_play_final_score = -float('inf')
-
-        best_exchange_tiles = []
-        best_exchange_evaluation = -float('inf')
-
-        can_play = bool(all_moves_gen)
-        can_exchange = bag_count > 0
-
-        if can_play:
-            if not is_silent_batch_run_param:
-                print(f"AI {turn} evaluating {len(all_moves_gen)} plays for Raw+Leave score...")
-            for move in all_moves_gen:
-                raw_score = move.get('score', 0)
-                leave_value = ai_engine.evaluate_leave(move.get('leave', []), is_silent_batch_run_param=is_silent_batch_run_param)
-                current_move_raw_plus_leave_eval = raw_score + leave_value
-                if current_move_raw_plus_leave_eval > best_raw_plus_leave_evaluation:
-                    best_raw_plus_leave_evaluation = current_move_raw_plus_leave_eval
-                    best_raw_plus_leave_play_candidate = move
-            if not is_silent_batch_run_param and best_raw_plus_leave_play_candidate:
-                _m_word = best_raw_plus_leave_play_candidate.get('word_with_blanks', best_raw_plus_leave_play_candidate.get('word', 'N/A'))
-                _m_score = best_raw_plus_leave_play_candidate.get('score',0)
-                _m_leave_val = ai_engine.evaluate_leave(best_raw_plus_leave_play_candidate.get('leave', []), is_silent_batch_run_param=is_silent_batch_run_param)
-                print(f"  Best Raw+Leave Play: '{_m_word}' ({_m_score} + {_m_leave_val:.2f} = {best_raw_plus_leave_evaluation:.2f})")
-
-        run_simulation_for_decision = (USE_AI_SIMULATION and game_mode in [MODE_HVH, MODE_HVA, MODE_AVA] and practice_mode_param is None and can_play)
-        if run_simulation_for_decision:
-            opponent_rack_len_sim = len(racks[opponent_idx]) if 0 <= opponent_idx < len(racks) and racks[opponent_idx] is not None else 7
-            simulation_results = ai_engine.run_ai_simulation(
-                all_moves_gen,
-                current_rack,
-                opponent_rack_len_sim,
-                tiles,
-                blanks,
-                board,
-                bag,
-                sim_config_num_candidates,
-                sim_config_num_opponent_sims,
-                sim_config_num_post_sim_candidates,
-                is_silent_batch_run_param=is_silent_batch_run_param
-            )
-            if simulation_results:
-                best_simulated_play_candidate = simulation_results[0]['move']
-                best_simulated_play_final_score = simulation_results[0]['final_score']
-                if not is_silent_batch_run_param:
-                    print(f"  Simulation Top Pick: '{best_simulated_play_candidate.get('word','N/A')}', Sim Score (raw+leave-opp): {best_simulated_play_final_score:.1f}")
-            else:
-                if not is_silent_batch_run_param:
-                    print("  Simulation returned no valid play.")
-                best_simulated_play_candidate = None
-
-        if can_exchange:
-            best_exchange_tiles, best_exchange_evaluation = ai_engine.find_best_exchange_option(\
-                current_rack, tiles, blanks, bag_count, is_silent_batch_run_param=is_silent_batch_run_param\
-            )
-            if not is_silent_batch_run_param:
-                if best_exchange_tiles:
-                    print(f"  Best Exchange Option: Exchange {len(best_exchange_tiles)} tiles ({''.join(sorted(best_exchange_tiles))}), Est Value: {best_exchange_evaluation:.1f}")
-                else:
-                    print("  No beneficial exchange option found.")
-
-        if can_play and best_raw_plus_leave_play_candidate:
-            if best_exchange_tiles and (best_exchange_evaluation > best_raw_plus_leave_evaluation + EXCHANGE_PREFERENCE_THRESHOLD):
-                action_chosen = 'exchange'
-                if not is_silent_batch_run_param:
-                    print(f"AI {turn}: DECISION -> Proactive Exchange (Exchange eval {best_exchange_evaluation:.1f} > Raw+Leave eval {best_raw_plus_leave_evaluation:.1f} + Threshold {EXCHANGE_PREFERENCE_THRESHOLD})")
-            else:
-                action_chosen = 'play'
-                if run_simulation_for_decision and best_simulated_play_candidate:
-                    best_play_move = best_simulated_play_candidate
-                    if not is_silent_batch_run_param:
-                        print(f"AI {turn}: DECISION -> Play (Simulated: '{best_play_move.get('word','N/A')}') (Exchange not sufficiently better or not preferred)")
-                else:
-                    best_play_move = best_raw_plus_leave_play_candidate
-                    if not is_silent_batch_run_param:
-                        print(f"AI {turn}: DECISION -> Play (Raw+Leave: '{best_play_move.get('word','N/A')}') (Exchange not sufficiently better or no sim result)")
-        elif best_exchange_tiles:
-            action_chosen = 'exchange'
-            if not is_silent_batch_run_param:
-                print(f"AI {turn}: DECISION -> Exchange (No plays possible, exchange eval: {best_exchange_evaluation:.1f})")
-        else:
-            action_chosen = 'pass'
-            if not is_silent_batch_run_param:
-                print(f"AI {turn}: DECISION -> Pass (No plays, no viable/beneficial exchange)")
-
-    # --- COMMON LOGIC FOR PLAYING THE CHOSEN ACTION ---
+    # --- Process the result ---
+    move_rack_before = racks[player_idx][:] if 0 <= player_idx < len(racks) and racks[player_idx] is not None else []
     next_turn_val = turn
     drawn_tiles = []
     newly_placed = []
@@ -6159,108 +5802,79 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
     word_with_blanks = ''
     is_bingo = False
     leave_for_history = []
-    turn_duration = 0.0
     exchanged_tiles_for_history = []
     tiles_consumed_from_rack_history = []
+    total_expected_value_of_this_draw = 0.0
+    luck_factor = 0.0
+    
+    expected_single_draw_value_for_turn = ai_engine.get_expected_single_draw_value(current_rack, tiles, blanks)
 
-    if action_chosen == 'play':
-        if best_play_move:
-            if first_play:
-                if random.choice([True, False]):
-                    if not is_silent_batch_run_param:
-                        print("AI is randomly orienting the first move to Vertical.")
-                    best_play_move['direction'] = 'V'
-                    word_len = len(best_play_move.get('word', ''))
-                    if word_len > 0:
-                        new_start_row = CENTER_SQUARE[0] - (word_len // 2)
-                        new_start_col = CENTER_SQUARE[1]
-                        best_play_move['start'] = (new_start_row, new_start_col)
-                        
-                        new_positions = []
-                        for i, tile_details in enumerate(best_play_move.get('newly_placed', [])):
-                            new_positions.append((new_start_row + i, new_start_col, tile_details[2]))
-                        best_play_move['newly_placed'] = new_positions
-                        best_play_move['positions'] = new_positions
-            word_to_print = best_play_move.get('word', 'N/A')
-            start_pos_print = best_play_move.get('start', (0,0))
-            direction_print = best_play_move.get('direction', 'right')
-            coord_print = ai_engine.get_coord(start_pos_print, direction_print, is_silent_batch_run_param=is_silent_batch_run_param)
-            if not is_silent_batch_run_param:
-                print(f"AI {turn} playing move: '{word_to_print}' at {coord_print}")
-            next_turn_val, drawn_tiles, newly_placed, tiles_consumed_from_rack_history = play_hint_move(best_play_move, tiles, racks, blanks, scores, turn, bag, board, is_ai_list_param, practice_mode_param, is_silent_batch_run_param=is_silent_batch_run_param)
-            move_type = 'place'
-            score_val = best_play_move.get('score', 0)
-            word = word_to_print
-            positions = best_play_move.get('positions', [])
-            blanks_used = best_play_move.get('blanks', set())
-            coord = coord_print
-            word_with_blanks = best_play_move.get('word_with_blanks', '')
-            is_bingo = best_play_move.get('is_bingo', False)
-            leave_for_history = best_play_move.get('leave', [])
-            first_play = False
-            consecutive_zero_point_turns = 0
-            pass_count = 0
-            exchange_count = 0
-            last_played_highlight_coords = set((pos[0], pos[1]) for pos in positions)
-        else:
-            if not is_silent_batch_run_param:
-                print(f"AI {turn} Error: Action was 'play' but best_play_move is None. Passing.")
-            action_chosen = 'pass'
-            tiles_consumed_from_rack_history = []
+    if action_chosen == 'play' and move_details:
+        if first_play and random.choice([True, False]):
+            move_details['direction'] = 'V'
+            word_len = len(move_details.get('word', ''))
+            if word_len > 0:
+                new_start_row = CENTER_SQUARE[0] - (word_len // 2)
+                new_start_col = CENTER_SQUARE[1]
+                move_details['start'] = (new_start_row, new_start_col)
+                new_positions = []
+                for i, tile_details_item in enumerate(move_details.get('newly_placed', [])):
+                    new_positions.append((new_start_row + i, new_start_col, tile_details_item[2]))
+                move_details['newly_placed'] = new_positions
+                move_details['positions'] = new_positions
 
-    if action_chosen == 'exchange':
-        if best_exchange_tiles:
-            if not is_silent_batch_run_param:
-                print(f"AI {turn} exchanging {len(best_exchange_tiles)} tiles: {''.join(sorted(best_exchange_tiles))}")
-            exchanged_tiles_for_history = best_exchange_tiles[:]
-            current_rack_list = racks[player_idx] if 0 <= player_idx < len(racks) and racks[player_idx] is not None else []
-            temp_rack_after_exchange = []
-            exchange_counts = Counter(exchanged_tiles_for_history)
-            for tile_val_ex in current_rack_list:
-                if exchange_counts.get(tile_val_ex, 0) > 0:
-                    exchange_counts[tile_val_ex] -= 1
-                else:
-                    temp_rack_after_exchange.append(tile_val_ex)
-            
-            leave_for_history = temp_rack_after_exchange[:]
-            
-            bag.extend(exchanged_tiles_for_history)
-            random.shuffle(bag)
-            
-            num_to_draw = len(exchanged_tiles_for_history)
-            drawn_tiles = []
-            for _ in range(num_to_draw):
-                if bag:
-                    drawn_tiles.append(bag.pop())
-                else:
-                    break
-            
-            temp_rack_after_exchange.extend(drawn_tiles)
-            
-            should_sort_racks_ai_exchange = not is_silent_batch_run_param
-            if should_sort_racks_ai_exchange:
-                if temp_rack_after_exchange is not None:
-                    temp_rack_after_exchange.sort()
-            
-            racks[player_idx] = temp_rack_after_exchange
-            
-            move_type = 'exchange'
-            score_val = 0
-            consecutive_zero_point_turns += 1
-            exchange_count += 1
-            pass_count = 0
-            next_turn_val = 3 - turn
-            last_played_highlight_coords = set()
-            tiles_consumed_from_rack_history = []
-        else:
-            if not is_silent_batch_run_param:
-                print(f"AI {turn} Error: Action was 'exchange' but best_exchange_tiles is empty. Passing.")
-            action_chosen = 'pass'
-            tiles_consumed_from_rack_history = []
+        next_turn_val, drawn_tiles, newly_placed, tiles_consumed_from_rack_history = play_hint_move(
+            move_details, tiles, racks, blanks, scores, turn, bag, board, is_ai_list_param, practice_mode_param, is_silent_batch_run_param
+        )
+        move_type = 'place'
+        score_val = move_details.get('score', 0)
+        word = move_details.get('word', 'N/A')
+        positions = move_details.get('positions', [])
+        blanks_used = move_details.get('blanks', set())
+        coord = ai_engine.get_coord(move_details.get('start', (0,0)), move_details.get('direction', 'right'), is_silent_batch_run_param)
+        word_with_blanks = move_details.get('word_with_blanks', '')
+        is_bingo = move_details.get('is_bingo', False)
+        leave_for_history = move_details.get('leave', [])
+        first_play = False
+        consecutive_zero_point_turns = 0
+        pass_count = 0
+        exchange_count = 0
+        last_played_highlight_coords = set((pos[0], pos[1]) for pos in positions)
 
-    if action_chosen == 'pass':
+    elif action_chosen == 'exchange' and move_details:
+        exchanged_tiles_for_history = move_details[:]
+        current_rack_list = racks[player_idx] if 0 <= player_idx < len(racks) and racks[player_idx] is not None else []
+        
+        temp_rack_after_exchange = []
+        exchange_counts = Counter(exchanged_tiles_for_history)
+        for tile_val_ex in current_rack_list:
+            if exchange_counts.get(tile_val_ex, 0) > 0:
+                exchange_counts[tile_val_ex] -= 1
+            else:
+                temp_rack_after_exchange.append(tile_val_ex)
+
+        leave_for_history = temp_rack_after_exchange[:]
+        
+        bag.extend(exchanged_tiles_for_history)
+        random.shuffle(bag)
+        
+        num_to_draw = len(exchanged_tiles_for_history)
+        drawn_tiles = [bag.pop() for _ in range(num_to_draw) if bag]
+        
+        temp_rack_after_exchange.extend(drawn_tiles)
         if not is_silent_batch_run_param:
-            print(f"AI {turn} passing.")
+            temp_rack_after_exchange.sort()
+        racks[player_idx] = temp_rack_after_exchange
+        
+        move_type = 'exchange'
+        score_val = 0
+        consecutive_zero_point_turns += 1
+        exchange_count += 1
+        pass_count = 0
+        next_turn_val = 3 - turn
+        last_played_highlight_coords = set()
+
+    else: # Pass
         move_type = 'pass'
         score_val = 0
         leave_for_history = racks[player_idx][:] if 0 <= player_idx < len(racks) and racks[player_idx] is not None else []
@@ -6269,44 +5883,33 @@ def ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
         exchange_count = 0
         next_turn_val = 3 - turn
         last_played_highlight_coords = set()
-        tiles_consumed_from_rack_history = []
 
     if drawn_tiles:
         actual_drawn_leave_value = ai_engine.evaluate_leave(drawn_tiles, is_silent_batch_run_param=is_silent_batch_run_param)
         total_expected_value_of_this_draw = expected_single_draw_value_for_turn * len(drawn_tiles)
         luck_factor = actual_drawn_leave_value - total_expected_value_of_this_draw
-        if not is_silent_batch_run_param:
-            drawn_tiles_str = "".join(sorted(t if t != ' ' else '?' for t in drawn_tiles))
-            print(f"  Drew: {drawn_tiles_str}, ActualLeaveVal: {actual_drawn_leave_value:.2f}, ExpectedSingleDrawVal: {expected_single_draw_value_for_turn:.2f}, TotalExpectedForDraw: {total_expected_value_of_this_draw:.2f}, LuckFactor: {luck_factor:+.2f}")
-    
-    turn_start_time = time.perf_counter()
-    if not is_silent_batch_run_param:
-        print(f"\n{'='*15} ai_turn START: Turn {turn} {'='*15}")
-    else:
-        turn_duration = 0.0
 
     move_data_for_turn = {
         'player': turn, 'move_type': move_type, 'rack': move_rack_before,
         'score': score_val, 'word': word, 'positions': positions,
         'blanks': blanks_used, 'drawn': drawn_tiles, 'coord': coord,
         'word_with_blanks': word_with_blanks, 'is_bingo': is_bingo,
-        'turn_duration': turn_duration,
+        'turn_duration': 0.0,
         'total_expected_draw_value': total_expected_value_of_this_draw,
         'luck_factor': luck_factor,
         'tiles_played_from_rack': tiles_consumed_from_rack_history,
         'leave': leave_for_history
     }
 
-    if move_type == 'place' and best_play_move:
+    if move_type == 'place' and move_details:
         move_data_for_turn['newly_placed'] = newly_placed
-        move_data_for_turn['start'] = best_play_move.get('start', (0,0))
-        move_data_for_turn['direction'] = best_play_move.get('direction', 'right')
+        move_data_for_turn['start'] = move_details.get('start', (0,0))
+        move_data_for_turn['direction'] = move_details.get('direction', 'right')
     elif move_type == 'exchange':
         move_data_for_turn['exchanged_tiles'] = exchanged_tiles_for_history
 
-    return next_turn_val, first_play, pass_count, exchange_count, consecutive_zero_point_turns, [], dropdown_open, hinting, showing_all_words, paused_for_power_tile_local_flag, current_power_tile_local_val, paused_for_bingo_practice_local_flag, set(), move_data_for_turn
-
-
+    return (next_turn_val, first_play, pass_count, exchange_count, consecutive_zero_point_turns, 
+            [], dropdown_open, hinting, showing_all_words, False, None, False, set(), move_data_for_turn)
 
 
 
@@ -6324,13 +5927,10 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
     global gaddag_loading_status
     global gaddag_load_thread
     global DEV_CPROFILE_ENABLED_SESSION, DEV_VISUALIZE_BATCH_ENABLED_SESSION
-    # --- MODIFICATION: Add globals to be set by this function ---
     global USE_AI_SIMULATION, USE_ENDGAME_SOLVER
-    # --- END MODIFICATION ---
     global WORD_DEFINITIONS, word_definitions_loading_status, word_definitions_load_thread
-    global insights_data_for_replay # Use the new global name
-    global screen, ui_font, RED, WHITE, BLACK, BLUE # For loading message (added BLUE for consistency)
-    # Globals needed by generate_turn_insights_data if called from here
+    global insights_data_for_replay
+    global screen, ui_font, RED, WHITE, BLACK, BLUE
     global TILE_DISTRIBUTION, LETTERS, GRID_SIZE 
 
     dev_cprofile_checked_init = False
@@ -6345,12 +5945,14 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
 
     _is_potentially_silent_batch = False
     if selected_mode_result == "BATCH_MODE":
-        if len(return_data) == 11:
-             if not return_data[7]: 
-                _is_potentially_silent_batch = True
-        elif len(return_data) == 8: 
-             if not return_data[7]:
-                _is_potentially_silent_batch = True
+        # Check based on new signature with plaid mode
+        if len(return_data) == 12 and not return_data[7]:
+            _is_potentially_silent_batch = True
+        # Check based on old signatures
+        elif len(return_data) == 11 and not return_data[7]:
+            _is_potentially_silent_batch = True
+        elif len(return_data) == 8 and not return_data[7]:
+            _is_potentially_silent_batch = True
 
     if not _is_potentially_silent_batch:
         print("--- initialize_game() entered ---")
@@ -6364,10 +5966,8 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                 dev_visualize_batch_checked_init = return_data[2]
                 if isinstance(sgs_loaded_game_data_from_param, dict):
                     game_settings_load = sgs_loaded_game_data_from_param.get('game_settings', {})
-                    # --- MODIFICATION: Set globals from loaded game ---
                     USE_ENDGAME_SOLVER = game_settings_load.get('use_endgame_solver', False)
                     USE_AI_SIMULATION = game_settings_load.get('use_ai_simulation', False)
-                    # --- END MODIFICATION ---
                     ai_sim_config_sgs = game_settings_load.get('ai_simulation_parameters')
                     if isinstance(ai_sim_config_sgs, dict):
                         ai_sim_num_candidates_init = ai_sim_config_sgs.get('num_candidates', DEFAULT_AI_CANDIDATES)
@@ -6389,10 +5989,8 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                 dev_visualize_batch_checked_init = return_data[2]
                 if isinstance(sgs_loaded_game_data_from_param, dict): 
                     game_settings_load = sgs_loaded_game_data_from_param.get('game_settings', {})
-                    # --- MODIFICATION: Set globals from loaded game ---
                     USE_ENDGAME_SOLVER = game_settings_load.get('use_endgame_solver', False)
                     USE_AI_SIMULATION = game_settings_load.get('use_ai_simulation', False)
-                    # --- END MODIFICATION ---
                     ai_sim_config_sgs = game_settings_load.get('ai_simulation_parameters') 
                     if isinstance(ai_sim_config_sgs, dict):
                         ai_sim_num_candidates_init = ai_sim_config_sgs.get('num_candidates', DEFAULT_AI_CANDIDATES)
@@ -6406,25 +6004,32 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                 if len(return_data) >= 2: 
                     sgs_loaded_game_data_from_param = return_data[0]
                     dev_cprofile_checked_init = return_data[1]
+
         elif selected_mode_result == "BATCH_MODE":
-            if len(return_data) == 11:
+            plaid_mode_checked = False # Default
+            if len(return_data) == 12: # New signature with plaid_mode
+                game_mode_tuple, player_names_sel, human_player_sel, use_endgame_solver_checked, \
+                use_ai_simulation_checked, num_games, dev_cprofile_checked_init, dev_visualize_batch_checked_init, \
+                ai_sim_num_cand_batch, ai_sim_num_opp_batch, ai_sim_num_post_batch, plaid_mode_checked = return_data
+                ai_sim_num_candidates_init = ai_sim_num_cand_batch
+                ai_sim_num_opponent_sims_init = ai_sim_num_opp_batch
+                ai_sim_num_post_sim_candidates_init = ai_sim_num_post_batch
+            elif len(return_data) == 11: # Old signature without plaid
                 game_mode_tuple, player_names_sel, human_player_sel, use_endgame_solver_checked, \
                 use_ai_simulation_checked, num_games, dev_cprofile_checked_init, dev_visualize_batch_checked_init, \
                 ai_sim_num_candidates_init, ai_sim_num_opponent_sims_init, ai_sim_num_post_sim_candidates_init = return_data
-                # --- MODIFICATION: Set globals from batch config ---
-                USE_ENDGAME_SOLVER = use_endgame_solver_checked
-                USE_AI_SIMULATION = use_ai_simulation_checked
-                # --- END MODIFICATION ---
-            elif len(return_data) == 8: 
+            elif len(return_data) == 8: # Older signature
                 game_mode_tuple, player_names_sel, human_player_sel, use_endgame_solver_checked, \
                 use_ai_simulation_checked, num_games, dev_cprofile_checked_init, dev_visualize_batch_checked_init = return_data
-                # --- MODIFICATION: Set globals from batch config ---
-                USE_ENDGAME_SOLVER = use_endgame_solver_checked
-                USE_AI_SIMULATION = use_ai_simulation_checked
-                # --- END MODIFICATION ---
             else:
-                if not _is_potentially_silent_batch:
-                    print("Warning (initialize_game): Unexpected return_data structure for BATCH_MODE.")
+                if not _is_potentially_silent_batch: print("Error: Unexpected data structure for BATCH_MODE in initialize_game (main logic).")
+                return None
+
+            # Set globals from batch config
+            USE_ENDGAME_SOLVER = use_endgame_solver_checked
+            # Plaid mode overrides simulation
+            USE_AI_SIMULATION = use_ai_simulation_checked and not plaid_mode_checked
+
         elif selected_mode_result is not None: 
             if len(return_data) == 15: 
                 player_names_sel, human_player_sel, practice_mode_sel, letter_checks_sel, \
@@ -6432,10 +6037,8 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                 practice_state_from_mode_sel, dev_cprofile_checked_init, dev_visualize_batch_checked_init, \
                 ai_sim_num_candidates_init, ai_sim_num_opponent_sims_init, ai_sim_num_post_sim_candidates_init, \
                 bbb_7l_str, bbb_8l_str = return_data 
-                # --- MODIFICATION: Set globals from mode selection ---
                 USE_ENDGAME_SOLVER = use_endgame_solver_sel
                 USE_AI_SIMULATION = use_ai_simulation_sel
-                # --- END MODIFICATION ---
                 try:
                     bbb_7l_max_prob_init = int(bbb_7l_str) if bbb_7l_str else 1000
                 except ValueError:
@@ -6449,18 +6052,14 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                 number_checks_sel, use_endgame_solver_sel, use_ai_simulation_sel, \
                 practice_state_from_mode_sel, dev_cprofile_checked_init, dev_visualize_batch_checked_init, \
                 ai_sim_num_candidates_init, ai_sim_num_opponent_sims_init, ai_sim_num_post_sim_candidates_init = return_data
-                # --- MODIFICATION: Set globals from mode selection ---
                 USE_ENDGAME_SOLVER = use_endgame_solver_sel
                 USE_AI_SIMULATION = use_ai_simulation_sel
-                # --- END MODIFICATION ---
             elif len(return_data) == 10: 
                  player_names_sel, human_player_sel, practice_mode_sel, letter_checks_sel, \
                 number_checks_sel, use_endgame_solver_sel, use_ai_simulation_sel, \
                 practice_state_from_mode_sel, _, _ = return_data
-                 # --- MODIFICATION: Set globals from mode selection ---
                  USE_ENDGAME_SOLVER = use_endgame_solver_sel
                  USE_AI_SIMULATION = use_ai_simulation_sel
-                 # --- END MODIFICATION ---
             else:
                 if not _is_potentially_silent_batch:
                     print("Warning (initialize_game): Unexpected return_data structure for standard game mode.")
@@ -6476,10 +6075,6 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
             print(f"--- initialize_game(): AI Sim Params Initialized: Cands={ai_sim_num_candidates_init}, OppSims={ai_sim_num_opponent_sims_init}, PostSimCands={ai_sim_num_post_sim_candidates_init} ---")
             print(f"--- initialize_game(): BBB Params Initialized: 7L Max Prob={bbb_7l_max_prob_init}, 8L Max Prob={bbb_8l_max_prob_init} ---")
 
-
-    # --- REMOVED BACKGROUND THREAD LOGIC ---
-    # The loading is now handled synchronously in main() before the game loop starts.
-    
     game_mode = None
     is_loaded_game = False
     player_names = ["Player 1", "Player 2"]
@@ -6502,7 +6097,6 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
     initial_racks_at_game_start = [[], []]
     number_checks = [True] * 6
     letter_checks = [True] * 4
-    # USE_ENDGAME_SOLVER and USE_AI_SIMULATION are now set directly above
     is_batch_running = False
     total_batch_games = 0
     current_batch_game_num = 0
@@ -6523,8 +6117,6 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
     last_scoreboard_click_time_init = 0
     last_scoreboard_click_idx_init = -1
     insights_data_for_replay = [] 
-
-    # Default visibility
     rack_visibility = [True, True]
 
     is_silent_run_for_init = (selected_mode_result == "BATCH_MODE" and not DEV_VISUALIZE_BATCH_ENABLED_SESSION)
@@ -6535,23 +6127,18 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
     if selected_mode_result == "LOADED_GAME":
         if not is_silent_run_for_init:
             print("--- initialize_game(): Handling LOADED_GAME setup (SGS) ---")
-
         if not sgs_loaded_game_data_from_param or not isinstance(sgs_loaded_game_data_from_param, dict):
             print("Error: No valid SGS data provided for loaded game (checked before main logic).")
             return None
-
         sgs_loaded_game_data = sgs_loaded_game_data_from_param
         game_mode = "LOADED_GAME" 
         is_loaded_game = True
         is_batch_running = False 
-
         player_names = sgs_loaded_game_data.get('player_names', ["Player1", "Player2"])
         sgs_initial_bag = sgs_loaded_game_data.get('sgs_initial_bag', []) 
         initial_racks_at_game_start = sgs_loaded_game_data.get('initial_racks_sgs', [[],[]]) 
         move_history = sgs_loaded_game_data.get('full_move_history', [])
-
         game_settings = sgs_loaded_game_data.get('game_settings', {})
-        # USE_ENDGAME_SOLVER and USE_AI_SIMULATION are already set from this dict
         is_ai = game_settings.get('is_ai_config', [False, False])
         human_player = game_settings.get('human_player_if_hva', 1)
         practice_mode = game_settings.get('practice_mode_str', None)
@@ -6564,12 +6151,10 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
             ai_sim_num_candidates_init = ai_sim_config_sgs.get('num_candidates', DEFAULT_AI_CANDIDATES)
             ai_sim_num_opponent_sims_init = ai_sim_config_sgs.get('num_opponent_sims', DEFAULT_OPPONENT_SIMULATIONS)
             ai_sim_num_post_sim_candidates_init = ai_sim_config_sgs.get('num_post_sim_candidates', DEFAULT_POST_SIM_CANDIDATES)
-        
         snapshot = sgs_loaded_game_data.get('current_game_state_snapshot')
         if snapshot and 'final_scores_adjusted' not in sgs_loaded_game_data: 
             if not is_silent_run_for_init:
                 print("--- initialize_game(): Loading IN-PROGRESS game state from snapshot ---")
-            
             board_init = snapshot.get('board_layout_multipliers', board_init) 
             tiles_init = snapshot.get('tiles_on_board', tiles_init) 
             blanks_init = snapshot.get('blanks_on_board', set())
@@ -6582,51 +6167,42 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
             exchange_count = snapshot.get('current_exchange_count', 0)
             consecutive_zero_point_turns = snapshot.get('current_consecutive_zero_point_turns', 0)
             last_played_highlight_coords = snapshot.get('current_last_played_highlight_coords', set())
-
-            # Load visibility, but ensure it's visible if it's not a human game
             loaded_visibility = snapshot.get('rack_visibility', [True, True])
             game_mode_from_settings = game_settings.get('game_mode_str', game_mode)
             if game_mode_from_settings in [MODE_AVA]:
                  rack_visibility = [True, True]
             else:
                  rack_visibility = loaded_visibility
-            
             if not isinstance(racks_init, list) or len(racks_init) != 2 or \
                not all(isinstance(r, list) for r in racks_init) or \
                not all(isinstance(t, str) for r in racks_init for t in r):
                 if not is_silent_run_for_init:
                     print(f"Warning: Loaded racks_init from snapshot is not in expected format: {racks_init}. Resetting to empty.")
                 racks_init = [[], []]
-
             replay_mode = False 
             game_over_at_init = False 
             final_scores_at_init = None
             current_replay_turn = len(move_history) 
-            
             if not is_silent_run_for_init:
                 print(f"  In-progress game loaded. Turn: {turn}, First Play: {first_play}, Moves: {len(move_history)}")
                 p1r_disp = racks_init[0] if len(racks_init)>0 and racks_init[0] is not None else 'N/A'
                 p2r_disp = racks_init[1] if len(racks_init)>1 and racks_init[1] is not None else 'N/A'
                 print(f"  Racks from snapshot: P1={p1r_disp}, P2={p2r_disp}")
                 print(f"  Bag size from snapshot: {len(bag_init)}")
-            
             if gaddag_loading_status == 'loaded':
                 if not is_silent_run_for_init:
                     screen.fill(WHITE) 
-                    loading_text_surf = ui_font.render("Generating Insights for Loaded Game...", True, BLUE) # Changed color
+                    loading_text_surf = ui_font.render("Generating Insights for Loaded Game...", True, BLUE)
                     screen.blit(loading_text_surf, ( (WINDOW_WIDTH - loading_text_surf.get_width()) // 2, (WINDOW_HEIGHT - loading_text_surf.get_height()) // 2))
                     pygame.display.flip()
                 insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_run_param=is_silent_run_for_init)
             else:
                 insights_data_for_replay = [] 
-                if not is_silent_run_for_init and gaddag_loading_status == 'loading': # Should be 'idle' or 'error' if not loaded
+                if not is_silent_run_for_init and gaddag_loading_status == 'loading':
                      print("Insights generation skipped for in-progress game: GADDAG not ready.")
-
-
         else: 
             if not is_silent_run_for_init:
                 print("--- initialize_game(): Loading COMPLETED game state (or older format) for replay ---")
-            
             final_scores_from_sgs = sgs_loaded_game_data.get('final_scores_adjusted')
             if final_scores_from_sgs is not None:
                 game_over_at_init = True
@@ -6635,13 +6211,12 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                 game_over_at_init = False 
                 final_scores_at_init = None
             replay_mode = True
-            rack_visibility = [True, True] # Racks are always visible in replay mode
+            rack_visibility = [True, True]
             current_replay_turn = 0 
-            
             if gaddag_loading_status == 'loaded':
                 if not is_silent_run_for_init:
                     screen.fill(WHITE)
-                    loading_text_surf = ui_font.render("Generating Insights...", True, BLUE) # Changed color
+                    loading_text_surf = ui_font.render("Generating Insights...", True, BLUE)
                     screen.blit(loading_text_surf, ( (WINDOW_WIDTH - loading_text_surf.get_width()) // 2, (WINDOW_HEIGHT - loading_text_surf.get_height()) // 2))
                     pygame.display.flip()
                 insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_run_param=is_silent_run_for_init)
@@ -6649,50 +6224,22 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                 insights_data_for_replay = []
                 if not is_silent_run_for_init and gaddag_loading_status == 'loading':
                      print("Insights generation skipped for replay: GADDAG not ready.")
-
-
         if not is_silent_run_for_init:
             print(f"--- initialize_game(): Loaded SGS Game. Players: {player_names}, Moves: {len(move_history)} ---")
 
-
     elif selected_mode_result == "BATCH_MODE":
         is_batch_running = True
-        rack_visibility = [True, True] # Racks are always visible for batch
-
-        if len(return_data) == 12:
-            game_mode_tuple, player_names_sel, human_player_sel, use_endgame_solver_checked, \
-            use_ai_simulation_checked, num_games, _, _, \
-            ai_sim_num_cand_batch, ai_sim_num_opp_batch, ai_sim_num_post_batch, plaid_mode_checked = return_data
-            ai_sim_num_candidates_init = ai_sim_num_cand_batch
-            ai_sim_num_opponent_sims_init = ai_sim_num_opp_batch
-            ai_sim_num_post_sim_candidates_init = ai_sim_num_post_batch
-            
-        elif len(return_data) == 11:
-            game_mode_tuple, player_names_sel, human_player_sel, use_endgame_solver_checked, \
-            use_ai_simulation_checked, num_games, _, _, \
-            ai_sim_num_cand_batch, ai_sim_num_opp_batch, ai_sim_num_post_batch = return_data
-            ai_sim_num_candidates_init = ai_sim_num_cand_batch
-            ai_sim_num_opponent_sims_init = ai_sim_num_opp_batch
-            ai_sim_num_post_sim_candidates_init = ai_sim_num_post_batch
-        elif len(return_data) == 8: 
-            game_mode_tuple, player_names_sel, human_player_sel, use_endgame_solver_checked, \
-            use_ai_simulation_checked, num_games, _, _ = return_data
-        else:
-            if not is_silent_run_for_init: print("Error: Unexpected data structure for BATCH_MODE in initialize_game (main logic).")
-            return None
-
+        rack_visibility = [True, True]
         game_mode = game_mode_tuple
         total_batch_games = num_games
         current_batch_game_num = 1 
         batch_results = []
-        # USE_ENDGAME_SOLVER and USE_AI_SIMULATION are already set
         practice_mode = None
         letter_checks = [True]*4
         number_checks = [True]*6
         active_practice_state_data = None
         bbb_7l_max_prob_init = 1000
         bbb_8l_max_prob_init = 1000
-
         batch_now = datetime.datetime.now()
         batch_date_str = batch_now.strftime("%d%b%y").upper()
         batch_time_str = batch_now.strftime("%H%M")
@@ -6706,7 +6253,6 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
             batch_seq_num = max_existing_batch_num + 1
         except OSError as e_os_err: print(f"Warning: Error listing directory for batch sequence number: {e_os_err}. Using sequence 1.")
         batch_base_filename_prefix = f"{batch_date_str}-{batch_time_str}-BATCH-{batch_seq_num}"
-
         initial_game_config = {
             'game_mode': game_mode, 'player_names': player_names_sel, 'human_player': human_player_sel,
             'use_endgame_solver': USE_ENDGAME_SOLVER, 'use_ai_simulation': USE_AI_SIMULATION,
@@ -6715,16 +6261,15 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
             'ai_sim_num_opponent_sims': ai_sim_num_opponent_sims_init,
             'ai_sim_num_post_sim_candidates': ai_sim_num_post_sim_candidates_init,
             'bbb_7l_max_prob': bbb_7l_max_prob_init, 
-            'bbb_8l_max_prob': bbb_8l_max_prob_init
+            'bbb_8l_max_prob': bbb_8l_max_prob_init,
+            'plaid_mode': plaid_mode_checked
         }
         player_names = player_names_sel
         human_player = human_player_sel
-
         is_ai = [False, False]
         if initial_game_config['game_mode'] == MODE_HVA: is_ai[2 - initial_game_config['human_player']] = True
         elif initial_game_config['game_mode'] == MODE_AVA: is_ai = [True, True]
         initial_game_config['is_ai'] = is_ai
-
         reset_result = reset_game_state(initial_game_config, is_silent_batch_run_param=is_silent_run_for_init)
         if reset_result is None:
              print("FATAL: Could not initialize first batch game."); pygame.quit(); sys.exit()
@@ -6734,71 +6279,32 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
          sgs_initial_bag) = reset_result
         initial_racks_at_game_start = [r[:] for r in racks_init] 
         game_over_at_init = False; final_scores_at_init = None
-        insights_data_for_replay = [] # No insights for batch mode itself
+        insights_data_for_replay = []
         if not is_silent_run_for_init: print(f"--- initialize_game(): Batch Mode Setup Complete. Running {total_batch_games} games. Base Filename Prefix: {batch_base_filename_prefix} ---")
 
     elif selected_mode_result is not None: 
         is_batch_running = False
         if not is_silent_run_for_init:
             print(f"--- initialize_game(): Handling New Game Setup ({selected_mode_result}) ---")
-
-        if len(return_data) == 15: 
-            player_names_sel, human_player_sel, practice_mode_sel, letter_checks_sel, \
-            number_checks_sel, use_endgame_solver_sel, use_ai_simulation_sel, \
-            practice_state_from_mode_sel, _, _, \
-            ai_sim_cand_std, ai_sim_opp_std, ai_sim_post_std, \
-            bbb_7l_str, bbb_8l_str = return_data 
-            ai_sim_num_candidates_init = ai_sim_cand_std
-            ai_sim_num_opponent_sims_init = ai_sim_opp_std
-            ai_sim_num_post_sim_candidates_init = ai_sim_post_std
-            try:
-                bbb_7l_max_prob_init = int(bbb_7l_str) if bbb_7l_str else 1000
-            except ValueError:
-                bbb_7l_max_prob_init = 1000
-            try:
-                bbb_8l_max_prob_init = int(bbb_8l_str) if bbb_8l_str else 1000
-            except ValueError:
-                bbb_8l_max_prob_init = 1000
-        elif len(return_data) == 13: 
-            player_names_sel, human_player_sel, practice_mode_sel, letter_checks_sel, \
-            number_checks_sel, use_endgame_solver_sel, use_ai_simulation_sel, \
-            practice_state_from_mode_sel, _, _, \
-            ai_sim_cand_std, ai_sim_opp_std, ai_sim_post_std = return_data
-            ai_sim_num_candidates_init = ai_sim_cand_std
-            ai_sim_num_opponent_sims_init = ai_sim_opp_std
-            ai_sim_num_post_sim_candidates_init = ai_sim_post_std
-        elif len(return_data) == 10: 
-             player_names_sel, human_player_sel, practice_mode_sel, letter_checks_sel, \
-            number_checks_sel, use_endgame_solver_sel, use_ai_simulation_sel, \
-            practice_state_from_mode_sel, _, _ = return_data
-        else:
-            if not is_silent_run_for_init: print("Error: Unexpected data structure for standard game in initialize_game (main logic).")
-            return None
-
         game_mode = selected_mode_result
         is_loaded_game = False
         replay_initial_shuffled_bag = None 
-
         player_names = player_names_sel
         human_player = human_player_sel
         practice_mode = practice_mode_sel
         letter_checks = letter_checks_sel
         number_checks = number_checks_sel
-        # USE_ENDGAME_SOLVER and USE_AI_SIMULATION are already set
         active_practice_state_data = practice_state_from_mode_sel
-
         if practice_mode or game_mode == MODE_AVA:
             rack_visibility = [True, True]
-        else: # HvH or HvA
+        else:
             rack_visibility = [False, False]
-
         if not is_silent_run_for_init:
             print(f"--- initialize_game(): Use Endgame Solver set to: {USE_ENDGAME_SOLVER} ---")
             print(f"--- initialize_game(): Use AI Simulation set to: {USE_AI_SIMULATION} ---")
             print(f"--- initialize_game(): AI Sim Params for this game: Cands={ai_sim_num_candidates_init}, OppSims={ai_sim_num_opponent_sims_init}, PostSimCands={ai_sim_num_post_sim_candidates_init} ---")
             if practice_mode == "bingo_bango_bongo":
                 print(f"--- initialize_game(): BBB Params for this game: 7L Max Prob={bbb_7l_max_prob_init}, 8L Max Prob={bbb_8l_max_prob_init} ---")
-
         if active_practice_state_data: 
             if not is_silent_run_for_init: print(f"Loading state from practice_state for mode: {practice_mode}...")
             board_init = active_practice_state_data["board"]
@@ -6813,7 +6319,6 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
             if practice_mode == "bingo_bango_bongo":
                 bbb_7l_max_prob_init = active_practice_state_data.get('bbb_7l_max_prob', 1000)
                 bbb_8l_max_prob_init = active_practice_state_data.get('bbb_8l_max_prob', 1000)
-
             if practice_mode == "eight_letter": is_ai = [False, False]
             else:
                 is_ai = [False, False]
@@ -6825,17 +6330,14 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
             random.shuffle(temp_full_bag)
             sgs_initial_bag = temp_full_bag[:] 
             bag_init = temp_full_bag[:]
-
             racks_init = [[], []]; scores_init = [0, 0]; turn = 1; blanks_init = set(); first_play = True
             try:
                 racks_init[0] = [bag_init.pop() for _ in range(7)]
                 racks_init[1] = [bag_init.pop() for _ in range(7)]
             except IndexError: print("Error: Not enough tiles in bag."); pygame.quit(); sys.exit()
-
             is_ai = [False, False] 
             if game_mode == MODE_HVA: is_ai[2 - human_player] = True
             elif game_mode == MODE_AVA: is_ai = [True, True]
-
             should_sort_racks_init_std = not is_silent_run_for_init
             if should_sort_racks_init_std:
                 for i, rack_item in enumerate(racks_init):
@@ -6844,7 +6346,7 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                     print(f"DEBUG initialize_game (standard new game): After initial sort, P1 rack: {racks_init[0]}, P2 rack: {racks_init[1]}")
         initial_racks_at_game_start = [rack_item[:] for rack_item in racks_init] 
         game_over_at_init = False; final_scores_at_init = None
-        insights_data_for_replay = [] # No insights for new non-replay games
+        insights_data_for_replay = []
 
     elif selected_mode_result is None:
         print("--- initialize_game(): Mode selection returned None. Exiting. ---"); pygame.quit(); sys.exit()
@@ -6855,7 +6357,6 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
     if not is_silent_run_for_init:
         print("--- initialize_game(): Initialization complete. Returning state. ---")
 
-    # --- MODIFICATION: Remove USE_AI_SIMULATION and USE_ENDGAME_SOLVER from return tuple ---
     return (game_mode, is_loaded_game, player_names, move_history, final_scores_at_init, \
             replay_initial_shuffled_bag, board, tiles, scores, blanks, racks, bag,\
             replay_mode, current_replay_turn, practice_mode, is_ai, human_player,\
@@ -11078,23 +10579,40 @@ def handle_turn_start_updates(state):
 def handle_ai_turn_trigger(state):
     """
     Checks if it's the AI's turn and conditions are met, then executes the AI turn.
-    If GADDAG is loading or structure is None, the turn is skipped or passed.
+    This now includes logic to PAUSE for practice modes before triggering the AI.
     Updates and returns the game state dictionary.
-    Reads global gaddag_loading_status and GADDAG_STRUCTURE directly.
-    Print statements are now conditional.
-    MODIFIED: Corrected call signature for ai_turn.
     """
     global gaddag_loading_status 
     global GADDAG_STRUCTURE    
     global DEV_VISUALIZE_BATCH_ENABLED_SESSION 
+    global bbb_7l_max_prob_global, bbb_8l_max_prob_global
+    global seven_letter_words, eight_letter_words
+
+    if 'seven_letter_words' not in globals() or not seven_letter_words:
+        try:
+            with open("7-letter-list.txt", "r") as f_7l:
+                seven_letter_words = [line.strip().upper() for line in f_7l]
+        except FileNotFoundError:
+            seven_letter_words = []
+            print("Warning (handle_ai_turn_trigger): 7-letter-list.txt not found for BBB.")
+    if 'eight_letter_words' not in globals() or not eight_letter_words:
+        try:
+            with open("8-letter-list.txt", "r") as f_8l:
+                eight_letter_words = [line.strip().upper() for line in f_8l]
+        except FileNotFoundError:
+            eight_letter_words = []
+            print("Warning (handle_ai_turn_trigger): 8-letter-list.txt not found for BBB.")
 
     is_silent_run = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
 
+    # Unpack state variables
     game_over_state = state['game_over_state']
     replay_mode = state['replay_mode']
     paused_for_power_tile = state['paused_for_power_tile']
     paused_for_bingo_practice = state['paused_for_bingo_practice']
+    # --- FIX: Define practice_mode_from_state here ---
     practice_mode_from_state = state['practice_mode'] 
+    # --- END FIX ---
     turn = state['turn']
     is_ai_list_from_state = state['is_ai']
     human_played = state['human_played']
@@ -11114,15 +10632,14 @@ def handle_ai_turn_trigger(state):
     hinting = state['hinting']
     showing_all_words = state['showing_all_words']
     letter_checks = state['letter_checks']
-    current_power_tile = state['current_power_tile'] 
     
     sim_cands = state.get('ai_sim_num_candidates_cfg', DEFAULT_AI_CANDIDATES)
     sim_opp_sims = state.get('ai_sim_num_opponent_sims_cfg', DEFAULT_OPPONENT_SIMULATIONS)
     sim_post_sims = state.get('ai_sim_num_post_sim_candidates_cfg', DEFAULT_POST_SIM_CANDIDATES)
     
-    # --- FIX: Define the variable by reading it from the state dictionary ---
     is_plaid_mode_from_config = state.get('initial_game_config', {}).get('plaid_mode', False)
     
+    # Main condition to check if an AI turn should be considered
     if not game_over_state and \
        not replay_mode and \
        not paused_for_power_tile and \
@@ -11133,32 +10650,100 @@ def handle_ai_turn_trigger(state):
        not human_played and \
        not is_solving_endgame:
 
-        all_moves_for_ai = []
-        if gaddag_loading_status == 'loaded' and GADDAG_STRUCTURE is not None:
-            if racks and len(racks) > turn - 1 and racks[turn - 1] is not None:
-                all_moves_for_ai = ai_engine.generate_all_moves_gaddag(
-                    racks[turn - 1], tiles, board, blanks,
-                    is_silent_batch_run_param=is_silent_run
-                )
-                if all_moves_for_ai is None:
-                    all_moves_for_ai = []
-        
-        ai_result = ai_turn(turn, racks, tiles, board, blanks, scores, bag, first_play, \
-                            pass_count, exchange_count, consecutive_zero_point_turns, \
-                            player_names, dropdown_open, hinting, showing_all_words, letter_checks,\
-                            is_ai_list_from_state, \
-                            practice_mode_from_state, \
-                            sim_cands, sim_opp_sims, sim_post_sims,
-                            all_moves_for_ai,
-                            is_silent_batch_run_param=is_silent_run,
-                            is_plaid_mode=is_plaid_mode_from_config) # Now this variable is defined
-        
-        if len(ai_result) == 14: 
-            (turn_after_ai, first_play_after_ai, pass_count_after_ai, \
-             exchange_count_after_ai, consecutive_zero_after_ai, returned_moves_from_ai,
-             dropdown_open_after_ai, hinting_after_ai, showing_all_words_after_ai, \
-             paused_power_after_ai, current_power_tile_after_ai, \
-             paused_bingo_after_ai, _, returned_move_data) = ai_result 
+        # --- PLAID MODE EXECUTION PATH ---
+        if is_plaid_mode_from_config:
+            all_moves_for_ai = ai_engine.generate_all_moves_gaddag(
+                state['racks'][turn - 1], state['tiles'], state['board'], state['blanks'],
+                is_silent_batch_run_param=is_silent_run
+            )
+            if all_moves_for_ai is None:
+                all_moves_for_ai = []
+            
+            # Directly call ai_turn with the plaid flag
+            ai_result = ai_turn(
+                turn, state['racks'], state['tiles'], state['board'], state['blanks'], state['scores'], state['bag'], state['first_play'],
+                state['pass_count'], state['exchange_count'], state['consecutive_zero_point_turns'],
+                state['player_names'], state['dropdown_open'], state['hinting'], state['showing_all_words'], state['letter_checks'],
+                is_ai_list_from_state, state['practice_mode'],
+                state.get('ai_sim_num_candidates_cfg', DEFAULT_AI_CANDIDATES),
+                state.get('ai_sim_num_opponent_sims_cfg', DEFAULT_OPPONENT_SIMULATIONS),
+                state.get('ai_sim_num_post_sim_candidates_cfg', DEFAULT_POST_SIM_CANDIDATES),
+                all_moves_for_ai,
+                is_silent_batch_run_param=is_silent_run,
+                is_plaid_mode=True
+            )
+        # --- STANDARD/INTERACTIVE EXECUTION PATH ---
+        else:
+            # 1. Power Tiles Practice Check
+            if state['practice_mode'] == "power_tiles":
+                checked_power_tiles = {letter_pt for i_pt, letter_pt in enumerate(['J', 'Q', 'X', 'Z']) if state['letter_checks'][i_pt]}
+                power_tiles_on_rack = sorted([tile_val for tile_val in state['racks'][turn - 1] if tile_val in checked_power_tiles])
+                if power_tiles_on_rack:
+                    state['current_power_tile'] = power_tiles_on_rack[0]
+                    state['paused_for_power_tile'] = True
+                    if not is_silent_run:
+                        print(f"AI turn PAUSING for power tile practice. Target: {state['current_power_tile']}")
+                    return state
+
+            # 2. Generate moves once for other checks
+            all_moves_for_ai = ai_engine.generate_all_moves_gaddag(
+                state['racks'][turn - 1], state['tiles'], state['board'], state['blanks'],
+                is_silent_batch_run_param=is_silent_run
+            )
+            if all_moves_for_ai is None:
+                all_moves_for_ai = []
+
+            # 3. BBB Practice Check
+            if state['practice_mode'] == "bingo_bango_bongo":
+                bingo_plays = [m for m in all_moves_for_ai if m.get('is_bingo', False)]
+                if bingo_plays:
+                    most_probable_playable_bingo_index = float('inf')
+                    most_probable_bingo_details = None
+                    for bingo_move in bingo_plays:
+                        word_str = bingo_move.get('word', '').upper()
+                        word_len = len(word_str)
+                        current_index = float('inf')
+                        word_list_to_check = None
+                        if word_len == 7: word_list_to_check = seven_letter_words
+                        elif word_len == 8: word_list_to_check = eight_letter_words
+                        if word_list_to_check:
+                            try:
+                                current_index = word_list_to_check.index(word_str) + 1
+                            except ValueError:
+                                current_index = float('inf')
+                        if current_index < most_probable_playable_bingo_index:
+                            most_probable_playable_bingo_index = current_index
+                            most_probable_bingo_details = bingo_move
+                    if most_probable_bingo_details:
+                        threshold_to_use = float('inf')
+                        bingo_len = len(most_probable_bingo_details.get('word', ''))
+                        if bingo_len == 7: threshold_to_use = bbb_7l_max_prob_global
+                        elif bingo_len == 8: threshold_to_use = bbb_8l_max_prob_global
+                        if most_probable_playable_bingo_index <= threshold_to_use:
+                            state['paused_for_bingo_practice'] = True
+                            state['all_moves'] = all_moves_for_ai
+                            if not is_silent_run:
+                                print(f"AI turn PAUSING for Bingo, Bango, Bongo. Probable bingo found within threshold.")
+                            return state
+            
+            # 4. If not paused, execute the normal AI turn
+            ai_result = ai_turn(
+                turn, state['racks'], state['tiles'], state['board'], state['blanks'], state['scores'], state['bag'], state['first_play'],
+                state['pass_count'], state['exchange_count'], state['consecutive_zero_point_turns'],
+                state['player_names'], state['dropdown_open'], state['hinting'], state['showing_all_words'], state['letter_checks'],
+                is_ai_list_from_state, state['practice_mode'],
+                sim_cands, sim_opp_sims, sim_post_sims,
+                all_moves_for_ai,
+                is_silent_batch_run_param=is_silent_run,
+                is_plaid_mode=False
+            )
+
+        # Common result processing for both Plaid and Standard paths
+        if 'ai_result' in locals() and len(ai_result) == 14:
+            (turn_after_ai, first_play_after_ai, pass_count_after_ai,
+             exchange_count_after_ai, consecutive_zero_after_ai, _,
+             dropdown_open_after_ai, hinting_after_ai, showing_all_words_after_ai,
+             paused_power_after_ai, _, paused_bingo_after_ai, _, returned_move_data) = ai_result
 
             if returned_move_data:
                 state['move_history'].append(returned_move_data)
@@ -11172,21 +10757,18 @@ def handle_ai_turn_trigger(state):
             state['hinting'] = hinting_after_ai
             state['showing_all_words'] = showing_all_words_after_ai
             state['paused_for_power_tile'] = paused_power_after_ai
-            state['current_power_tile'] = current_power_tile_after_ai
             state['paused_for_bingo_practice'] = paused_bingo_after_ai
 
             if returned_move_data and returned_move_data.get('move_type') == 'place':
                 positions_for_highlight = returned_move_data.get('newly_placed', returned_move_data.get('positions', []))
                 state['last_played_highlight_coords'] = set((pos[0], pos[1]) for pos in positions_for_highlight)
-            elif turn_after_ai != turn : 
+            elif turn_after_ai != turn:
                 state['last_played_highlight_coords'] = set()
             
             state['turn'] = turn_after_ai
-
-            if paused_power_after_ai or paused_bingo_after_ai:
-                state['all_moves'] = returned_moves_from_ai
-        else:
+        elif 'ai_result' in locals():
             print(f"Error: AI turn returned unexpected number of values: {len(ai_result)}")
+
     return state
 
 
