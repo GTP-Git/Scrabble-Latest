@@ -1,6 +1,6 @@
 # ai_engine.pyx
 
-#ai_engine_pyx - AI - 14JUN25
+#ai_engine_pyx - AJ - 15JUN25
 #
 
 
@@ -2011,3 +2011,114 @@ cpdef object solve_endgame(list rack_player, list opponent_rack, list tiles, set
         return evaluated_lines[0]['sequence'][0]
     else:
         return "PASS"
+
+
+
+
+
+# In ai_engine_pyx
+
+cpdef tuple determine_best_action(
+    list rack, list tiles, list board, set blanks, list bag, bint first_play,
+    bint use_simulation, bint use_endgame_solver, bint is_plaid_mode,
+    int opponent_rack_len, int num_ai_candidates, int num_opponent_sims, int num_post_sim_candidates,
+    int current_score_diff_for_endgame,
+    bint is_silent_batch_run_param=False
+):
+    """
+    The new AI brain, fully in Cython. It determines the best action (play, exchange, or pass).
+    Returns: tuple (action_chosen_str, move_details_obj)
+    """
+    cdef list all_moves, best_exchange_tiles
+    cdef object best_raw_plus_leave_play_candidate, best_simulated_play_candidate, best_first_move_endgame
+    cdef float best_raw_plus_leave_evaluation, best_exchange_evaluation, best_simulated_play_final_score
+    cdef bint can_play, can_exchange
+    cdef int bag_count, total_tiles_on_racks, player_rack_len
+    cdef float raw_score, leave_value, current_move_raw_plus_leave_eval
+    cdef object move, sim_results
+
+    # --- Endgame Solver Check ---
+    bag_count = len(bag)
+    player_rack_len = len(rack)
+    total_tiles_on_racks = player_rack_len + opponent_rack_len
+
+    if use_endgame_solver and bag_count == 0 and total_tiles_on_racks <= 10:
+        best_first_move_endgame = solve_endgame(
+            rack,
+            [], # Opponent rack is unknown, negamax handles this
+            tiles, blanks, board, current_score_diff_for_endgame,
+            is_silent_batch_run_param=True
+        )
+        if best_first_move_endgame == "PASS":
+            return 'pass', None
+        elif isinstance(best_first_move_endgame, dict):
+            return 'play', best_first_move_endgame
+        else:
+            return 'pass', None # Fallback
+
+    # --- Standard or Plaid Move Generation ---
+    all_moves = generate_all_moves_gaddag(
+        rack, tiles, board, blanks, None, is_silent_batch_run_param
+    )
+    if all_moves is None:
+        all_moves = []
+
+    # --- Plaid Mode Logic (Highest Score) ---
+    if is_plaid_mode:
+        if not all_moves:
+            return 'pass', None
+        else:
+            # This is slightly inefficient but required to get the full move object
+            best_move = max(all_moves, key=_sort_key_raw_score)
+            return 'play', best_move
+
+    # --- Standard AI Logic (Equity & Simulation) ---
+    best_raw_plus_leave_play_candidate = None
+    best_raw_plus_leave_evaluation = -1000000.0 # Using large negative number
+    best_simulated_play_candidate = None
+    best_simulated_play_final_score = -1000000.0
+    best_exchange_tiles = []
+    best_exchange_evaluation = -1000000.0
+
+    can_play = bool(all_moves)
+    can_exchange = bag_count > 0
+
+    if can_play:
+        for move in all_moves:
+            raw_score = move.get('score', 0)
+            leave_value = evaluate_leave(move.get('leave', []), True)
+            current_move_raw_plus_leave_eval = raw_score + leave_value
+            if current_move_raw_plus_leave_eval > best_raw_plus_leave_evaluation:
+                best_raw_plus_leave_evaluation = current_move_raw_plus_leave_eval
+                best_raw_plus_leave_play_candidate = move
+
+    if use_simulation and can_play:
+        sim_results = run_ai_simulation(
+            all_moves, rack, opponent_rack_len, tiles, blanks, board, bag,
+            num_ai_candidates, num_opponent_sims, num_post_sim_candidates,
+            is_silent_batch_run_param=True
+        )
+        if sim_results:
+            best_simulated_play_candidate = sim_results[0]['move']
+            best_simulated_play_final_score = sim_results[0]['final_score']
+
+    if can_exchange:
+        best_exchange_tiles, best_exchange_evaluation = find_best_exchange_option(
+            rack, tiles, blanks, bag_count, is_silent_batch_run_param=True
+        )
+
+    # --- Final Decision Logic ---
+    if can_play and best_raw_plus_leave_play_candidate:
+        # Use a fixed threshold for now, can be made dynamic later
+        # This is the logic from your old find_best_move
+        if best_exchange_tiles and (best_exchange_evaluation > best_raw_plus_leave_evaluation + 10.0):
+            return 'exchange', best_exchange_tiles
+        else:
+            if use_simulation and best_simulated_play_candidate:
+                return 'play', best_simulated_play_candidate
+            else:
+                return 'play', best_raw_plus_leave_play_candidate
+    elif best_exchange_tiles:
+        return 'exchange', best_exchange_tiles
+    else:
+        return 'pass', None
