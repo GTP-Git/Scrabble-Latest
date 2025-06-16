@@ -1,6 +1,6 @@
 # ai_engine.pyx
 
-#ai_engine_pyx - AK - 15JUN25
+#ai_engine_pyx - AK - 16JUN25
 #<3s batch
 #Ready for multithreading
 
@@ -1244,7 +1244,7 @@ cpdef find_main_word(list new_tiles, list tiles):
     else:
         return [], None
 
-cdef find_cross_word(tuple tile, list tiles, str main_orientation):
+cpdef find_cross_word(tuple tile, list tiles, str main_orientation):
     """Finds a cross word formed by a single tile. (Cythonized)"""
     cdef int r, c, min_row, max_row, min_col, max_col, rr, cc
     cdef list cross_word = []
@@ -1280,6 +1280,12 @@ cdef find_cross_word(tuple tile, list tiles, str main_orientation):
         return cross_word
     else:
         return []
+
+
+
+
+# In ai_engine.pyx
+# This function should be a cdef function.
 
 cdef _validate_and_get_words_formed(list new_tiles, list tiles):
     """
@@ -1350,6 +1356,8 @@ cdef _validate_and_get_words_formed(list new_tiles, list tiles):
 
     return True, [], valid_words_details
 
+
+
 cpdef get_words_formed_for_python(list new_tiles, list tiles):
     """
     A Python-callable wrapper for the internal word-finding and validation logic.
@@ -1361,6 +1369,8 @@ cpdef get_words_formed_for_python(list new_tiles, list tiles):
     # The caller (ai_turn) doesn't need to know if they were valid, as it's just checking length.
     return valid_word_details
 
+
+
 cpdef is_valid_play(list word_positions, list tiles_after_play, bint is_first_play_param, int initial_rack_size, list original_tiles_on_board, object rack_before_play, bint is_silent_batch_run_param=False):
     """Validate a potential play against game rules and dictionary. (Cythonized)"""
     cdef set newly_placed_positions_coords
@@ -1370,14 +1380,15 @@ cpdef is_valid_play(list word_positions, list tiles_after_play, bint is_first_pl
     cdef int r, c, min_col_new_tiles, max_col_new_tiles, temp_min_c, temp_max_c, c_check
     cdef int min_row_new_tiles, max_row_new_tiles, temp_min_r, temp_max_r, r_check
     cdef int r_conn, c_conn, dr, dc, nr, nc
+    cdef int r_item, c_item
+    cdef str l_item_dummy
 
     if not word_positions:
         return VC_INVALID_STRUCTURE_EMPTY_PLAY_C, False, "No tiles placed.", []
 
-    newly_placed_coords_list = []
-    for r_item, c_item, _ in word_positions:
-        newly_placed_coords_list.append((r_item, c_item))
-    newly_placed_positions_coords = set(newly_placed_coords_list)
+    newly_placed_positions_coords = set()
+    for r_item, c_item, l_item_dummy in word_positions:
+        newly_placed_positions_coords.add((r_item, c_item))
 
     is_bingo = (initial_rack_size == 7 and len(newly_placed_positions_coords) == 7)
 
@@ -1481,6 +1492,110 @@ cpdef is_valid_play(list word_positions, list tiles_after_play, bint is_first_pl
 
     return VC_VALID_C, is_bingo, None, all_words_details
 
+
+
+
+
+cpdef find_main_word_for_python(list new_tiles, list tiles):
+    """Python wrapper for the cdef find_main_word function."""
+    return find_main_word(new_tiles, tiles)
+
+cpdef find_cross_word_for_python(tuple tile, list tiles, str main_orientation):
+    """Python wrapper for the cdef find_cross_word function."""
+    return find_cross_word(tile, tiles, main_orientation)
+
+
+
+
+
+
+
+
+
+cpdef list get_all_formed_word_structures(list new_tiles, list tiles):
+    """
+    Finds all word structures, but does NOT validate them against the DAWG.
+    This is used for scoring phony words that the user allows.
+    It is intentionally separate from the validation path to keep validation fast.
+    """
+    cdef list all_word_structures = []
+    cdef set new_positions_set, seen_signatures
+    cdef list main_word_tiles, cross_word, temp_list_for_sorting
+    cdef str orientation
+    cdef tuple tile, signature, t
+    cdef int r_item, c_item
+    cdef str l_item_dummy
+
+    if not new_tiles:
+        return []
+
+    # Replace generator expression with a for loop
+    new_positions_set = set()
+    for r_item, c_item, l_item_dummy in new_tiles:
+        new_positions_set.add((r_item, c_item))
+
+    seen_signatures = set()
+
+    # Find main word
+    main_word_tiles, orientation = find_main_word(new_tiles, tiles)
+    if main_word_tiles:
+        # Replace list comprehension with a loop to create the signature
+        temp_list_for_sorting = []
+        for t in main_word_tiles:
+            temp_list_for_sorting.append(t)
+        signature = tuple(sorted(temp_list_for_sorting))
+        
+        if signature not in seen_signatures:
+            all_word_structures.append(main_word_tiles)
+            seen_signatures.add(signature)
+
+    # Find cross words
+    if main_word_tiles:  # Standard play with a main word
+        for tile in new_tiles:
+            if (tile[0], tile[1]) in new_positions_set:
+                cross_word = find_cross_word(tile, tiles, orientation)
+                if cross_word:
+                    # Replace list comprehension with a loop
+                    temp_list_for_sorting = []
+                    for t in cross_word:
+                        temp_list_for_sorting.append(t)
+                    signature = tuple(sorted(temp_list_for_sorting))
+
+                    if signature not in seen_signatures:
+                        all_word_structures.append(cross_word)
+                        seen_signatures.add(signature)
+    elif len(new_tiles) == 1:  # Single tile play, can form two words
+        tile = new_tiles[0]
+        # Horizontal word check
+        cross_h = find_cross_word(tile, tiles, "vertical")
+        if cross_h:
+            # Replace list comprehension with a loop
+            temp_list_for_sorting = []
+            for t in cross_h:
+                temp_list_for_sorting.append(t)
+            signature = tuple(sorted(temp_list_for_sorting))
+
+            if signature not in seen_signatures:
+                all_word_structures.append(cross_h)
+                seen_signatures.add(signature)
+        # Vertical word check
+        cross_v = find_cross_word(tile, tiles, "horizontal")
+        if cross_v:
+            # Replace list comprehension with a loop
+            temp_list_for_sorting = []
+            for t in cross_v:
+                temp_list_for_sorting.append(t)
+            signature = tuple(sorted(temp_list_for_sorting))
+
+            if signature not in seen_signatures:
+                all_word_structures.append(cross_v)
+                seen_signatures.add(signature)
+
+    return all_word_structures
+
+
+
+
 cpdef calculate_score(list new_tiles, list board, list tiles, set blanks, list words_formed_details):
     """Calculates the score for a play. (Cythonized)"""
     cdef int total_score = 0
@@ -1530,16 +1645,23 @@ cpdef float evaluate_leave(list rack, bint verbose=False, bint is_silent_batch_r
     Retrieves the pre-calculated leave value (float) from the LEAVE_LOOKUP_TABLE.
     """
     cdef int num_tiles = len(rack)
-    cdef str leave_key
+    cdef str leave_key, tile
     cdef object value
     cdef float leave_float
+    cdef list rack_with_question_marks
 
     if num_tiles == 0:
         return 0.0 
     if num_tiles > 6:
         return 0.0 
 
-    rack_with_question_marks = ['?' if tile == ' ' else tile for tile in rack]
+    rack_with_question_marks = []
+    for tile in rack:
+        if tile == ' ':
+            rack_with_question_marks.append('?')
+        else:
+            rack_with_question_marks.append(tile)
+            
     leave_key = "".join(sorted(rack_with_question_marks))
 
     value = LEAVE_LOOKUP_TABLE_C.get(leave_key)
@@ -1549,6 +1671,8 @@ cpdef float evaluate_leave(list rack, bint verbose=False, bint is_silent_batch_r
         return leave_float
     else:
         return 0.0
+
+
 
 # --- NEW: Cythonized get_remaining_tiles ---
 @cython.boundscheck(False)
@@ -1848,14 +1972,14 @@ cpdef tuple determine_best_action(
     the best action (play, exchange, pass, or pause for practice).
     Returns: tuple (action_chosen_str, move_details_obj_or_metadata)
     """
-    cdef list all_moves, best_exchange_tiles, bingo_plays
+    cdef list all_moves, best_exchange_tiles, bingo_plays, power_tiles_on_rack, power_tile_letters
     cdef object best_raw_plus_leave_play_candidate, best_simulated_play_candidate, best_first_move_endgame, best_plaid_move
     cdef float best_raw_plus_leave_evaluation, best_exchange_evaluation, best_simulated_play_final_score
     cdef bint can_play, can_exchange
     cdef int bag_count, total_tiles_on_racks, player_rack_len, i
     cdef float raw_score, leave_value, current_move_raw_plus_leave_eval
-    cdef object move, sim_results, checked_power_tiles, power_tiles_on_rack, bingo_move, word_list_to_check
-    cdef str word_str
+    cdef object move, sim_results, checked_power_tiles, bingo_move, word_list_to_check
+    cdef str word_str, tile
     cdef int word_len, current_index, most_probable_playable_bingo_index, threshold_to_use, bingo_len
     cdef dict most_probable_bingo_details
 
@@ -1883,7 +2007,8 @@ cpdef tuple determine_best_action(
 
     # --- Practice Mode Checks ---
     if practice_mode == "power_tiles":
-        checked_power_tiles = {letter_checks[i] for i in range(4)}
+        power_tile_letters = ['J', 'Q', 'X', 'Z']
+        checked_power_tiles = {power_tile_letters[i] for i in range(4) if letter_checks[i]}
         power_tiles_on_rack = [tile for tile in rack if tile in checked_power_tiles]
         if power_tiles_on_rack:
             # Return a PAUSE action with the specific tile to practice
@@ -1894,7 +2019,11 @@ cpdef tuple determine_best_action(
     if all_moves is None: all_moves = []
 
     if practice_mode == "bingo_bango_bongo":
-        bingo_plays = [m for m in all_moves if m.get('is_bingo', False)]
+        bingo_plays = []
+        for m in all_moves:
+            if m.get('is_bingo', False):
+                bingo_plays.append(m)
+        
         if bingo_plays:
             most_probable_playable_bingo_index = 999999
             most_probable_bingo_details = None
@@ -2199,8 +2328,8 @@ cpdef tuple negamax_endgame(list rack_player, list rack_opponent, list tiles, se
 
     return best_value, best_sequence
 
-@cython.boundscheck(False)
-@cython.wraparound(False)
+
+
 cpdef object solve_endgame(list rack_player, list opponent_rack, list tiles, set blanks, list board, int current_score_diff, bint is_silent_batch_run_param=False):
     """
     Top-level function to initiate the endgame solver. (Cythonized)
@@ -2213,10 +2342,11 @@ cpdef object solve_endgame(list rack_player, list opponent_rack, list tiles, set
     cdef int i, rank, num_to_print
     cdef float opp_perspective_score_diff, ai_final_score_diff_for_this_line, last_printed_score, current_score
     cdef bint valid_placement_sim
-    cdef object ai_first_move_obj, line_data
+    cdef object ai_first_move_obj, line_data, m
     cdef str sequence_str_parts_str
     cdef int r, c
     cdef str letter
+    cdef list playout_moves, other_moves
 
     initial_tiles_board_state = [row[:] for row in tiles]
     initial_blanks_board_state = blanks.copy()
