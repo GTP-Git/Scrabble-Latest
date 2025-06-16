@@ -2,9 +2,8 @@
 
 
 #python
-#Scrabble AK
-#Batch <3s
-#Ready for multithreading
+#Scrabble AL
+#Various bug fixes
 #16JUN25
 
 
@@ -7447,6 +7446,10 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
                         profiler = cProfile.Profile()
                         profiler.enable()
 
+                    # --- NEW: Set simulation flag ---
+                    state['is_simulating_for_ui'] = True
+                    # --- END NEW ---
+
                     if replay_mode:
                         # The state['tiles'] and state['blanks'] are now already correct.
                         # We just need to get the correct rack and bag for the simulation.
@@ -7505,6 +7508,10 @@ def _handle_mouse_down_simulation_config(event, state, drawn_rects):
                             is_silent_batch_run_param=is_silent_run_local
                         )
                     
+                    # --- NEW: Unset simulation flag ---
+                    state['is_simulating_for_ui'] = False
+                    # --- END NEW ---
+
                     if profiler:
                         profiler.disable()
                         stats_obj = pstats.Stats(profiler, stream=sys.stdout).sort_stats('cumulative')
@@ -10382,54 +10389,9 @@ def check_and_handle_game_over(state):
             if is_batch_running_local_check: 
                 batch_prefix = initial_game_config.get('batch_filename_prefix', 'UNKNOWN-BATCH')
                 individual_sgs_filename = f"{batch_prefix}-GAME-{current_batch_game_num}.sgs"
-                try:
-                    if not isinstance(current_game_initial_racks, list) or len(current_game_initial_racks) != 2:
-                         print(f"  ERROR: Invalid current_game_initial_racks for SGS save: {current_game_initial_racks}. Using empty racks.")
-                         sgs_initial_racks_to_save = [[], []]
-                    else:
-                         sgs_initial_racks_to_save = current_game_initial_racks
-                    
-                    # --- MODIFICATION: Ensure full game_settings are saved for batch games ---
-                    batch_game_settings = {
-                        'use_endgame_solver': initial_game_config.get('use_endgame_solver', False),
-                        'use_ai_simulation': initial_game_config.get('use_ai_simulation', False),
-                        'is_ai_config': initial_game_config.get('is_ai', [False, False]),
-                        'letter_checks': initial_game_config.get('letter_checks', [True]*4), # Assuming these might be in initial_game_config for some batch types
-                        'number_checks': initial_game_config.get('number_checks', [True]*6), # Assuming these might be in initial_game_config
-                        'ai_simulation_parameters': { 
-                            'num_candidates': initial_game_config.get('ai_sim_num_candidates', DEFAULT_AI_CANDIDATES),
-                            'num_opponent_sims': initial_game_config.get('ai_sim_num_opponent_sims', DEFAULT_OPPONENT_SIMULATIONS),
-                            'num_post_sim_candidates': initial_game_config.get('ai_sim_num_post_sim_candidates', DEFAULT_POST_SIM_CANDIDATES)
-                        },
-                        'bbb_7l_max_prob': initial_game_config.get('bbb_7l_max_prob', 1000), 
-                        'bbb_8l_max_prob': initial_game_config.get('bbb_8l_max_prob', 1000)
-                    }
-                    # --- END MODIFICATION ---
-
-                    game_data_for_sgs = {
-                        'sgs_version': "1.0", # Or "1.1" if you want to signify it *could* have been in-progress
-                        'player_names': player_names,
-                        'sgs_initial_bag': state.get('sgs_initial_bag', []),
-                        'initial_racks_sgs': sgs_initial_racks_to_save,
-                        'full_move_history': move_history,
-                        'final_scores_adjusted': final_scores_calc, 
-                        'game_mode_info': {
-                            'game_mode_str': initial_game_config.get('game_mode'), # From batch config
-                            'practice_mode_str': None # Batch games are not typically practice modes
-                        },
-                        'game_settings': batch_game_settings # Use the more complete settings
-                    }
-                    save_game_sgs(individual_sgs_filename, game_data_for_sgs, \
-                                  show_success_dialog=False, \
-                                  is_silent_batch_run_param=is_silent_run) 
-                    if not is_silent_run: 
-                        print(f"  Saved individual game SGS: {individual_sgs_filename}")
-                except Exception as e:
-                    print(f"  ERROR saving individual game SGS '{individual_sgs_filename}': {e}")
-                    import traceback
-                    traceback.print_exc()
-                    individual_sgs_filename = "SAVE_ERROR"
-
+                
+                # The file is NOT saved here. The filename is just passed for stat collection.
+                # The actual saving is buffered and handled in execute_game_session.
                 game_stats = collect_game_stats(current_batch_game_num, player_names, final_scores_calc, \
                                                 move_history, individual_sgs_filename,
                                                 is_silent_batch_run_param=is_silent_run) 
@@ -11198,6 +11160,35 @@ def reset_for_play_again(is_ai, practice_mode):
 
 
 
+def save_sgs_batch(sgs_data_buffer, is_silent_run):
+    """
+    Iterates through a buffer of completed game data and saves each to an SGS file.
+    
+    Args:
+        sgs_data_buffer (list): A list of tuples, where each tuple is 
+                                (filename, game_data_dict).
+        is_silent_run (bool): If True, suppresses console output.
+    """
+    if not sgs_data_buffer:
+        return
+
+    if not is_silent_run:
+        print(f"--- Writing batch of {len(sgs_data_buffer)} SGS files to disk... ---")
+
+    for filename, game_data in sgs_data_buffer:
+        try:
+            save_game_sgs(filename, game_data, show_success_dialog=False, is_silent_batch_run_param=True)
+        except Exception as e:
+            # Log error but continue trying to save others
+            print(f"  ERROR saving individual game SGS '{filename}' during batch write: {e}")
+    
+    if not is_silent_run:
+        print(f"--- Batch write complete. ---")
+
+
+
+
+
 
 def execute_game_session(is_initialized_from_outer_loop_param):
     # MODULE-LEVEL GLOBALS that this function and its helpers will use/modify
@@ -11265,6 +11256,11 @@ def execute_game_session(is_initialized_from_outer_loop_param):
     # --- MODIFICATION START: Add Pygame Clock ---
     clock = pygame.time.Clock()
     # --- MODIFICATION END ---
+
+    # --- NEW: Initialize SGS data buffer for batch runs ---
+    sgs_data_buffer = []
+    SGS_WRITE_BATCH_SIZE = 1000
+    # --- END NEW ---
 
     try:
         for game_num_loop_internal in range(1, num_loops_exec + 1):
@@ -11382,8 +11378,10 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                 if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
                     current_state_dict['drawn_rects'] = draw_game_screen(screen, current_state_dict)
                     pygame.display.flip()
-                    clock.tick(60)
-                elif is_batch_running: 
+                    # --- MODIFICATION: Use the new flag to skip ticking during UI simulation ---
+                    if not current_state_dict.get('is_simulating_for_ui', False):
+                        clock.tick(60)
+                elif is_batch_running and not current_state_dict.get('is_simulating_for_ui', False): 
                     pygame.time.wait(1) 
 
                 # 5. ONLY NOW, after drawing, check if the AI should take its turn
@@ -11391,6 +11389,51 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                 if not current_state_dict.get('paused_for_power_tile') and not current_state_dict.get('paused_for_bingo_practice'):
                     current_state_dict = handle_ai_turn_trigger(current_state_dict)
                 # --- END CORRECTED LOGIC FLOW ---
+
+
+            # --- MODIFICATION START: Batch SGS writing logic ---
+            if is_batch_running and current_state_dict.get('game_over_state'):
+                # This block runs after a single batch game's inner loop has finished.
+                batch_prefix = initial_game_config.get('batch_filename_prefix', 'UNKNOWN-BATCH')
+                individual_sgs_filename = f"{batch_prefix}-GAME-{current_batch_game_num}.sgs"
+                
+                # Construct the game data dictionary to be saved
+                batch_game_settings = {
+                    'use_endgame_solver': initial_game_config.get('use_endgame_solver', False),
+                    'use_ai_simulation': initial_game_config.get('use_ai_simulation', False),
+                    'is_ai_config': initial_game_config.get('is_ai', [False, False]),
+                    'letter_checks': initial_game_config.get('letter_checks', [True]*4),
+                    'number_checks': initial_game_config.get('number_checks', [True]*6),
+                    'ai_simulation_parameters': {
+                        'num_candidates': initial_game_config.get('ai_sim_num_candidates', DEFAULT_AI_CANDIDATES),
+                        'num_opponent_sims': initial_game_config.get('ai_sim_num_opponent_sims', DEFAULT_OPPONENT_SIMULATIONS),
+                        'num_post_sim_candidates': initial_game_config.get('ai_sim_num_post_sim_candidates', DEFAULT_POST_SIM_CANDIDATES)
+                    },
+                    'bbb_7l_max_prob': initial_game_config.get('bbb_7l_max_prob', 1000),
+                    'bbb_8l_max_prob': initial_game_config.get('bbb_8l_max_prob', 1000)
+                }
+                game_data_for_sgs = {
+                    'sgs_version': "1.0",
+                    'player_names': player_names,
+                    'sgs_initial_bag': current_state_dict.get('sgs_initial_bag', []),
+                    'initial_racks_sgs': current_state_dict.get('initial_racks', [[],[]]),
+                    'full_move_history': current_state_dict.get('move_history', []),
+                    'final_scores_adjusted': current_state_dict.get('final_scores', [0,0]),
+                    'game_mode_info': {
+                        'game_mode_str': initial_game_config.get('game_mode'),
+                        'practice_mode_str': None
+                    },
+                    'game_settings': batch_game_settings
+                }
+                
+                # Append the filename and data to the buffer instead of writing immediately
+                sgs_data_buffer.append((individual_sgs_filename, game_data_for_sgs))
+
+                # Check if it's time to write the batch of SGS files
+                if (game_num_loop_internal % SGS_WRITE_BATCH_SIZE == 0) or (game_num_loop_internal == total_batch_games):
+                    save_sgs_batch(sgs_data_buffer, is_silent_run=(not DEV_VISUALIZE_BATCH_ENABLED_SESSION))
+                    sgs_data_buffer.clear() # Clear the buffer after writing
+            # --- MODIFICATION END ---
 
 
             game_mode = current_state_dict['game_mode']
@@ -11434,6 +11477,14 @@ def execute_game_session(is_initialized_from_outer_loop_param):
             print("\n--- Game Interrupted by User (Ctrl+C) ---")
             _module_level_batch_stop_requested_internal = True 
             _return_to_mode_selection_internal = True 
+
+    finally:
+        # --- NEW: This block ensures any remaining buffered SGS files are saved ---
+        if is_batch_running and sgs_data_buffer:
+            print(f"--- Interruption/End of Batch: Saving remaining {len(sgs_data_buffer)} buffered SGS files... ---")
+            save_sgs_batch(sgs_data_buffer, is_silent_run=(not DEV_VISUALIZE_BATCH_ENABLED_SESSION))
+            sgs_data_buffer.clear()
+        # --- END NEW ---
 
     if is_batch_running and batch_results: 
         total_batch_duration_seconds = time.perf_counter() - batch_start_time
