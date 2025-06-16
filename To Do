@@ -1,6 +1,8 @@
 To-Do List
 
--- Set up batch games to run in threads/cores.
+-- In Lookup dialog, give option to search for leave values
+
+-- Set up batch games to run in threads/cores. (Tried, failed, will try again)
 
 -- Can the Lookup feature also serve as a word search, for ex., LO? returns LOG, LOT..., etc. Can it also return the probability of each word, within it's length? For ex, LOVED is 2880 w/in the fives.
 
@@ -234,4 +236,4 @@ ________________________________________________
                                                                                                                                                              -- Simulation results should show as many results as you sim, instead of just the top five.
 -- Create a batch setting that runs games where the AI only picks move based on highest score and calculates nothing else. Call it Plaid. :)
 
-                                                                                                                                                           
+-- Gamified 8LB with increasing/decreasing difficulty depending on puzzle success
