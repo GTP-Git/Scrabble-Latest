@@ -2,8 +2,8 @@
 
 
 #python
-#Scrabble AL
-#Various bug fixes
+#Scrabble AM
+#Gamify 8LB
 #16JUN25
 
 
@@ -2088,126 +2088,264 @@ def select_seven_letter_word(removed_letter, seven_letter_words):
 
 
 def eight_letter_practice(reuse_probability_input=None):
-    """Handles the setup dialog and initialization for 8-Letter Bingo practice.
-    Print statements are now conditional based on DEV_VISUALIZE_BATCH_ENABLED_SESSION.
     """
-    global DEV_VISUALIZE_BATCH_ENABLED_SESSION # Access global flag
+    Handles the setup dialog for 8-Letter Bingo practice, including the new "Gamify" mode.
+    This is a full and complete function.
+    """
+    global DEV_VISUALIZE_BATCH_ENABLED_SESSION, screen, dialog_font, ui_font, button_font, DIALOG_COLOR, BLACK, WHITE, BUTTON_COLOR, BUTTON_HOVER, WINDOW_WIDTH, WINDOW_HEIGHT, CENTER_SQUARE, GRID_SIZE
 
-    # Determine if prints should be made for this function call
-    # For interactive dialogs/practice setup, usually we want prints unless specifically told otherwise.
-    # Here, DEV_VISUALIZE_BATCH_ENABLED_SESSION acts as a general "verbose/debug" flag for non-core-gameplay elements.
-    can_print_info = DEV_VISUALIZE_BATCH_ENABLED_SESSION # If True, prints are shown. If False, suppressed.
-    # If DEV_VISUALIZE_BATCH_ENABLED_SESSION is not yet defined (e.g. very early startup), default to printing.
+    can_print_info = DEV_VISUALIZE_BATCH_ENABLED_SESSION
     if 'DEV_VISUALIZE_BATCH_ENABLED_SESSION' not in globals():
         can_print_info = True
-
 
     try:
         with open("7-letter-list.txt", "r") as seven_file, open("8-letter-list.txt", "r") as eight_file:
             seven_letter_words = [line.strip().upper() for line in seven_file.readlines()]
             eight_letter_words = [line.strip().upper() for line in eight_file.readlines()]
-    except FileNotFoundError: 
-        # Error messages should always print
+    except FileNotFoundError:
         print("Error: Could not find 7-letter-list.txt or 8-letter-list.txt")
         return False, None, None, None, None, None, None
-    if not seven_letter_words or not eight_letter_words: 
-        print("Error: Word list files are empty.") # Error, always print
+    if not seven_letter_words or not eight_letter_words:
+        print("Error: Word list files are empty.")
         return False, None, None, None, None, None, None
+
+    # --- NEW: Dialog state for both modes ---
+    dialog_width, dialog_height = 450, 320  # Increased size for new options
+    dialog_x = (WINDOW_WIDTH - dialog_width) // 2
+    dialog_y = (WINDOW_HEIGHT - dialog_height) // 2
+
+    # Gamify mode state
+    gamify_checked = False
+    gamify_min_prob_input = "500"
+    gamify_max_goal_input = "3500"
+    gamify_increment_input = "250"
+
+    # Standard mode state
+    standard_max_prob_input = "1000"
     
-    dialog_width, dialog_height = 300, 150; dialog_x = (WINDOW_WIDTH - dialog_width) // 2; dialog_y = (WINDOW_HEIGHT - dialog_height) // 2
+    active_input_field = 'standard' # 'standard', 'min', 'max', 'increment'
     
-    proceed_to_go_logic = False 
+    dialog_running = True
+    while dialog_running:
+        screen.fill(WHITE)
+        pygame.draw.rect(screen, DIALOG_COLOR, (dialog_x, dialog_y, dialog_width, dialog_height))
+        pygame.draw.rect(screen, BLACK, (dialog_x, dialog_y, dialog_width, dialog_height), 2)
+        
+        title_text = dialog_font.render("8-Letter Bingo Options", True, BLACK)
+        screen.blit(title_text, (dialog_x + 10, dialog_y + 10))
 
-    if reuse_probability_input is not None:
-        probability_input = reuse_probability_input
-        text_box_active = False 
-        proceed_to_go_logic = True 
-    else:
-        probability_input = "" 
-        text_box_active = True 
+        # --- Standard Mode Input ---
+        y_offset = dialog_y + 50
+        standard_label_surf = ui_font.render("Max Probability Index:", True, BLACK)
+        screen.blit(standard_label_surf, (dialog_x + 20, y_offset + 5))
+        standard_input_rect = pygame.Rect(dialog_x + 250, y_offset, 150, 30)
+        pygame.draw.rect(screen, WHITE, standard_input_rect)
+        pygame.draw.rect(screen, BLACK, standard_input_rect, 1 if active_input_field != 'standard' else 2)
+        standard_text_surf = ui_font.render(standard_max_prob_input, True, BLACK)
+        screen.blit(standard_text_surf, (standard_input_rect.x + 5, standard_input_rect.y + 5))
+        if active_input_field == 'standard' and int(time.time() * 2) % 2 == 0:
+            cursor_x = standard_input_rect.x + 5 + standard_text_surf.get_width()
+            pygame.draw.line(screen, BLACK, (cursor_x, standard_input_rect.y + 5), (cursor_x, standard_input_rect.bottom - 5), 1)
 
-    if not proceed_to_go_logic: 
-        while True: 
-            screen.fill(WHITE); pygame.draw.rect(screen, DIALOG_COLOR, (dialog_x, dialog_y, dialog_width, dialog_height)); pygame.draw.rect(screen, BLACK, (dialog_x, dialog_y, dialog_width, dialog_height), 2)
-            title_text = dialog_font.render("8-Letter Bingo Options", True, BLACK); screen.blit(title_text, (dialog_x + 10, dialog_y + 10))
-            prob_text = ui_font.render("Probability", True, BLACK); screen.blit(prob_text, (dialog_x + 20, dialog_y + 50))
-            text_box_rect = pygame.Rect(dialog_x + 120, dialog_y + 45, 150, 30); pygame.draw.rect(screen, WHITE, text_box_rect); pygame.draw.rect(screen, BLACK, text_box_rect, 1 if not text_box_active else 2)
-            input_text_surf = ui_font.render(probability_input, True, BLACK); screen.blit(input_text_surf, (text_box_rect.x + 5, text_box_rect.y + 5))
-            if text_box_active and int(time.time() * 2) % 2 == 0: 
-                cursor_x = text_box_rect.x + 5 + input_text_surf.get_width()
-                pygame.draw.line(screen, BLACK, (cursor_x, text_box_rect.y + 5), (cursor_x, text_box_rect.bottom - 5), 1)
+        # --- Gamify Checkbox ---
+        y_offset += 50
+        gamify_checkbox_rect = pygame.Rect(dialog_x + 20, y_offset, 20, 20)
+        draw_checkbox(screen, gamify_checkbox_rect.x, gamify_checkbox_rect.y, gamify_checked)
+        gamify_label_surf = ui_font.render("Gamify Practice", True, BLACK)
+        screen.blit(gamify_label_surf, (gamify_checkbox_rect.right + 10, y_offset))
 
-            go_rect = pygame.Rect(dialog_x + 50, dialog_y + 100, 100, 30); cancel_rect = pygame.Rect(dialog_x + 160, dialog_y + 100, 100, 30)
-            pygame.draw.rect(screen, BUTTON_COLOR, go_rect); pygame.draw.rect(screen, BUTTON_COLOR, cancel_rect)
-            go_text = button_font.render("Go", True, BLACK); cancel_text = button_font.render("Cancel", True, BLACK)
-            screen.blit(go_text, go_text.get_rect(center=go_rect.center)); screen.blit(cancel_text, cancel_text.get_rect(center=cancel_rect.center))
+        # --- Gamify Mode Inputs (only drawn if checked) ---
+        gamify_min_rect, gamify_max_rect, gamify_inc_rect = None, None, None
+        if gamify_checked:
+            y_offset += 40
+            # Min Prob
+            min_label_surf = ui_font.render("Min Probability:", True, BLACK)
+            screen.blit(min_label_surf, (dialog_x + 40, y_offset + 5))
+            gamify_min_rect = pygame.Rect(dialog_x + 250, y_offset, 150, 30)
+            pygame.draw.rect(screen, WHITE, gamify_min_rect)
+            pygame.draw.rect(screen, BLACK, gamify_min_rect, 1 if active_input_field != 'min' else 2)
+            min_text_surf = ui_font.render(gamify_min_prob_input, True, BLACK)
+            screen.blit(min_text_surf, (gamify_min_rect.x + 5, gamify_min_rect.y + 5))
+            if active_input_field == 'min' and int(time.time() * 2) % 2 == 0:
+                cursor_x = gamify_min_rect.x + 5 + min_text_surf.get_width()
+                pygame.draw.line(screen, BLACK, (cursor_x, gamify_min_rect.y + 5), (cursor_x, gamify_min_rect.bottom - 5), 1)
             
-            dialog_should_close = False
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT: pygame.quit(); sys.exit()
-                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                    x_mouse, y_mouse = event.pos 
-                    text_box_active = text_box_rect.collidepoint(x_mouse, y_mouse)
-                    if go_rect.collidepoint(x_mouse, y_mouse):
-                        proceed_to_go_logic = True
-                        dialog_should_close = True 
-                    elif cancel_rect.collidepoint(x_mouse, y_mouse): 
-                        return False, None, None, None, None, None, None 
-                elif event.type == pygame.KEYDOWN and text_box_active:
-                    if event.key == pygame.K_BACKSPACE: probability_input = probability_input[:-1]
-                    elif event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
-                        proceed_to_go_logic = True
-                        dialog_should_close = True
-                    elif event.unicode.isdigit(): probability_input += event.unicode
-            
-            pygame.display.flip()
-            if dialog_should_close:
-                break 
-    if not proceed_to_go_logic: 
-        return False, None, None, None, None, None, probability_input 
+            y_offset += 40
+            # Max Goal
+            max_label_surf = ui_font.render("Max Goal:", True, BLACK)
+            screen.blit(max_label_surf, (dialog_x + 40, y_offset + 5))
+            gamify_max_rect = pygame.Rect(dialog_x + 250, y_offset, 150, 30)
+            pygame.draw.rect(screen, WHITE, gamify_max_rect)
+            pygame.draw.rect(screen, BLACK, gamify_max_rect, 1 if active_input_field != 'max' else 2)
+            max_text_surf = ui_font.render(gamify_max_goal_input, True, BLACK)
+            screen.blit(max_text_surf, (gamify_max_rect.x + 5, gamify_max_rect.y + 5))
+            if active_input_field == 'max' and int(time.time() * 2) % 2 == 0:
+                cursor_x = gamify_max_rect.x + 5 + max_text_surf.get_width()
+                pygame.draw.line(screen, BLACK, (cursor_x, gamify_max_rect.y + 5), (cursor_x, gamify_max_rect.bottom - 5), 1)
 
-    max_index = len(eight_letter_words) 
-    if probability_input.isdigit(): 
-        prob_val = int(probability_input)
-        max_index = min(max(1, prob_val), len(eight_letter_words))
-    
-    selected_eight = random.choice(eight_letter_words[:max_index])
+            y_offset += 40
+            # Increment
+            inc_label_surf = ui_font.render("Increment:", True, BLACK)
+            screen.blit(inc_label_surf, (dialog_x + 40, y_offset + 5))
+            gamify_inc_rect = pygame.Rect(dialog_x + 250, y_offset, 150, 30)
+            pygame.draw.rect(screen, WHITE, gamify_inc_rect)
+            pygame.draw.rect(screen, BLACK, gamify_inc_rect, 1 if active_input_field != 'increment' else 2)
+            inc_text_surf = ui_font.render(gamify_increment_input, True, BLACK)
+            screen.blit(inc_text_surf, (gamify_inc_rect.x + 5, gamify_inc_rect.y + 5))
+            if active_input_field == 'increment' and int(time.time() * 2) % 2 == 0:
+                cursor_x = gamify_inc_rect.x + 5 + inc_text_surf.get_width()
+                pygame.draw.line(screen, BLACK, (cursor_x, gamify_inc_rect.y + 5), (cursor_x, gamify_inc_rect.bottom - 5), 1)
+
+        # --- Go / Cancel Buttons ---
+        go_rect = pygame.Rect(dialog_x + (dialog_width // 2) - 110, dialog_y + dialog_height - 40, 100, 30)
+        cancel_rect = pygame.Rect(dialog_x + (dialog_width // 2) + 10, dialog_y + dialog_height - 40, 100, 30)
+        pygame.draw.rect(screen, BUTTON_COLOR, go_rect)
+        pygame.draw.rect(screen, BUTTON_COLOR, cancel_rect)
+        go_text = button_font.render("Go", True, BLACK)
+        cancel_text = button_font.render("Cancel", True, BLACK)
+        screen.blit(go_text, go_text.get_rect(center=go_rect.center))
+        screen.blit(cancel_text, cancel_text.get_rect(center=cancel_rect.center))
+
+        # --- Event Handling ---
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                x_mouse, y_mouse = event.pos
+                if standard_input_rect.collidepoint(x_mouse, y_mouse):
+                    active_input_field = 'standard'
+                elif gamify_checkbox_rect.collidepoint(x_mouse, y_mouse):
+                    gamify_checked = not gamify_checked
+                    active_input_field = 'min' if gamify_checked else 'standard'
+                elif gamify_checked and gamify_min_rect and gamify_min_rect.collidepoint(x_mouse, y_mouse):
+                    active_input_field = 'min'
+                elif gamify_checked and gamify_max_rect and gamify_max_rect.collidepoint(x_mouse, y_mouse):
+                    active_input_field = 'max'
+                elif gamify_checked and gamify_inc_rect and gamify_inc_rect.collidepoint(x_mouse, y_mouse):
+                    active_input_field = 'increment'
+                elif go_rect.collidepoint(x_mouse, y_mouse):
+                    dialog_running = False # Exit loop to process and return
+                elif cancel_rect.collidepoint(x_mouse, y_mouse):
+                    return False, None, None, None, None, None, None
+                else:
+                    active_input_field = None
+
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    return False, None, None, None, None, None, None
+                if event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
+                    dialog_running = False # Exit loop to process and return
+                    break
+                
+                current_input_str = ""
+                if active_input_field == 'standard': current_input_str = standard_max_prob_input
+                elif active_input_field == 'min': current_input_str = gamify_min_prob_input
+                elif active_input_field == 'max': current_input_str = gamify_max_goal_input
+                elif active_input_field == 'increment': current_input_str = gamify_increment_input
+
+                if event.key == pygame.K_BACKSPACE:
+                    current_input_str = current_input_str[:-1]
+                elif event.unicode.isdigit():
+                    current_input_str += event.unicode
+                
+                if active_input_field == 'standard': standard_max_prob_input = current_input_str
+                elif active_input_field == 'min': gamify_min_prob_input = current_input_str
+                elif active_input_field == 'max': gamify_max_goal_input = current_input_str
+                elif active_input_field == 'increment': gamify_increment_input = current_input_str
+        
+        pygame.display.flip()
+
+    # --- Process and Return Values ---
+    gamified_params = None
+    if gamify_checked:
+        try:
+            min_p = int(gamify_min_prob_input)
+            max_g = int(gamify_max_goal_input)
+            inc = int(gamify_increment_input)
+            if not (min_p > 0 and max_g > 0 and inc > 0 and min_p < max_g):
+                show_message_dialog("Gamify values must be positive numbers, and Min must be less than Max Goal.", "Input Error")
+                return False, None, None, None, None, None, None
+            gamified_params = {'min': min_p, 'max_goal': max_g, 'increment': inc}
+            
+            # Use the gamified logic for word selection
+            # The starting range is Min to Min + Increment
+            max_index = min_p + inc
+            # Ensure the starting range doesn't exceed the list bounds
+            if max_index > len(eight_letter_words): max_index = len(eight_letter_words)
+            if min_p >= max_index:
+                show_message_dialog("Min probability is too high for the given increment. No words in range.", "Input Error")
+                return False, None, None, None, None, None, None
+            selected_eight = random.choice(eight_letter_words[min_p-1:max_index])
+
+        except (ValueError, TypeError):
+            show_message_dialog("Gamify values must be valid numbers.", "Input Error")
+            return False, None, None, None, None, None, None
+    else: # Standard mode
+        try:
+            max_index = int(standard_max_prob_input)
+            max_index = min(max(1, max_index), len(eight_letter_words))
+            selected_eight = random.choice(eight_letter_words[:max_index])
+        except (ValueError, TypeError):
+            show_message_dialog("Max Probability must be a valid number.", "Input Error")
+            return False, None, None, None, None, None, None
+
     if can_print_info:
         print("Selected 8-letter word:", selected_eight)
-    
-    remove_idx = random.randint(0, 7); removed_letter = selected_eight[remove_idx]; removed_eight = selected_eight[:remove_idx] + selected_eight[remove_idx + 1:]
+
+    remove_idx = random.randint(0, 7)
+    removed_letter = selected_eight[remove_idx]
+    removed_eight = selected_eight[:remove_idx] + selected_eight[remove_idx + 1:]
     if can_print_info:
         print("Player 1 rack (7 letters):", removed_eight)
         print("Removed letter:", removed_letter)
-    
+
     selected_seven = select_seven_letter_word(removed_letter, seven_letter_words)
-    if selected_seven is None: 
-        print("Error: Could not find a suitable 7-letter word.") # Error, always print
-        return False, None, None, None, None, None, probability_input
+    if selected_seven is None:
+        print("Error: Could not find a suitable 7-letter word.")
+        return False, None, None, None, None, None, None
     if can_print_info:
         print("Selected 7-letter word for board:", selected_seven)
-    
-    board_setup, _, tiles_setup = create_board(); local_racks_setup = [[], []]; local_blanks_setup = set(); local_racks_setup[0] = sorted(list(removed_eight)); local_racks_setup[1] = [] 
-    center_r, center_c = CENTER_SQUARE; word_len = len(selected_seven); start_offset = word_len // 2; place_horizontally = random.choice([True, False]); placement_successful = False
+
+    board_setup, _, tiles_setup = create_board()
+    local_racks_setup = [[], []]
+    local_blanks_setup = set()
+    local_racks_setup[0] = sorted(list(removed_eight))
+    local_racks_setup[1] = []
+    center_r, center_c = CENTER_SQUARE
+    word_len = len(selected_seven)
+    start_offset = word_len // 2
+    place_horizontally = random.choice([True, False])
+    placement_successful = False
     if place_horizontally:
         start_c_place = center_c - start_offset
         if 0 <= start_c_place and start_c_place + word_len <= GRID_SIZE:
-            for i, letter in enumerate(selected_seven): tiles_setup[center_r][start_c_place + i] = letter
+            for i, letter in enumerate(selected_seven):
+                tiles_setup[center_r][start_c_place + i] = letter
             placement_successful = True
             if can_print_info:
                 print(f"Placed '{selected_seven}' horizontally at ({center_r},{start_c_place})")
-    if not placement_successful: 
+    if not placement_successful:
         start_r_place = center_r - start_offset
         if 0 <= start_r_place and start_r_place + word_len <= GRID_SIZE:
-            for i, letter in enumerate(selected_seven): tiles_setup[start_r_place + i][center_c] = letter
+            for i, letter in enumerate(selected_seven):
+                tiles_setup[start_r_place + i][center_c] = letter
             placement_successful = True
             if can_print_info:
                 print(f"Placed '{selected_seven}' vertically at ({start_r_place},{center_c})")
-    if not placement_successful: 
-        print("Error: Could not place 7-letter word centered H or V.") # Error, always print
-        return False, None, None, None, None, None, probability_input
-    local_bag_setup = []; 
-    return True, board_setup, tiles_setup, local_racks_setup, local_blanks_setup, local_bag_setup, probability_input
+    if not placement_successful:
+        print("Error: Could not place 7-letter word centered H or V.")
+        return False, None, None, None, None, None, None
+    local_bag_setup = []
+    
+    # Return a dictionary for the practice parameters
+    practice_params = {
+        'gamify_active': gamify_checked,
+        'gamified_params': gamified_params,
+        'standard_max_prob': int(standard_max_prob_input) if not gamify_checked else None
+    }
+
+    return True, board_setup, tiles_setup, local_racks_setup, local_blanks_setup, local_bag_setup, practice_params
 
 
 
@@ -2604,7 +2742,7 @@ def mode_selection_screen():
                                             showing_power_tiles_dialog = True
                                         elif selected_practice_option == "8-Letter Bingos":
                                             print("--- mode_selection_screen(): 8-Letter Bingo practice selected. Calling eight_letter_practice()... ---")
-                                            proceed, p_board, p_tiles, p_racks, p_blanks, p_bag, eight_letter_prob_input = eight_letter_practice()
+                                            proceed, p_board, p_tiles, p_racks, p_blanks, p_bag, practice_params = eight_letter_practice()
                                             if proceed:
                                                 practice_mode = "eight_letter"
                                                 selected_mode = MODE_HVH 
@@ -2614,7 +2752,7 @@ def mode_selection_screen():
                                                     "board": p_board, "tiles": p_tiles, "racks": p_racks,
                                                     "blanks": p_blanks, "bag": p_bag, "first_play": False,
                                                     "scores": [0, 0], "turn": 1,
-                                                    "eight_letter_probability_input": eight_letter_prob_input
+                                                    "practice_params": practice_params # Store the new params dict
                                                 }
                                                 print(f"--- mode_selection_screen(): 8-Letter practice setup successful. Selected mode: {selected_mode} ---")
                                                 break 
@@ -2898,6 +3036,86 @@ def mode_selection_screen():
             bbb_8l_max_prob_input_str
         )
         return selected_mode, standard_game_settings
+
+
+
+
+def _setup_next_8lb_puzzle(min_prob, current_max_prob):
+    """
+    Sets up the board for the next 8-Letter Bingo puzzle based on a given probability range.
+    This is a helper function for the gamified practice mode.
+    This is a full and complete function.
+    """
+    global DEV_VISUALIZE_BATCH_ENABLED_SESSION, CENTER_SQUARE, GRID_SIZE
+
+    can_print_info = DEV_VISUALIZE_BATCH_ENABLED_SESSION
+    if 'DEV_VISUALIZE_BATCH_ENABLED_SESSION' not in globals():
+        can_print_info = True
+
+    try:
+        with open("7-letter-list.txt", "r") as seven_file, open("8-letter-list.txt", "r") as eight_file:
+            seven_letter_words = [line.strip().upper() for line in seven_file.readlines()]
+            eight_letter_words = [line.strip().upper() for line in eight_file.readlines()]
+    except FileNotFoundError:
+        print("Error: Could not find 7-letter-list.txt or 8-letter-list.txt for puzzle setup.")
+        return None, None, None, None, None, None
+
+    # Ensure the range is valid
+    list_len = len(eight_letter_words)
+    min_idx = min_prob - 1
+    max_idx = current_max_prob
+    if min_idx < 0: min_idx = 0
+    if max_idx > list_len: max_idx = list_len
+    if min_idx >= max_idx:
+        print(f"Error: Invalid probability range for puzzle setup. Min index: {min_idx}, Max index: {max_idx}")
+        # Default to a valid word if the range is bad
+        selected_eight = random.choice(eight_letter_words)
+    else:
+        selected_eight = random.choice(eight_letter_words[min_idx:max_idx])
+
+    if can_print_info:
+        print(f"--- Setting up next 8LB puzzle (Range: {min_prob}-{current_max_prob}) ---")
+        print("Selected 8-letter word:", selected_eight)
+
+    remove_idx = random.randint(0, 7)
+    removed_letter = selected_eight[remove_idx]
+    player_rack_seven_letters = sorted(list(selected_eight[:remove_idx] + selected_eight[remove_idx + 1:]))
+
+    if can_print_info:
+        print("Player 1 rack (7 letters):", "".join(player_rack_seven_letters))
+
+    selected_seven = select_seven_letter_word(removed_letter, seven_letter_words)
+    if selected_seven is None:
+        print("Error: Could not find a suitable 7-letter word for puzzle setup.")
+        return None, None, None, None, None, None
+
+    if can_print_info:
+        print("Selected 7-letter word for board:", selected_seven)
+
+    board_setup, _, tiles_setup = create_board()
+    place_horizontally = random.choice([True, False])
+    word_len = len(selected_seven)
+    start_offset = word_len // 2
+    placement_successful = False
+
+    if place_horizontally:
+        start_c = CENTER_SQUARE[1] - start_offset
+        if 0 <= start_c and start_c + word_len <= GRID_SIZE:
+            for i, letter in enumerate(selected_seven):
+                tiles_setup[CENTER_SQUARE[0]][start_c + i] = letter
+            placement_successful = True
+    if not placement_successful:
+        start_r = CENTER_SQUARE[0] - start_offset
+        if 0 <= start_r and start_r + word_len <= GRID_SIZE:
+            for i, letter in enumerate(selected_seven):
+                tiles_setup[start_r + i][CENTER_SQUARE[1]] = letter
+            placement_successful = True
+
+    if not placement_successful:
+        print("Error: Could not place 7-letter word on board for puzzle setup.")
+        return None, None, None, None, None, None
+
+    return board_setup, tiles_setup, player_rack_seven_letters, selected_eight, True, None
 
 
 
@@ -3724,27 +3942,27 @@ def show_message_dialog(message, title="Message"):
 
 
 
-def draw_practice_end_dialog(message):
+def draw_practice_end_dialog(message, state):
     """
-    Draw the dialog shown at the end of a practice puzzle,
-    dynamically adjusting height based on the message content.
+    Draw the dialog shown at the end of a practice puzzle.
+    This is a full and complete function.
     """
-    # --- MODIFICATION START: Dynamic Height Calculation ---
-    base_dialog_width = 400
-    min_dialog_height = 180 # Keep original minimum height
-    padding = 15 # Padding around elements
-    line_spacing = 5 # Extra space between lines
-    button_area_height = BUTTON_HEIGHT + padding * 2 # Space for buttons + padding
+    global ui_font, dialog_font, button_font, DIALOG_COLOR, BLACK, BUTTON_COLOR, WINDOW_WIDTH, WINDOW_HEIGHT, BUTTON_HEIGHT, BUTTON_GAP
 
-    # 1. Wrap text first to determine needed lines
-    words = message.split(' ')
+    final_message = message
+
+    base_dialog_width = 400
+    min_dialog_height = 180
+    padding = 15
+    line_spacing = 5
+    button_area_height = BUTTON_HEIGHT + padding * 2
+
+    words = final_message.split(' ')
     lines = []
     current_line = ''
-    # Use a slightly reduced width for text wrapping calculation
     max_line_width = base_dialog_width - padding * 2 - 10
 
     for word in words:
-        # Handle newline characters explicitly
         if '\n' in word:
             parts = word.split('\n')
             for i, part in enumerate(parts):
@@ -3767,7 +3985,7 @@ def draw_practice_end_dialog(message):
                      if current_line: lines.append(current_line.strip())
                      lines.append("")
                      current_line = ""
-        else: # Word does not contain newline
+        else:
             test_line = current_line + word + ' '
             if ui_font.size(test_line)[0] < max_line_width:
                 current_line = test_line
@@ -3778,38 +3996,29 @@ def draw_practice_end_dialog(message):
                 else:
                      lines.append(word)
                      current_line = ""
-    if current_line: # Add the last line
+    if current_line:
         lines.append(current_line.strip())
 
-    # 2. Calculate required height
-    # No explicit title, start text height calculation directly
     text_height = len(lines) * ui_font.get_linesize() + max(0, len(lines) - 1) * line_spacing
-    required_height = text_height + button_area_height + padding * 2 # Text + Button Area + Top/Bottom Padding
+    required_height = text_height + button_area_height + padding * 2
 
     dialog_height = max(min_dialog_height, required_height)
-    dialog_width = base_dialog_width # Keep width fixed
+    dialog_width = base_dialog_width
 
-    # 3. Calculate dialog position
     dialog_x = (WINDOW_WIDTH - dialog_width) // 2
     dialog_y = (WINDOW_HEIGHT - dialog_height) // 2
-    # --- MODIFICATION END ---
 
-    # Drawing uses calculated dimensions
     pygame.draw.rect(screen, DIALOG_COLOR, (dialog_x, dialog_y, dialog_width, dialog_height))
     pygame.draw.rect(screen, BLACK, (dialog_x, dialog_y, dialog_width, dialog_height), 2)
 
-    # Draw the wrapped text lines starting near the top
     y_offset = dialog_y + padding
     for line in lines:
         text_surf = ui_font.render(line, True, BLACK)
-        # Center text horizontally within the padded area
         text_rect = text_surf.get_rect(centerx=dialog_x + dialog_width // 2)
-        text_rect.top = y_offset # Align top
+        text_rect.top = y_offset
         screen.blit(text_surf, text_rect)
-        # screen.blit(text_surf, (dialog_x + padding, y_offset)) # Original left-align
         y_offset += ui_font.get_linesize() + line_spacing
 
-    # Buttons positioned relative to the new dynamic bottom
     button_y = dialog_y + dialog_height - BUTTON_HEIGHT - padding
     total_button_width = 3 * BUTTON_WIDTH + 2 * BUTTON_GAP
     button_start_x = dialog_x + (dialog_width - total_button_width) // 2
@@ -3818,12 +4027,18 @@ def draw_practice_end_dialog(message):
     main_menu_rect = pygame.Rect(button_start_x + BUTTON_WIDTH + BUTTON_GAP, button_y, BUTTON_WIDTH, BUTTON_HEIGHT)
     quit_rect = pygame.Rect(button_start_x + 2 * (BUTTON_WIDTH + BUTTON_GAP), button_y, BUTTON_WIDTH, BUTTON_HEIGHT)
 
-    # Draw buttons
     pygame.draw.rect(screen, BUTTON_COLOR, play_again_rect)
     pygame.draw.rect(screen, BUTTON_COLOR, main_menu_rect)
     pygame.draw.rect(screen, BUTTON_COLOR, quit_rect)
 
-    play_again_text = button_font.render("Play Again", True, BLACK)
+    # --- MODIFICATION START ---
+    play_again_text_str = "Play Again"
+    if state and state.get('practice_mode') == 'eight_letter' and state.get('initial_game_config', {}).get('gamify_active'):
+        play_again_text_str = "Continue"
+    
+    play_again_text = button_font.render(play_again_text_str, True, BLACK)
+    # --- MODIFICATION END ---
+    
     main_menu_text = button_font.render("Main Menu", True, BLACK)
     quit_text = button_font.render("Quit", True, BLACK)
 
@@ -6190,7 +6405,19 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
             scores_init = active_practice_state_data["scores"]
             turn = active_practice_state_data["turn"]
             first_play = active_practice_state_data["first_play"]
-            sgs_initial_bag = active_practice_state_data.get("sgs_initial_bag", bag_init[:]) 
+            sgs_initial_bag = active_practice_state_data.get("sgs_initial_bag", bag_init[:])
+            if practice_mode == "eight_letter":
+                practice_params = active_practice_state_data.get("practice_params", {})
+                initial_game_config['gamify_active'] = practice_params.get('gamify_active', False)
+                if initial_game_config['gamify_active']:
+                    gamified_params = practice_params.get('gamified_params', {})
+                    initial_game_config['gamify_min_prob'] = gamified_params.get('min', 500)
+                    initial_game_config['gamify_max_goal'] = gamified_params.get('max_goal', 3500)
+                    initial_game_config['gamify_increment'] = gamified_params.get('increment', 250)
+                    # Set the starting dynamic range
+                    initial_game_config['gamify_current_max_prob'] = initial_game_config['gamify_min_prob'] + initial_game_config['gamify_increment']
+
+            
             if practice_mode == "bingo_bango_bongo":
                 bbb_7l_max_prob_init = active_practice_state_data.get('bbb_7l_max_prob', 1000)
                 bbb_8l_max_prob_init = active_practice_state_data.get('bbb_8l_max_prob', 1000)
@@ -8195,14 +8422,10 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
     """
     Handles MOUSEBUTTONDOWN events when the Hint or All Words dialog is showing.
     Manages move selection, preview, playing moves, and dialog dismissal.
-    MODIFIED: Adds drag initiation for All Words dialog and preview for its items.
-    MODIFIED: Sets state['first_play'] = False after a successful hint/all_words play.
-    MODIFIED: Correctly calculates clicked index in scrollable hint dialog.
-    MODIFIED: Reverts board to correct historical state before applying preview in replay mode.
-    NO CODE OMITTED.
+    This is a full and complete function.
     """
     global DEV_VISUALIZE_BATCH_ENABLED_SESSION, WINDOW_WIDTH, WINDOW_HEIGHT, ALL_WORDS_DIALOG_WIDTH, ALL_WORDS_DIALOG_HEIGHT, BUTTON_HEIGHT, BUTTON_GAP
-    global ui_font # For item height calculation in draw_all_words_dialog
+    global ui_font
 
     is_silent_run_local = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
 
@@ -8210,7 +8433,7 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
     showing_all_words = state['showing_all_words']
     hint_moves = state['hint_moves']
     all_moves_list = state['all_moves']
-    selected_hint_index = state['selected_hint_index'] # Local variable, initialized from state
+    selected_hint_index = state['selected_hint_index']
     hint_dialog_x = state['hint_dialog_x']
     hint_dialog_y = state['hint_dialog_y']
     all_words_dialog_x = state.get('all_words_dialog_x', (WINDOW_WIDTH - ALL_WORDS_DIALOG_WIDTH) // 2)
@@ -8268,9 +8491,6 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
             'tiles_played_from_rack': tiles_consumed_param,
             'newly_placed': newly_placed_param,
             'leave': selected_move_dict_param.get('leave', [])
-
-
-
         })
         current_state['current_replay_turn'] = len(current_state['move_history'])
         current_state['last_played_highlight_coords'] = set((pos[0], pos[1]) for pos in selected_move_dict_param.get('positions', []))
@@ -8312,21 +8532,31 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
                         show_message_dialog("At least one 5-letter word must be formed.", "Invalid Play"); valid_for_practice_play = False
                 elif practice_mode == "eight_letter":
                     if practice_best_move:
-                        selected_score = selected_move_dict.get('score', -1); max_score_8l = practice_best_move.get('score', 0)
-                        if selected_score >= max_score_8l and max_score_8l > 0:
-                            if not is_silent_run_local: print(f"8-Letter Hint Play CORRECT! Played: '{selected_move_dict.get('word_with_blanks')}' ({selected_score} pts)")
-                            _next_turn, _drawn, newly_placed, tiles_consumed_for_history = play_hint_move(selected_move_dict, state['tiles'], state['racks'], state['blanks'], state['scores'], player_who_played, state['bag'], state['board'], state['is_ai'], state['practice_mode'], is_silent_batch_run_param=is_silent_run_local)  
-                            state['human_played'] = True; state['hinting'] = False; state['practice_solved'] = True; state['showing_practice_end_dialog'] = True
-                            state['practice_end_message'] = f"Correct! You found the highest scoring bingo:\n{selected_move_dict.get('word_with_blanks','')} ({selected_score} pts)"
-                            state['last_played_highlight_coords'] = set((pos[0], pos[1]) for pos in selected_move_dict.get('positions', []))
-                            state['first_play'] = False 
+                        selected_score = selected_move_dict.get('score', -1)
+                        max_score_8l = practice_best_move.get('score', 0)
+                        is_correct_solve = selected_score >= max_score_8l and max_score_8l > 0
+                        state['gamify_puzzle_outcome'] = 'success' if is_correct_solve else 'failure'
+                        
+                        gamify_active = state.get('initial_game_config', {}).get('gamify_active', False)
+                        if gamify_active:
+                            min_p = state['initial_game_config'].get('gamify_min_prob', 500)
+                            current_max_p = state['initial_game_config'].get('gamify_current_max_prob', 750)
+                            increment = state['initial_game_config'].get('gamify_increment', 250)
+                            next_max_p = current_max_p + increment if is_correct_solve else current_max_p - increment
+                            if not is_correct_solve and next_max_p < (min_p + increment):
+                                next_max_p = min_p + increment
+                            outcome_text = "Correct!" if is_correct_solve else "Incorrect."
+                            state['practice_end_message'] = f"{outcome_text}\n\nYour new probability range is:\n{min_p} to {next_max_p}"
                         else:
-                            if not is_silent_run_local: print(f"8-Letter Hint Play INCORRECT. Score: {selected_score}, Target: {max_score_8l}")
-                            show_message_dialog(f"Try again. The highest score is {int(max_score_8l)}.", "8-Letter Bingo"); state['hinting'] = False
+                            state['practice_end_message'] = f"Correct! You found the highest scoring bingo:\n{selected_move_dict.get('word_with_blanks','')} ({selected_score} pts)" if is_correct_solve else f"Try again. The highest score is {max_score_8l}."
+
+                        state['practice_solved'] = True
+                        state['showing_practice_end_dialog'] = True
+                        state['hinting'] = False
                     else: 
                         if not is_silent_run_local: print("Error: Cannot validate 8-letter hint play, best move unknown.")
                         show_message_dialog("Error: Best move data missing for validation.", "Internal Error"); state['hinting'] = False
-                    valid_for_practice_play = False 
+                    valid_for_practice_play = False
                 elif paused_for_power_tile:
                     power_moves_filtered = [
                         m for m in state['all_moves'] if 
@@ -8385,9 +8615,7 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
                         move_to_preview_data = hint_moves[clicked_index]
                     
                     if move_to_preview_data:
-                        # --- FIX: Revert board to correct historical state before previewing ---
                         if replay_mode:
-                            # Get the state BEFORE the current turn's move was made
                             turn_to_reconstruct = max(0, state.get('current_replay_turn', 1) - 1)
                             sgs_data_for_preview = state.get('sgs_loaded_game_data')
                             if sgs_data_for_preview:
@@ -8396,10 +8624,8 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
                                     turn_to_reconstruct,
                                     is_silent_batch_run_param=True
                                 )
-                                # Set the main board state to this historical state before applying the preview
                                 state['tiles'] = historical_tiles
                                 state['blanks'] = historical_blanks
-                        # --- END FIX ---
                         state = apply_move_as_preview(state, move_to_preview_data)
                     else: 
                         state = clear_current_preview(state)
@@ -8445,21 +8671,33 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
                     show_message_dialog("At least one 5-letter word must be formed.", "Invalid Play"); valid_for_practice_play = False
             elif practice_mode == "eight_letter": 
                  if practice_best_move:
-                     selected_score = selected_move_dict.get('score', -1); max_score_8l = practice_best_move.get('score', 0)
-                     if selected_score >= max_score_8l and max_score_8l > 0:
-                         if not is_silent_run_local: print(f"8-Letter All Words Play CORRECT! Played: '{selected_move_dict.get('word_with_blanks')}' ({selected_score} pts)")
-                         _next_turn, _drawn, newly_placed, tiles_consumed_for_history = play_hint_move(selected_move_dict, state['tiles'], state['racks'], state['blanks'], state['scores'], player_who_played, state['bag'], state['board'], state['is_ai'], state['practice_mode'], is_silent_batch_run_param=is_silent_run_local)  
-                         state['human_played'] = True; state['showing_all_words'] = False; state['practice_solved'] = True; state['showing_practice_end_dialog'] = True
-                         state['practice_end_message'] = f"Correct! You found the highest scoring bingo:\n{selected_move_dict.get('word_with_blanks','')} ({selected_score} pts)"
-                         state['last_played_highlight_coords'] = set((pos[0], pos[1]) for pos in selected_move_dict.get('positions', []))
-                         state['first_play'] = False 
+                     selected_score = selected_move_dict.get('score', -1)
+                     max_score_8l = practice_best_move.get('score', 0)
+                     is_correct_solve = selected_score >= max_score_8l and max_score_8l > 0
+                     state['gamify_puzzle_outcome'] = 'success' if is_correct_solve else 'failure'
+                     
+                     # --- MODIFICATION START ---
+                     gamify_active = state.get('initial_game_config', {}).get('gamify_active', False)
+                     if gamify_active:
+                         min_p = state['initial_game_config'].get('gamify_min_prob', 500)
+                         current_max_p = state['initial_game_config'].get('gamify_current_max_prob', 750)
+                         increment = state['initial_game_config'].get('gamify_increment', 250)
+                         next_max_p = current_max_p + increment if is_correct_solve else current_max_p - increment
+                         if not is_correct_solve and next_max_p < (min_p + increment):
+                             next_max_p = min_p + increment
+                         outcome_text = "Correct!" if is_correct_solve else "Incorrect."
+                         state['practice_end_message'] = f"{outcome_text}\n\nYour new probability range is:\n{min_p} to {next_max_p}"
                      else:
-                         if not is_silent_run_local: print(f"8-Letter All Words Play INCORRECT. Score: {selected_score}, Target: {max_score_8l}")
-                         show_message_dialog(f"Try again. The highest score is {max_score_8l}.", "8-Letter Bingo"); state['showing_all_words'] = False
+                         state['practice_end_message'] = f"Correct! You found the highest scoring bingo:\n{selected_move_dict.get('word_with_blanks','')} ({selected_score} pts)" if is_correct_solve else f"Try again. The highest score is {max_score_8l}."
+                     # --- MODIFICATION END ---
+
+                     state['practice_solved'] = True
+                     state['showing_practice_end_dialog'] = True
+                     state['showing_all_words'] = False
                  else: 
                      if not is_silent_run_local: print("Error: Cannot validate 8-letter all words play, best move unknown.")
                      show_message_dialog("Error: Best move data missing for validation.", "Internal Error"); state['showing_all_words'] = False
-                 valid_for_practice_play = False 
+                 valid_for_practice_play = False
             
             if valid_for_practice_play:
                 if paused_for_bingo_practice:
@@ -8483,21 +8721,20 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
                     else:
                         show_message_dialog(f"This is not the highest scoring move with {current_power_tile} matching the selected lengths (Max: {int(max_power_score_filtered)}). Try again!", "Incorrect Move")
                         state['showing_all_words'] = False
-                else: # This is a standard, non-practice play
+                else:
                     next_turn_val, drawn_tiles, newly_placed, tiles_consumed_for_history = play_hint_move(selected_move_dict, state['tiles'], state['racks'], state['blanks'], state['scores'], player_who_played, state['bag'], state['board'], state['is_ai'], state['practice_mode'], is_silent_batch_run_param=is_silent_run_local) 
                     state = finalize_dialog_play(state, selected_move_dict, move_rack_before_play, tiles_consumed_for_history, drawn_tiles, newly_placed, next_turn_val)
         elif all_words_ok_rect and all_words_ok_rect.collidepoint(x, y):
             clicked_in_active_dialog = True
-            state = clear_current_preview(state) # Clear preview when OK is clicked
+            state = clear_current_preview(state)
             state['showing_all_words'] = False
         elif all_words_rects_list: 
             for rect_aw_item, idx_aw_item in all_words_rects_list:
                 if rect_aw_item.collidepoint(x, y):
                     clicked_in_active_dialog = True
-                    state['selected_hint_index'] = idx_aw_item # Update state for highlighting
+                    state['selected_hint_index'] = idx_aw_item
                     if idx_aw_item < len(current_moves_for_all_words):
-                         move_to_preview_data = current_moves_for_all_words[idx_aw_item] # Use idx_aw_item directly
-                         # --- NEW FIX: Revert board state before previewing from All Words dialog ---
+                         move_to_preview_data = current_moves_for_all_words[idx_aw_item]
                          if replay_mode:
                              turn_to_reconstruct = max(0, state.get('current_replay_turn', 1) - 1)
                              sgs_data_for_preview = state.get('sgs_loaded_game_data')
@@ -8509,7 +8746,6 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
                                  )
                                  state['tiles'] = historical_tiles
                                  state['blanks'] = historical_blanks
-                         # --- END NEW FIX ---
                          state = apply_move_as_preview(state, move_to_preview_data)
                     else: 
                          state = clear_current_preview(state)
@@ -8632,15 +8868,11 @@ def _handle_keydown_typing_on_board(event, state):
     """
     Handles KEYDOWN events when a player is actively typing a word on the board.
     Manages letter placement, blank usage, backspace, and word submission.
-    Modifies state directly.
-    Returns the modified state.
+    This is a full and complete function.
     """
-    global GRID_SIZE, DEV_VISUALIZE_BATCH_ENABLED_SESSION, pyperclip_available, pyperclip # Constants and globals
+    global GRID_SIZE, DEV_VISUALIZE_BATCH_ENABLED_SESSION, pyperclip_available, pyperclip, VC_VALID, VC_INVALID_WORDS
 
     is_silent_run = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
-
-    # This function assumes state['selected_square'] is not None and the turn is appropriate for typing.
-    # The main _handle_keydown_event should ensure these conditions before calling.
 
     mods = pygame.key.get_mods()
     if event.key == pygame.K_v and (mods & pygame.KMOD_CTRL or mods & pygame.KMOD_META) and pyperclip_available and pyperclip:
@@ -8651,26 +8883,26 @@ def _handle_keydown_typing_on_board(event, state):
                 if not is_silent_run:
                     print(f"Pasting: {pasted_text}")
                 
-                if not state['typing']: # Start typing mode if not already active
+                if not state['typing']:
                     state['typing'] = True
                     state['original_tiles'] = [row[:] for row in state['tiles']]
                     state['original_rack'] = state['racks'][state['turn']-1][:]
                     state['original_blanks_before_typing'] = state['blanks'].copy()
-                    state['typing_start'] = state['selected_square'][:2] # (r, c)
-                    state['typing_direction'] = state['selected_square'][2] # "right" or "down"
-                    state['word_positions'] = [] # Initialize list of (r, c, letter) tuples
+                    state['typing_start'] = state['selected_square'][:2]
+                    state['typing_direction'] = state['selected_square'][2]
+                    state['word_positions'] = []
                     state['current_r'], state['current_c'] = state['typing_start']
                 elif state['current_r'] is None or state['current_c'] is None or state['typing_direction'] is None:
                     if not is_silent_run:
                         print("  Error: Cannot paste, current cursor state (r,c,direction) is invalid.")
-                    pasted_text = "" # Prevent processing if cursor state is bad
+                    pasted_text = ""
 
                 for letter in pasted_text:
                     if state['current_r'] is None or state['current_c'] is None or \
                        not (0 <= state['current_r'] < GRID_SIZE and 0 <= state['current_c'] < GRID_SIZE):
                         if not is_silent_run:
                             print("  Typing cursor out of bounds. Stopping paste.")
-                        break # Stop pasting if cursor is out of bounds
+                        break
                     
                     use_blank = False
                     if letter not in state['racks'][state['turn']-1]:
@@ -8679,9 +8911,8 @@ def _handle_keydown_typing_on_board(event, state):
                         else:
                             if not is_silent_run:
                                 print(f"  Cannot place '{letter}' (not in rack and no blanks). Stopping paste.")
-                            break # Stop if letter not available
+                            break
                     
-                    # Place letter
                     state['tiles'][state['current_r']][state['current_c']] = letter
                     state['word_positions'].append((state['current_r'], state['current_c'], letter))
                     if use_blank:
@@ -8690,28 +8921,24 @@ def _handle_keydown_typing_on_board(event, state):
                     else:
                         state['racks'][state['turn']-1].remove(letter)
 
-                    # Advance cursor
                     if state['typing_direction'] == "right":
                         state['current_c'] += 1
-                        # Skip over already existing tiles on the board
                         while 0 <= state['current_c'] < GRID_SIZE and state['original_tiles'][state['current_r']][state['current_c']]:
                             state['current_c'] += 1
                     elif state['typing_direction'] == "down":
                         state['current_r'] += 1
-                        # Skip over already existing tiles on the board
                         while 0 <= state['current_r'] < GRID_SIZE and state['original_tiles'][state['current_r']][state['current_c']]:
                             state['current_r'] += 1
-                    else: # Should not happen if typing_direction is validated
+                    else:
                         if not is_silent_run:
                             print(f"  Error: Invalid typing direction '{state['typing_direction']}' during paste. Stopping.")
                         break
                     
-                    # Check bounds again after advancing
                     if not (0 <= state['current_r'] < GRID_SIZE and 0 <= state['current_c'] < GRID_SIZE):
                         if not is_silent_run:
                             print("  Typing cursor moved out of bounds after placement. Stopping paste.")
                         break
-        except Exception as e_paste: # Catch potential pyperclip errors
+        except Exception as e_paste:
             print(f"Error during paste operation: {e_paste}")
 
 
@@ -8721,31 +8948,28 @@ def _handle_keydown_typing_on_board(event, state):
         has_letter = letter in current_rack_debug
         has_blank = ' ' in current_rack_debug
 
-        if has_letter or has_blank: # Player has the tile or a blank
-            if not state['typing']: # If not already typing, initialize typing mode
+        if has_letter or has_blank:
+            if not state['typing']:
                 state['typing'] = True
                 state['original_tiles'] = [row[:] for row in state['tiles']]
                 state['original_rack'] = state['racks'][state['turn']-1][:]
                 state['original_blanks_before_typing'] = state['blanks'].copy()
-                state['typing_start'] = state['selected_square'][:2] # (r, c)
-                state['typing_direction'] = state['selected_square'][2] # "right" or "down"
-                state['word_positions'] = [] # Initialize list of (r, c, letter) tuples
+                state['typing_start'] = state['selected_square'][:2]
+                state['typing_direction'] = state['selected_square'][2]
+                state['word_positions'] = []
                 state['current_r'], state['current_c'] = state['typing_start']
             elif state['current_r'] is None or state['current_c'] is None or state['typing_direction'] is None:
-                # This case should ideally not be reached if selected_square is managed correctly
                 if not is_silent_run:
                     print("ERROR: Typing mode active but cursor state invalid. Resetting typing.")
-                # Reset typing state fully
                 state['typing'] = False; state['word_positions'] = []; state['original_tiles'] = None; state['original_rack'] = None
                 state['selected_square'] = None; state['current_r'] = None; state['current_c'] = None; state['typing_direction'] = None; state['typing_start'] = None
                 state['original_blanks_before_typing'] = None
-                return state # Exit early as typing state was corrupt
+                return state
 
             use_blank = False
-            if not has_letter and has_blank: # Must use blank if letter not present but blank is
+            if not has_letter and has_blank:
                 use_blank = True
             
-            # Ensure current_r and current_c are valid before placing
             if state['current_r'] is not None and state['current_c'] is not None and \
                0 <= state['current_r'] < GRID_SIZE and 0 <= state['current_c'] < GRID_SIZE:
                 
@@ -8757,53 +8981,45 @@ def _handle_keydown_typing_on_board(event, state):
                 else:
                     state['racks'][state['turn']-1].remove(letter)
 
-                # Advance cursor
                 if state['typing_direction'] == "right":
                     state['current_c'] += 1
-                    # Skip over already existing tiles on the board
                     while 0 <= state['current_c'] < GRID_SIZE and state['original_tiles'][state['current_r']][state['current_c']]:
                         state['current_c'] += 1
                 elif state['typing_direction'] == "down":
                     state['current_r'] += 1
-                    # Skip over already existing tiles on the board
                     while 0 <= state['current_r'] < GRID_SIZE and state['original_tiles'][state['current_r']][state['current_c']]:
                         state['current_r'] += 1
-            elif not is_silent_run: # current_r or current_c is out of bounds or None
+            elif not is_silent_run:
                 print(f"Warning: Attempted to type '{letter}' at invalid cursor ({state['current_r']},{state['current_c']})")
 
     elif event.key == pygame.K_BACKSPACE and state['typing']:
-        if state['word_positions']: # If there are letters to backspace
+        if state['word_positions']:
             last_r, last_c, last_letter = state['word_positions'].pop()
-            state['tiles'][last_r][last_c] = '' # Clear from board display
+            state['tiles'][last_r][last_c] = ''
             
-            # Return tile to rack
             tile_to_return = ' ' if (last_r, last_c) in state['blanks'] else last_letter
             state['racks'][state['turn']-1].append(tile_to_return)
             
-            should_sort_racks_backspace = not is_silent_run # Sort if not silent batch
+            should_sort_racks_backspace = not is_silent_run
             if should_sort_racks_backspace:
                 if state['racks'][state['turn']-1] is not None:
                     state['racks'][state['turn']-1].sort()
 
-            if (last_r, last_c) in state['blanks']: # If it was a blank, remove from blanks set
+            if (last_r, last_c) in state['blanks']:
                 state['blanks'].remove((last_r, last_c))
             
-            # Move cursor back to the position of the removed tile
             state['current_r'], state['current_c'] = last_r, last_c 
 
-            if not state['word_positions']: # If all typed letters removed, exit typing mode
+            if not state['word_positions']:
                 state['typing'] = False
                 state['original_tiles'] = None
                 state['original_rack'] = None
                 state['original_blanks_before_typing'] = None
-                # Keep selected_square as is, but current_r/c should reflect the now empty square
-                # If we want to fully reset selection on empty backspace:
-                # state['selected_square'] = None 
-                state['current_r'] = None # Or set to last_r, last_c if selection should persist
+                state['current_r'] = None
                 state['current_c'] = None
                 state['typing_direction'] = None
                 state['typing_start'] = None
-        else: # No word_positions, but somehow in typing mode (should be rare)
+        else:
             state['typing'] = False
             state['original_tiles'] = None
             state['original_rack'] = None
@@ -8812,10 +9028,10 @@ def _handle_keydown_typing_on_board(event, state):
 
 
     elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER) and state['typing']:
-        if state['word_positions']: # Only proceed if tiles have been typed
+        if state['word_positions']:
             newly_placed_details = [(r_wp_val, c_wp_val, l_wp_val) for r_wp_val, c_wp_val, l_wp_val in state['word_positions']]
             initial_rack_size_for_play = len(state['original_rack']) if state['original_rack'] else 0
-            temp_tiles_for_validation = [row[:] for row in state['tiles']] # Use current board state for validation
+            temp_tiles_for_validation = [row[:] for row in state['tiles']]
             
             if not is_silent_run:
                 print("\n--- DEBUG: Finalizing Typed Play (K_RETURN) ---")
@@ -8825,10 +9041,10 @@ def _handle_keydown_typing_on_board(event, state):
             
             validation_code, is_bingo, validation_detail, all_words_details = ai_engine.is_valid_play(
                 newly_placed_details,
-                temp_tiles_for_validation, # This is the board *after* typing
+                temp_tiles_for_validation,
                 state['first_play'],
                 initial_rack_size_for_play,
-                state['original_tiles'], # Board *before* typing for connection checks
+                state['original_tiles'],
                 state['original_rack'],
                 is_silent_batch_run_param=is_silent_run
             )
@@ -8847,17 +9063,12 @@ def _handle_keydown_typing_on_board(event, state):
                 allow_anyway = show_allow_invalid_word_dialog(invalid_words_list)
                 if allow_anyway:
                     proceed_with_play = True
-                    # --- THIS IS THE ONLY CHANGE IN THE ENTIRE FUNCTION ---
-                    # 1. Get the word structures using our new Python helper function.
                     words_to_score = _get_all_word_structures_for_phony_scoring(newly_placed_details, temp_tiles_for_validation)
-                    # 2. Call the Cython calculate_score function with the correct number of arguments.
                     score_val_play = ai_engine.calculate_score(newly_placed_details, state['board'], temp_tiles_for_validation, state['blanks'], words_to_score)
-                    # --- END CHANGE ---
                     if not is_silent_run:
                         print(f"Player allowed invalid word(s): {invalid_words_list}")
-                else: # Player chose not to allow invalid words
+                else:
                     if not is_silent_run: print("Player cancelled playing invalid word(s).")
-                    # Revert board and rack
                     if state['original_tiles'] and state['original_rack']:
                         for r_wp_revert, c_wp_revert, _ in state['word_positions']:
                             state['tiles'][r_wp_revert][c_wp_revert] = state['original_tiles'][r_wp_revert][c_wp_revert]
@@ -8867,15 +9078,13 @@ def _handle_keydown_typing_on_board(event, state):
                             if state['racks'][state['turn']-1] is not None:
                                 state['racks'][state['turn']-1].sort()
                         state['blanks'] = state.get('original_blanks_before_typing', set()).copy()
-                    # Reset typing state
                     state['typing'] = False; state['word_positions'] = []; state['original_tiles'] = None; state['original_rack'] = None; state['selected_square'] = None
                     state['current_r'] = None; state['current_c'] = None; state['typing_direction'] = None; state['typing_start'] = None
                     state['original_blanks_before_typing'] = None
-                    proceed_with_play = False # Ensure play does not proceed
-            else: # Other invalid structure
+                    proceed_with_play = False
+            else:
                 reason_str = validation_detail if isinstance(validation_detail, str) else "Unknown structural error."
                 show_message_dialog(f"Invalid play: {reason_str}", "Invalid Play")
-                # Revert board and rack
                 if state['original_tiles'] and state['original_rack']:
                     for r_wp_revert, c_wp_revert, _ in state['word_positions']:
                         state['tiles'][r_wp_revert][c_wp_revert] = state['original_tiles'][r_wp_revert][c_wp_revert]
@@ -8885,25 +9094,23 @@ def _handle_keydown_typing_on_board(event, state):
                         if state['racks'][state['turn']-1] is not None:
                             state['racks'][state['turn']-1].sort()
                     state['blanks'] = state.get('original_blanks_before_typing', set()).copy()
-                # Reset typing state
                 state['typing'] = False; state['word_positions'] = []; state['original_tiles'] = None; state['original_rack'] = None; state['selected_square'] = None
                 state['current_r'] = None; state['current_c'] = None; state['typing_direction'] = None; state['typing_start'] = None
                 state['original_blanks_before_typing'] = None
-                proceed_with_play = False # Ensure play does not proceed
+                proceed_with_play = False
             
             if proceed_with_play:
-                practice_mode_allows_play = True # Assume true unless a practice mode disallows it
-                # --- Practice Mode Validation Logic ---
+                practice_mode_allows_play = True
                 if state['practice_mode'] == "power_tiles" and state['paused_for_power_tile']:
                     is_power_tile_play = any(letter_check_pt == state['current_power_tile'] for _, _, letter_check_pt in newly_placed_details)
                     power_moves_filtered = [m for m in state['all_moves'] if any(letter_pmf == state['current_power_tile'] for _, _, letter_pmf in m.get('newly_placed',[])) and is_word_length_allowed(len(m.get('word','')), state['number_checks'])]
                     max_power_score = max(m['score'] for m in power_moves_filtered) if power_moves_filtered else 0
                     if is_power_tile_play and score_val_play >= max_power_score:
                         show_message_dialog(f"Correct! You found the highest scoring play ({score_val_play} pts) with {state['current_power_tile']} matching the selected lengths.", "Power Tile Success!")
-                    elif is_power_tile_play: # Used power tile but not highest score
+                    elif is_power_tile_play:
                         show_message_dialog(f"You played the {state['current_power_tile']}, but there is a higher score: ({int(max_power_score)}). Try again!", "Incorrect Score")
                         practice_mode_allows_play = False
-                    else: # Didn't use the power tile
+                    else:
                         show_message_dialog(f"You didn't use the required power tile: {state['current_power_tile']}. Try again!", "Incorrect Play")
                         practice_mode_allows_play = False
                 elif state['practice_mode'] == "bingo_bango_bongo" and state['paused_for_bingo_practice']:
@@ -8911,55 +9118,63 @@ def _handle_keydown_typing_on_board(event, state):
                     max_bingo_score = max(m['score'] for m in bingo_moves) if bingo_moves else 0
                     if is_bingo and score_val_play >= max_bingo_score:
                         show_message_dialog(f"Correct! You found the highest scoring bingo ({score_val_play} pts).", "Bingo Success!")
-                    elif is_bingo: # Played a bingo, but not the highest scoring one
+                    elif is_bingo:
                         show_message_dialog(f"You played a bingo, but score {score_val_play} is not the highest ({int(max_bingo_score)}). Try again!", "Incorrect Score")
                         practice_mode_allows_play = False
-                    else: # Didn't play a bingo
+                    else:
                         show_message_dialog("That wasn't a bingo. Try again!", "Incorrect Play")
                         practice_mode_allows_play = False
                 elif state['practice_mode'] == "eight_letter":
-                    # Get the primary word formed by the play
-                    all_words_details_8l = ai_engine.get_words_formed_for_python(newly_placed_details, temp_tiles_for_validation)
-                    played_word_str_8l = ""
-                    played_primary_tiles_8l = []
-                    newly_placed_coords_8l = set((r_8l,c_8l) for r_8l,c_8l,_ in newly_placed_details)
-                    for word_detail in all_words_details_8l:
-                        if any((t[0], t[1]) in newly_placed_coords_8l for t in word_detail): # Check if this word uses any of the newly placed tiles
-                            played_word_str_8l = "".join(t[2] for t in word_detail)
-                            played_primary_tiles_8l = word_detail
-                            break # Found the primary word
-
-                    max_score_8l = state['practice_target_moves'][0].get('score', 0) if state['practice_target_moves'] else 0
-                    if is_bingo and score_val_play >= max_score_8l and max_score_8l > 0:
-                        if not is_silent_run:
-                            print(f"8-Letter Bingo CORRECT! Typed: '{played_word_str_8l}' ({score_val_play} pts), Max Score: {max_score_8l}")
-                        state['practice_solved'] = True
-                        state['showing_practice_end_dialog'] = True
-                        # Construct word_with_blanks for display
-                        word_with_blanks_played_8l = ""
-                        if played_primary_tiles_8l: # Ensure we have the primary word tiles
-                            move_blanks_coords_played_8l = set((r_bl,c_bl) for r_bl,c_bl in newly_placed_coords_8l if (r_bl,c_bl) in state['blanks'])
-                            word_with_blanks_list_8l = []
-                            for wr, wc, w_letter in played_primary_tiles_8l:
-                                is_blank_in_word_8l = (wr, wc) in newly_placed_coords_8l and (wr, wc) in move_blanks_coords_played_8l
-                                word_with_blanks_list_8l.append(w_letter.lower() if is_blank_in_word_8l else w_letter.upper())
-                            word_with_blanks_played_8l = "".join(word_with_blanks_list_8l)
-                        else:
-                            word_with_blanks_played_8l = played_word_str_8l.upper() # Fallback if primary word tiles not found
-
-                        state['practice_end_message'] = f"Correct! You found the highest scoring bingo: {word_with_blanks_played_8l} ({score_val_play} pts)"
-                        practice_mode_allows_play = True # Allow the game state to update
+                    max_score_8l = state['practice_best_move'].get('score', 0) if state.get('practice_best_move') else 0
+                    is_correct_solve = is_bingo and score_val_play >= max_score_8l and max_score_8l > 0
+                    
+                    state['gamify_puzzle_outcome'] = 'success' if is_correct_solve else 'failure'
+                    
+                    gamify_active = state.get('initial_game_config', {}).get('gamify_active', False)
+                    if gamify_active:
+                        min_p = state['initial_game_config'].get('gamify_min_prob', 500)
+                        current_max_p = state['initial_game_config'].get('gamify_current_max_prob', 750)
+                        increment = state['initial_game_config'].get('gamify_increment', 250)
+                        
+                        next_max_p = current_max_p + increment if is_correct_solve else current_max_p - increment
+                        if not is_correct_solve and next_max_p < (min_p + increment):
+                            next_max_p = min_p + increment
+                        
+                        outcome_text = "Correct!" if is_correct_solve else "Incorrect."
+                        state['practice_end_message'] = f"{outcome_text}\n\nYour new probability range is:\n{min_p} to {next_max_p}"
                     else:
-                        if not is_silent_run:
-                            print(f"8-Letter Bingo INCORRECT. Typed: '{played_word_str_8l}' ({score_val_play} pts), Is Bingo: {is_bingo}, Target Max Score: {max_score_8l}")
-                        show_message_dialog(f"Try again. The highest score is {max_score_8l}.", "8-Letter Bingo")
-                        practice_mode_allows_play = False
+                        if is_correct_solve:
+                            all_words_details_8l = ai_engine.get_words_formed_for_python(newly_placed_details, temp_tiles_for_validation)
+                            played_word_str_8l = ""
+                            played_primary_tiles_8l = []
+                            newly_placed_coords_8l = set((r_8l,c_8l) for r_8l,c_8l,_ in newly_placed_details)
+                            for word_detail in all_words_details_8l:
+                                if any((t[0], t[1]) in newly_placed_coords_8l for t in word_detail):
+                                    played_word_str_8l = "".join(t[2] for t in word_detail)
+                                    played_primary_tiles_8l = word_detail
+                                    break
+                            word_with_blanks_played_8l = ""
+                            if played_primary_tiles_8l:
+                                move_blanks_coords_played_8l = set((r_bl,c_bl) for r_bl,c_bl in newly_placed_coords_8l if (r_bl,c_bl) in state['blanks'])
+                                word_with_blanks_list_8l = []
+                                for wr, wc, w_letter in played_primary_tiles_8l:
+                                    is_blank_in_word_8l = (wr, wc) in newly_placed_coords_8l and (wr, wc) in move_blanks_coords_played_8l
+                                    word_with_blanks_list_8l.append(w_letter.lower() if is_blank_in_word_8l else w_letter.upper())
+                                word_with_blanks_played_8l = "".join(word_with_blanks_list_8l)
+                            else:
+                                word_with_blanks_played_8l = played_word_str_8l.upper()
+                            state['practice_end_message'] = f"Correct! You found the highest scoring bingo: {word_with_blanks_played_8l} ({score_val_play} pts)"
+                        else:
+                            state['practice_end_message'] = f"Try again. The highest score is {max_score_8l}."
+                    
+                    state['practice_solved'] = True
+                    state['showing_practice_end_dialog'] = True
+                    practice_mode_allows_play = True
                 elif state['practice_mode'] == "only_fives":
                     if not does_move_form_five_letter_word({'newly_placed': newly_placed_details, 'blanks': state['blanks']}, temp_tiles_for_validation, state['blanks']):
                         show_message_dialog("At least one 5-letter word must be formed.", "Invalid Play")
                         practice_mode_allows_play = False
                 
-                # If practice mode disallows the play, revert and reset typing
                 if not practice_mode_allows_play:
                     if state['original_tiles'] and state['original_rack']:
                         for r_wp_revert_pract, c_wp_revert_pract, _ in state['word_positions']:
@@ -8973,42 +9188,39 @@ def _handle_keydown_typing_on_board(event, state):
                     state['typing'] = False; state['word_positions'] = []; state['original_tiles'] = None; state['original_rack'] = None; state['selected_square'] = None
                     state['current_r'] = None; state['current_c'] = None; state['typing_direction'] = None; state['typing_start'] = None
                     state['original_blanks_before_typing'] = None
-                else: # Play is allowed by practice mode (or no practice mode)
+                else:
                     state['scores'][state['turn']-1] += score_val_play
                     state['last_played_highlight_coords'] = set((r_lp, c_lp) for r_lp, c_lp, _ in newly_placed_details)
                     
-                    # Determine primary word and its details for history
                     all_words_formed_details_final = all_words_details
                     primary_word_tiles_final = []
                     primary_word_str_final = ""
-                    start_pos_final = state.get('typing_start', (0,0)) # Default to typing start
-                    orientation_final_str = state.get('typing_direction', 'right') # Default
+                    start_pos_final = state.get('typing_start', (0,0))
+                    orientation_final_str = state.get('typing_direction', 'right')
                     
-                    orientation_final_for_history = '?' # Default if not determined
+                    orientation_final_for_history = '?'
                     if orientation_final_str == "right":
                         orientation_final_for_history = 'H'
                     elif orientation_final_str == "down":
                         orientation_final_for_history = 'V'
 
-                    # Try to find the main word based on newly_placed_details and orientation
-                    if newly_placed_details: # Ensure there are newly placed tiles
+                    if newly_placed_details:
                         main_word_from_play, main_orientation_from_play_str = ai_engine.find_main_word(newly_placed_details, temp_tiles_for_validation)
                         if main_word_from_play:
                             primary_word_tiles_final = main_word_from_play
                             primary_word_str_final = "".join(t[2] for t in primary_word_tiles_final)
-                            start_pos_final = (primary_word_tiles_final[0][0], primary_word_tiles_final[0][1]) # First tile of the main word
+                            start_pos_final = (primary_word_tiles_final[0][0], primary_word_tiles_final[0][1])
                             if main_orientation_from_play_str == "horizontal":
                                 orientation_final_for_history = 'H'
                             elif main_orientation_from_play_str == "vertical":
                                 orientation_final_for_history = 'V'
-                        elif all_words_formed_details_final: # Fallback if find_main_word fails but words were formed
-                            primary_word_tiles_final = all_words_formed_details_final[0] # Take the first one
+                        elif all_words_formed_details_final:
+                            primary_word_tiles_final = all_words_formed_details_final[0]
                             primary_word_str_final = "".join(t[2] for t in primary_word_tiles_final)
                             start_pos_final = (primary_word_tiles_final[0][0], primary_word_tiles_final[0][1])
                             if len(set(r for r,c,l in primary_word_tiles_final)) == 1: orientation_final_for_history = 'H'
                             elif len(set(c for r,c,l in primary_word_tiles_final)) == 1: orientation_final_for_history = 'V'
                     
-                    # Construct word_with_blanks for history
                     word_with_blanks_final = ""
                     if primary_word_tiles_final:
                         word_with_blanks_list_hist = []
@@ -9017,29 +9229,25 @@ def _handle_keydown_typing_on_board(event, state):
                             is_blank_in_word_hist = (wr_hist, wc_hist) in state['blanks'] and (wr_hist, wc_hist) in newly_placed_coords
                             word_with_blanks_list_hist.append(w_letter_hist.lower() if is_blank_in_word_hist else w_letter_hist.upper())
                         word_with_blanks_final = "".join(word_with_blanks_list_hist)
-                    else: # Fallback if primary_word_tiles_final is empty (e.g. single letter play not forming longer word)
+                    else:
                         temp_wbl_final = []
                         newly_placed_coords_final = set((r_npc,c_npc) for r_npc,c_npc,_ in newly_placed_details)
                         for r_npd, c_npd, l_npd in newly_placed_details:
                             is_b_final = (r_npd, c_npd) in state['blanks'] and (r_npd, c_npd) in newly_placed_coords_final
                             temp_wbl_final.append(l_npd.lower() if is_b_final else l_npd.upper())
                         word_with_blanks_final = "".join(temp_wbl_final)
-                        # Try to set primary_word_str_final and orientation if not already set
-                        if newly_placed_details: # Should always be true if we got here
+                        if newly_placed_details:
                             primary_word_str_final = "".join(l_npd for _,_,l_npd in newly_placed_details)
                             if len(set(r for r,c,l in newly_placed_details)) == 1: orientation_final_for_history = 'H'
                             elif len(set(c for r,c,l in newly_placed_details)) == 1: orientation_final_for_history = 'V'
                             if newly_placed_details: start_pos_final = (newly_placed_details[0][0], newly_placed_details[0][1])
 
-
-                    current_leave_for_typed_play = state['racks'][state['turn']-1][:] # Rack after playing, before drawing
+                    current_leave_for_typed_play = state['racks'][state['turn']-1][:]
                     
-                    # --- MODIFICATION START: Correctly calculate tiles consumed from rack ---
                     original_rack_counter = Counter(state['original_rack'])
                     rack_after_play_counter = Counter(current_leave_for_typed_play)
                     consumed_counter = original_rack_counter - rack_after_play_counter
                     tiles_consumed_from_rack_for_history = list(consumed_counter.elements())
-                    # --- MODIFICATION END ---
                     
                     num_to_draw = len(newly_placed_details)
                     drawn_tiles = [state['bag'].pop() for _ in range(num_to_draw) if state['bag']]
@@ -9065,8 +9273,8 @@ def _handle_keydown_typing_on_board(event, state):
                         'blanks': set(state['blanks']), 'drawn': drawn_tiles, 
                         'coord': ai_engine.get_coord(start_pos_final, orientation_final_for_history, is_silent_batch_run_param=is_silent_run), 
                         'word_with_blanks': word_with_blanks_final, 'is_bingo': is_bingo, 
-                        'newly_placed': newly_placed_details, # Store the actual tiles placed from rack
-                        'start': start_pos_final, 'direction': orientation_final_for_history, 'turn_duration': 0.0, # Placeholder
+                        'newly_placed': newly_placed_details,
+                        'start': start_pos_final, 'direction': orientation_final_for_history, 'turn_duration': 0.0,
                         'pool_quality_before_draw': state['current_turn_pool_quality_score'], 'luck_factor': luck_factor,
                         'tiles_played_from_rack': tiles_consumed_from_rack_for_history,
                         'leave': current_leave_for_typed_play
@@ -9083,20 +9291,25 @@ def _handle_keydown_typing_on_board(event, state):
                     state['paused_for_power_tile'] = False
                     state['paused_for_bingo_practice'] = False
                     
-                    # Only switch turn if not in 8-letter practice mode that just got solved
                     if not (state['practice_mode'] == "eight_letter" and state['practice_solved']): 
                         state['turn'] = 3 - state['turn']
                 
-                # Reset typing state regardless of whether the play was ultimately made or reverted
-                # (unless it's 8-letter practice that just got solved, then dialog takes over)
-                if not (state['practice_mode'] == "eight_letter" and state['practice_solved']):
-                    state['typing'] = False; state['word_positions'] = []; state['original_tiles'] = None; state['original_rack'] = None; state['selected_square'] = None
-                    state['current_r'] = None; state['current_c'] = None; state['typing_direction'] = None; state['typing_start'] = None
-                    state['original_blanks_before_typing'] = None
-        else: # No word_positions, but Enter was pressed while typing mode was somehow active
-            # This case should be rare if typing flag is managed well
-            state['typing'] = False # Exit typing mode
-            state['selected_square'] = None # Clear selection as well
+                # --- MODIFICATION START: This block now runs unconditionally after a valid play ---
+                # This is the fix. It resets the typing state so it doesn't linger into the next puzzle.
+                state['typing'] = False
+                state['word_positions'] = []
+                state['original_tiles'] = None
+                state['original_rack'] = None
+                state['selected_square'] = None
+                state['current_r'] = None
+                state['current_c'] = None
+                state['typing_direction'] = None
+                state['typing_start'] = None
+                state['original_blanks_before_typing'] = None
+                # --- MODIFICATION END ---
+        else:
+            state['typing'] = False
+            state['selected_square'] = None
             state['current_r'] = None; state['current_c'] = None; state['typing_direction'] = None; state['typing_start'] = None
             state['original_blanks_before_typing'] = None
 
@@ -9380,12 +9593,30 @@ def _handle_keydown_event(event, state, drawn_rects):
     Handles KEYDOWN events for the main game loop by dispatching to helper functions
     based on the current game state.
     Modifies state directly (via helpers) and returns loop control flags.
+    This is a full and complete function.
     """
     # Loop control flags, default to no change
     running_inner = state.get('running_inner', True)
     return_to_mode_selection = state.get('return_to_mode_selection', False)
     batch_stop_requested = state.get('batch_stop_requested', False)
     start_new_game_same_mode = state.get('start_new_game_same_mode', False)
+
+    # --- MODIFICATION START: Handle practice end dialog shortcuts first ---
+    if state.get('showing_practice_end_dialog'):
+        if event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
+            state['restart_practice_mode'] = True
+            state['showing_practice_end_dialog'] = False
+        elif event.key == pygame.K_ESCAPE or event.key == pygame.K_m:
+            state['running_inner'] = False
+            state['return_to_mode_selection'] = True
+            state['batch_stop_requested'] = True
+        elif event.key == pygame.K_q:
+            state['running_inner'] = False
+            state['batch_stop_requested'] = True
+        
+        # After handling, return the updated loop control flags from the state
+        return state['running_inner'], state['return_to_mode_selection'], state['batch_stop_requested'], state['start_new_game_same_mode']
+    # --- MODIFICATION END ---
 
     # 1. Handle ESC for visualized batch stop (highest priority for ESC)
     if event.key == pygame.K_ESCAPE and \
@@ -9394,16 +9625,13 @@ def _handle_keydown_event(event, state, drawn_rects):
         if not (state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION): # is_silent_run
             print("--- ESCAPE pressed during visualized batch. Requesting stop after current game. ---")
         state['visual_batch_esc_stop_pending'] = True
-        # This doesn't immediately stop, just sets a flag. Loop control flags remain unchanged here.
         return running_inner, return_to_mode_selection, batch_stop_requested, start_new_game_same_mode
 
     # 2. Handle dialog-specific keyboard navigation (includes ESC for those dialogs)
     if _handle_keydown_dialog_navigation(event, state, drawn_rects):
-        # State is modified by the helper. Loop control flags are not changed by this helper.
         return running_inner, return_to_mode_selection, batch_stop_requested, start_new_game_same_mode
 
     # 3. Handle typing on the board
-    # Condition: selected_square is active, not in a blocking dialog, and it's a human's turn or paused practice
     current_player_idx = state['turn'] - 1
     is_human_turn_or_paused_for_typing = (
         0 <= current_player_idx < len(state['is_ai']) and
@@ -9416,29 +9644,17 @@ def _handle_keydown_event(event, state, drawn_rects):
        is_human_turn_or_paused_for_typing:
         
         state = _handle_keydown_typing_on_board(event, state)
-        # State is modified by the helper. Loop control flags are not changed by this helper.
         return running_inner, return_to_mode_selection, batch_stop_requested, start_new_game_same_mode
 
     # 4. Handle Game Over dialog shortcuts (if game over and not in a sub-dialog like stats)
     if state.get('game_over_state') and not state.get('is_batch_running', False) and not state.get('showing_stats'):
         if _handle_keydown_game_over_shortcuts(event, state, drawn_rects):
-            # State is modified by the helper (simulates clicks which then change loop flags via MOUSEBUTTONDOWN).
-            # Loop control flags are not directly changed here by keydown.
             return running_inner, return_to_mode_selection, batch_stop_requested, start_new_game_same_mode
             
-    # 5. Handle Practice End Dialog shortcuts (if active)
-    if state.get('showing_practice_end_dialog'):
-        # This dialog is simple: Enter or Esc might map to one of its buttons.
-        # For now, let mouse clicks handle it, or add specific key mappings if desired.
-        # Example: if event.key == pygame.K_RETURN: post click on "Play Again"
-        pass # Let mouse clicks handle for now.
-
-    # 6. Handle general shortcuts (like ESC for closing non-modal states or opening options)
+    # 5. Handle general shortcuts (like ESC for closing non-modal states or opening options)
     if _handle_keydown_general_shortcuts(event, state):
-        # State is modified by the helper. Loop control flags are not changed by this helper.
         return running_inner, return_to_mode_selection, batch_stop_requested, start_new_game_same_mode
 
-    # If no specific handler caught the key event, return current loop control flags
     return running_inner, return_to_mode_selection, batch_stop_requested, start_new_game_same_mode
 
 
@@ -10232,7 +10448,7 @@ def draw_game_screen(screen, state):
 
     })
     if showing_practice_end_dialog:
-        practice_play_again_rect_draw, practice_main_menu_rect_draw, practice_quit_rect_draw = draw_practice_end_dialog(practice_end_message)
+        practice_play_again_rect_draw, practice_main_menu_rect_draw, practice_quit_rect_draw = draw_practice_end_dialog(practice_end_message, state)
         drawn_rects['practice_play_again_rect'] = practice_play_again_rect_draw; drawn_rects['practice_main_menu_rect'] = practice_main_menu_rect_draw; drawn_rects['practice_quit_rect'] = practice_quit_rect_draw
     elif showing_simulation_config:
         sim_input_rects_draw, sim_simulate_rect_draw, sim_cancel_rect_draw, profile_checkbox_rect_sim_dialog = draw_simulation_config_dialog(simulation_config_inputs, simulation_config_active_input, state)
@@ -10613,20 +10829,11 @@ def handle_deferred_practice_init(state):
 def handle_practice_restart(state):
     """
     Handles the logic for restarting the 8-Letter Bingo or Power Tiles or BBB practice mode.
-    Updates and returns the game state dictionary.
-    Print statements are now conditional.
-
-    Args:
-        state (dict): The current game state dictionary.
-
-    Returns:
-        dict: The potentially updated state dictionary.
+    This is a full and complete function.
     """
-    global DEV_VISUALIZE_BATCH_ENABLED_SESSION # Access global flag
-    # --- NEW: Access BBB probability globals for restart ---
+    global DEV_VISUALIZE_BATCH_ENABLED_SESSION
     global bbb_7l_max_prob_global, bbb_8l_max_prob_global
-    # --- END NEW ---
-
+    global MODE_HVH, MODE_AVA
 
     can_print_practice_info = DEV_VISUALIZE_BATCH_ENABLED_SESSION
     if 'DEV_VISUALIZE_BATCH_ENABLED_SESSION' not in globals():
@@ -10636,73 +10843,137 @@ def handle_practice_restart(state):
     current_practice_mode = state.get('practice_mode')
 
     if restart_practice_mode_flag and current_practice_mode == "eight_letter":
-        if can_print_practice_info:
-            print("--- Restarting 8-Letter Bingo Practice ---")
+        gamify_active = state.get('initial_game_config', {}).get('gamify_active', False)
 
-        stored_probability_input = None
-        if state.get('active_practice_state_data') and \
-           isinstance(state['active_practice_state_data'], dict):
-            stored_probability_input = state['active_practice_state_data'].get('eight_letter_probability_input')
+        if gamify_active:
+            if can_print_practice_info:
+                print("--- Restarting Gamified 8-Letter Bingo Practice ---")
+            
+            # --- MODIFICATION START: Adjust parameters based on outcome ---
+            outcome = state.get('gamify_puzzle_outcome', 'failure')
+            min_p = state['initial_game_config'].get('gamify_min_prob', 500)
+            current_max_p = state['initial_game_config'].get('gamify_current_max_prob', 750)
+            max_goal = state['initial_game_config'].get('gamify_max_goal', 3500)
+            increment = state['initial_game_config'].get('gamify_increment', 250)
+            
+            new_max_p = current_max_p
+            if outcome == 'success':
+                new_max_p += increment
+                # Check if we are exceeding the user's goal
+                if new_max_p > max_goal and current_max_p <= max_goal:
+                    allow_exceed = show_gamify_goal_exceeded_dialog(max_goal, new_max_p)
+                    if allow_exceed:
+                        # Player wants to continue, so update the goal itself
+                        state['initial_game_config']['gamify_max_goal'] = new_max_p
+                        if can_print_practice_info:
+                            print(f"  Player chose to exceed goal. New goal is now {new_max_p}.")
+                    else:
+                        # Player does not want to exceed, so cap the difficulty at the goal
+                        new_max_p = max_goal
+                        if can_print_practice_info:
+                            print(f"  Player chose not to exceed goal. Capping difficulty at {max_goal}.")
+            else: # Failure
+                new_max_p -= increment
+                # Don't let the max drop below the initial range
+                if new_max_p < (min_p + increment):
+                    new_max_p = min_p + increment
+            
+            state['initial_game_config']['gamify_current_max_prob'] = new_max_p
+            # --- MODIFICATION END ---
 
-        if can_print_practice_info:
-            print(f"  Using stored probability input for restart: '{stored_probability_input}'")
+            board_setup, tiles_setup, player_rack, _, _, _ = _setup_next_8lb_puzzle(min_p, new_max_p)
+            
+            if board_setup is not None:
+                state['board'] = board_setup
+                state['tiles'] = tiles_setup
+                state['racks'][0] = player_rack
+                state['racks'][1] = []
+                state['blanks'] = set()
+                state['bag'] = []
+                state['scores'] = [0, 0]
+                state['turn'] = 1
+                state['first_play'] = False
+                state['practice_target_moves'] = []
+                state['practice_best_move'] = None
+                state['all_moves'] = []
+                state['practice_solved'] = False
+                state['showing_practice_end_dialog'] = False
+                state['game_over_state'] = False
+                state['final_scores'] = None
+                state['sgs_initial_bag'] = []
+                state['previous_turn'] = 0
+                state['move_history'] = []
+                state['gamify_puzzle_outcome'] = None
+                if can_print_practice_info:
+                    print("--- Gamified 8-Letter Bingo Practice Restarted Successfully ---")
+            else:
+                print("--- Error restarting Gamified 8-Letter Bingo Practice. Returning to menu. ---")
+                state['running_inner'] = False
+                state['return_to_mode_selection'] = True
+        else:
+            if can_print_practice_info:
+                print("--- Restarting Standard 8-Letter Bingo Practice ---")
 
-        proceed, p_board, p_tiles, p_racks, p_blanks, p_bag, new_probability_input = \
-            eight_letter_practice(reuse_probability_input=stored_probability_input)
-
-        if proceed:
-            state['board'] = p_board
-            state['tiles'] = p_tiles
-            state['racks'] = p_racks
-            state['blanks'] = p_blanks
-            state['bag'] = p_bag
-            state['scores'] = [0, 0]
-            state['turn'] = 1
-            state['first_play'] = False
-            state['practice_target_moves'] = []
-            state['practice_best_move'] = None
-            state['all_moves'] = []
-            state['practice_solved'] = False
-            state['showing_practice_end_dialog'] = False
-            state['game_over_state'] = False
-            state['final_scores'] = None
-            state['sgs_initial_bag'] = p_bag[:]
-
-            state['active_practice_state_data'] = {
-                "board": p_board, "tiles": p_tiles, "racks": p_racks,
-                "blanks": p_blanks, "bag": p_bag, "first_play": False,
-                "scores": [0, 0], "turn": 1,
-                "eight_letter_probability_input": new_probability_input,
-                "sgs_initial_bag": p_bag[:]
-            }
-            state['practice_mode'] = "eight_letter"
-            state['game_mode'] = MODE_HVH
-            state['is_ai'] = [False, False]
-
-            ui_resets = reset_per_game_variables()
-            for key, value in ui_resets.items():
-                if key not in ['game_mode', 'is_ai', 'practice_mode',
-                               'board', 'tiles', 'scores', 'blanks', 'bag', 'racks',
-                               'first_play', 'turn', 'sgs_initial_bag']:
-                    state[key] = value
-            state['previous_turn'] = 0
-            state['move_history'] = []
-
+            stored_probability_input = None
+            if state.get('active_practice_state_data') and isinstance(state['active_practice_state_data'], dict):
+                practice_params = state['active_practice_state_data'].get('practice_params', {})
+                if not practice_params.get('gamify_active'):
+                    stored_probability_input = str(practice_params.get('standard_max_prob', 1000))
 
             if can_print_practice_info:
-                print("--- 8-Letter Bingo Practice Restarted Successfully ---")
-        else:
-            print("--- Error restarting 8-Letter Bingo Practice. Returning to menu. ---")
-            state['running_inner'] = False
-            state['return_to_mode_selection'] = True
+                print(f"  Using stored probability input for restart: '{stored_probability_input}'")
+
+            proceed, p_board, p_tiles, p_racks, p_blanks, p_bag, new_practice_params = eight_letter_practice(reuse_probability_input=stored_probability_input)
+
+            if proceed:
+                state['board'] = p_board
+                state['tiles'] = p_tiles
+                state['racks'] = p_racks
+                state['blanks'] = p_blanks
+                state['bag'] = p_bag
+                state['scores'] = [0, 0]
+                state['turn'] = 1
+                state['first_play'] = False
+                state['practice_target_moves'] = []
+                state['practice_best_move'] = None
+                state['all_moves'] = []
+                state['practice_solved'] = False
+                state['showing_practice_end_dialog'] = False
+                state['game_over_state'] = False
+                state['final_scores'] = None
+                state['sgs_initial_bag'] = p_bag[:]
+                state['active_practice_state_data'] = {
+                    "board": p_board, "tiles": p_tiles, "racks": p_racks,
+                    "blanks": p_blanks, "bag": p_bag, "first_play": False,
+                    "scores": [0, 0], "turn": 1,
+                    "practice_params": new_practice_params,
+                    "sgs_initial_bag": p_bag[:]
+                }
+                state['practice_mode'] = "eight_letter"
+                state['game_mode'] = MODE_HVH
+                state['is_ai'] = [False, False]
+                ui_resets = reset_per_game_variables()
+                for key, value in ui_resets.items():
+                    if key not in ['game_mode', 'is_ai', 'practice_mode',
+                                   'board', 'tiles', 'scores', 'blanks', 'bag', 'racks',
+                                   'first_play', 'turn', 'sgs_initial_bag']:
+                        state[key] = value
+                state['previous_turn'] = 0
+                state['move_history'] = []
+                if can_print_practice_info:
+                    print("--- Standard 8-Letter Bingo Practice Restarted Successfully ---")
+            else:
+                print("--- Error restarting Standard 8-Letter Bingo Practice. Returning to menu. ---")
+                state['running_inner'] = False
+                state['return_to_mode_selection'] = True
         state['restart_practice_mode'] = False
 
     elif restart_practice_mode_flag and current_practice_mode == "power_tiles":
         if can_print_practice_info:
             print("--- Restarting Power Tiles Practice ---")
 
-        letter_checks_local = state.get('letter_checks', [True]*4) # Persist from previous session
-        number_checks_local = state.get('number_checks', [True]*6) # Persist
+        letter_checks_local = state.get('letter_checks', [True]*4)
+        number_checks_local = state.get('number_checks', [True]*6)
 
         new_board, _, new_tiles = create_board()
         state['board'] = new_board
@@ -10751,8 +11022,8 @@ def handle_practice_restart(state):
         state['game_mode'] = MODE_AVA
         state['is_ai'] = [True, True]
         state['practice_mode'] = "power_tiles"
-        state['letter_checks'] = letter_checks_local # Restore
-        state['number_checks'] = number_checks_local # Restore
+        state['letter_checks'] = letter_checks_local
+        state['number_checks'] = number_checks_local
         
         state['active_practice_state_data'] = {
             "letter_checks": letter_checks_local,
@@ -10774,7 +11045,6 @@ def handle_practice_restart(state):
             print("--- Power Tiles Practice Restarted Successfully ---")
         state['restart_practice_mode'] = False
     
-    # --- NEW: Handle BBB Restart ---
     elif restart_practice_mode_flag and current_practice_mode == "bingo_bango_bongo":
         if can_print_practice_info:
             print("--- Restarting Bingo, Bango, Bongo Practice ---")
@@ -10803,7 +11073,7 @@ def handle_practice_restart(state):
             return state
         
         state['racks'] = new_racks
-        state['initial_racks'] = [r[:] for r in new_racks] # Save initial racks for this game
+        state['initial_racks'] = [r[:] for r in new_racks]
 
         state['first_play'] = True
         state['turn'] = 1
@@ -10816,22 +11086,21 @@ def handle_practice_restart(state):
         state['game_over_state'] = False
         state['final_scores'] = None
 
-        state['practice_target_moves'] = [] # Will be populated by ai_turn if needed
+        state['practice_target_moves'] = []
         state['practice_best_move'] = None
-        state['all_moves'] = [] # Will be populated by ai_turn
-        state['practice_solved'] = False # Reset solved state
+        state['all_moves'] = []
+        state['practice_solved'] = False
         state['showing_practice_end_dialog'] = False
-        state['paused_for_bingo_practice'] = False # Reset pause state
+        state['paused_for_bingo_practice'] = False
         state['bingo_practice_message_shown'] = False
 
-        state['game_mode'] = MODE_AVA # BBB is AI vs AI
+        state['game_mode'] = MODE_AVA
         state['is_ai'] = [True, True]
         state['practice_mode'] = "bingo_bango_bongo"
-        # BBB probability thresholds are global and persist, no need to reset them here
-        # Store them in active_practice_state_data for consistency if needed elsewhere
+        
         state['active_practice_state_data'] = {
             "practice_mode": "bingo_bango_bongo",
-            "bbb_7l_max_prob": bbb_7l_max_prob_global, # Store the current global values
+            "bbb_7l_max_prob": bbb_7l_max_prob_global,
             "bbb_8l_max_prob": bbb_8l_max_prob_global
         }
         
@@ -10849,12 +11118,80 @@ def handle_practice_restart(state):
         if can_print_practice_info:
             print("--- Bingo, Bango, Bongo Practice Restarted Successfully ---")
         state['restart_practice_mode'] = False
-    # --- END NEW ---
 
-    elif restart_practice_mode_flag: # If flag is true but mode not handled
+    elif restart_practice_mode_flag:
         state['restart_practice_mode'] = False
 
     return state
+
+
+
+
+def show_gamify_goal_exceeded_dialog(current_goal, new_difficulty):
+    """
+    Displays a dialog asking if the user wants to exceed their set difficulty goal.
+    This is a full and complete function.
+    Returns:
+        bool: True for "Yes", False for "No".
+    """
+    global screen, dialog_font, ui_font, button_font, DIALOG_COLOR, BLACK, WHITE, BUTTON_COLOR, BUTTON_HOVER, WINDOW_WIDTH, WINDOW_HEIGHT, BUTTON_GAP
+
+    dialog_width, dialog_height = 400, 180
+    dialog_x = (WINDOW_WIDTH - dialog_width) // 2
+    dialog_y = (WINDOW_HEIGHT - dialog_height) // 2
+
+    yes_button_rect = pygame.Rect(dialog_x + (dialog_width // 2) - BUTTON_WIDTH - (BUTTON_GAP // 2), dialog_y + dialog_height - BUTTON_HEIGHT - 20, BUTTON_WIDTH, BUTTON_HEIGHT)
+    no_button_rect = pygame.Rect(dialog_x + (dialog_width // 2) + (BUTTON_GAP // 2), dialog_y + dialog_height - BUTTON_HEIGHT - 20, BUTTON_WIDTH, BUTTON_HEIGHT)
+
+    dialog_running = True
+    while dialog_running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if yes_button_rect.collidepoint(event.pos):
+                    return True
+                elif no_button_rect.collidepoint(event.pos):
+                    return False
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_y:
+                    return True
+                elif event.key == pygame.K_n or event.key == pygame.K_ESCAPE:
+                    return False
+
+        pygame.draw.rect(screen, DIALOG_COLOR, (dialog_x, dialog_y, dialog_width, dialog_height))
+        pygame.draw.rect(screen, BLACK, (dialog_x, dialog_y, dialog_width, dialog_height), 2)
+
+        prompt_line1 = dialog_font.render("Congratulations!", True, BLACK)
+        prompt_line2 = ui_font.render(f"You are about to exceed your goal of {current_goal}.", True, BLACK)
+        prompt_line3 = ui_font.render(f"Continue to difficulty {new_difficulty}?", True, BLACK)
+        
+        prompt_rect1 = prompt_line1.get_rect(center=(dialog_x + dialog_width // 2, dialog_y + 30))
+        prompt_rect2 = prompt_line2.get_rect(center=(dialog_x + dialog_width // 2, dialog_y + 65))
+        prompt_rect3 = prompt_line3.get_rect(center=(dialog_x + dialog_width // 2, dialog_y + 90))
+
+        screen.blit(prompt_line1, prompt_rect1)
+        screen.blit(prompt_line2, prompt_rect2)
+        screen.blit(prompt_line3, prompt_rect3)
+
+        # Yes Button
+        hover_yes = yes_button_rect.collidepoint(pygame.mouse.get_pos())
+        color_yes = BUTTON_HOVER if hover_yes else BUTTON_COLOR
+        pygame.draw.rect(screen, color_yes, yes_button_rect)
+        yes_text_surf = button_font.render("Yes (Y)", True, BLACK)
+        screen.blit(yes_text_surf, yes_text_surf.get_rect(center=yes_button_rect.center))
+
+        # No Button
+        hover_no = no_button_rect.collidepoint(pygame.mouse.get_pos())
+        color_no = BUTTON_HOVER if hover_no else BUTTON_COLOR
+        pygame.draw.rect(screen, color_no, no_button_rect)
+        no_text_surf = button_font.render("No (N)", True, BLACK)
+        screen.blit(no_text_surf, no_text_surf.get_rect(center=no_button_rect.center))
+
+        pygame.display.flip()
+        pygame.time.Clock().tick(30)
+    return False
 
 
 
