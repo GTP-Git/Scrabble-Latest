@@ -1,10 +1,11 @@
 
 
+
 #python
 #Scrabble AK
 #Batch <3s
 #Ready for multithreading
-#15JUN25
+#16JUN25
 
 
 
@@ -832,7 +833,7 @@ def show_allow_invalid_word_dialog(invalid_words_list):
                     return False
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
-                    return True # Default to Allow on Enter
+                    return False # Default to Cancel on Enter
                 elif event.key == pygame.K_ESCAPE:
                     return False # Cancel on Escape
 
@@ -5374,112 +5375,7 @@ def save_batch_statistics(batch_results, player_names, batch_summary_filename, t
 
 
 
-# --- AI Logic ---
 
-# --- AI Strategy Helper Functions ---
-
-
-
-
-
-def find_best_move(state, is_plaid_mode):
-    """
-    The new AI brain. It determines the best action (play, exchange, or pass)
-    based on the selected strategy (Plaid or standard).
-
-    Returns:
-        tuple: (action_chosen, move_details)
-               - action_chosen (str): 'play', 'exchange', or 'pass'
-               - move_details (dict or list): The move dictionary if playing,
-                 the list of tiles to exchange, or None if passing.
-    """
-    is_silent_run = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
-    
-    # Unpack necessary state
-    current_rack = state['racks'][state['turn'] - 1]
-    
-    if is_plaid_mode:
-        # --- PLAID MODE LOGIC ---
-        if not is_silent_run:
-            print("AI is in Plaid Mode (Highest Score Only).")
-        
-        # Generate moves but only keep track of the highest scoring one.
-        # This is still using the full generator for now, but the principle is what matters.
-        # A true optimization would be a new cython function find_highest_scoring_move.
-        all_moves = ai_engine.generate_all_moves_gaddag(
-            current_rack, state['tiles'], state['board'], state['blanks'],
-            is_silent_batch_run_param=is_silent_run
-        )
-        if not all_moves:
-            return 'pass', None
-        else:
-            # Find the best move by score without sorting the whole list
-            best_move = max(all_moves, key=lambda m: m.get('score', 0))
-            if not is_silent_run:
-                print(f"  Plaid AI selecting: '{best_move.get('word', 'N/A')}' with score {best_move.get('score', 0)}")
-            return 'play', best_move
-
-    else:
-        # --- STANDARD AI LOGIC (moved from ai_turn) ---
-        all_moves_gen = ai_engine.generate_all_moves_gaddag(
-            current_rack, state['tiles'], state['board'], state['blanks'],
-            is_silent_batch_run_param=is_silent_run
-        )
-        if all_moves_gen is None:
-            all_moves_gen = []
-
-        # (The entire complex decision block from the old ai_turn goes here)
-        expected_single_draw_value_for_turn = ai_engine.get_expected_single_draw_value(current_rack, state['tiles'], state['blanks'])
-
-        best_raw_plus_leave_play_candidate = None
-        best_raw_plus_leave_evaluation = -float('inf')
-        best_simulated_play_candidate = None
-        best_simulated_play_final_score = -float('inf')
-        best_exchange_tiles = []
-        best_exchange_evaluation = -float('inf')
-
-        can_play = bool(all_moves_gen)
-        can_exchange = len(state['bag']) > 0
-
-        if can_play:
-            for move in all_moves_gen:
-                raw_score = move.get('score', 0)
-                leave_value = ai_engine.evaluate_leave(move.get('leave', []), is_silent_batch_run_param=is_silent_run)
-                current_move_raw_plus_leave_eval = raw_score + leave_value
-                if current_move_raw_plus_leave_eval > best_raw_plus_leave_evaluation:
-                    best_raw_plus_leave_evaluation = current_move_raw_plus_leave_eval
-                    best_raw_plus_leave_play_candidate = move
-
-        if state.get('USE_AI_SIMULATION') and can_play:
-            opponent_idx = 1 - (state['turn'] - 1)
-            opponent_rack_len_sim = len(state['racks'][opponent_idx]) if 0 <= opponent_idx < len(state['racks']) and state['racks'][opponent_idx] is not None else 7
-            simulation_results = ai_engine.run_ai_simulation(
-                all_moves_gen, current_rack, opponent_rack_len_sim, state['tiles'], state['blanks'], state['board'], state['bag'],
-                state.get('ai_sim_num_candidates_cfg', DEFAULT_AI_CANDIDATES),
-                state.get('ai_sim_num_opponent_sims_cfg', DEFAULT_OPPONENT_SIMULATIONS),
-                state.get('ai_sim_num_post_sim_candidates_cfg', DEFAULT_POST_SIM_CANDIDATES),
-                is_silent_batch_run_param=is_silent_run
-            )
-            if simulation_results:
-                best_simulated_play_candidate = simulation_results[0]['move']
-
-        if can_exchange:
-            best_exchange_tiles, best_exchange_evaluation = ai_engine.find_best_exchange_option(
-                current_rack, state['tiles'], state['blanks'], len(state['bag']), is_silent_batch_run_param=is_silent_run
-            )
-
-        if can_play and best_raw_plus_leave_play_candidate:
-            if best_exchange_tiles and (best_exchange_evaluation > best_raw_plus_leave_evaluation + EXCHANGE_PREFERENCE_THRESHOLD):
-                return 'exchange', best_exchange_tiles
-            else:
-                if state.get('USE_AI_SIMULATION') and best_simulated_play_candidate:
-                    return 'play', best_simulated_play_candidate
-                else:
-                    return 'play', best_raw_plus_leave_play_candidate
-        elif best_exchange_tiles:
-            return 'exchange', best_exchange_tiles
-        else:
-            return 'pass', None
 
 
 
@@ -5747,6 +5643,10 @@ def ai_turn(state):
     Handles the AI's turn by calling the unified Cython decision-making function
     and then executing the returned action.
     """
+    # Add a guard clause at the top to prevent any action if the game is already paused for practice.
+    if state.get('paused_for_power_tile') or state.get('paused_for_bingo_practice'):
+        return state
+
     global last_played_highlight_coords, is_solving_endgame
     global USE_AI_SIMULATION, USE_ENDGAME_SOLVER
     global seven_letter_words, eight_letter_words, bbb_7l_max_prob_global, bbb_8l_max_prob_global
@@ -5795,6 +5695,12 @@ def ai_turn(state):
             state['all_moves'] = details['moves']
             if not is_silent_batch_run_param:
                 print(f"AI turn PAUSING for Bingo, Bango, Bongo.")
+        
+        # --- THIS IS THE FIX ---
+        # Signal that an action (pausing) has been taken for this turn.
+        state['human_played'] = True 
+        # --- END FIX ---
+
         return state # Return early, turn does not advance
 
     # If not pausing, proceed with play/exchange/pass
@@ -8615,9 +8521,105 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
 
 
 
+def _get_all_word_structures_for_phony_scoring(new_tiles, tiles):
+    """
+    A Python-based helper to find all word structures for a play, without validation.
+    This is used only for scoring user-allowed phony words to avoid TypeErrors.
+    """
+    all_word_structures = []
+    if not new_tiles:
+        return []
+
+    rows = {r for r, c, l in new_tiles}
+    cols = {c for r, c, l in new_tiles}
+    new_positions_set = set((r, c) for r, c, l in new_tiles)
+    seen_signatures = set()
+    orientation = None
+
+    # Find main word structure
+    main_word_tiles = []
+    if len(rows) == 1:
+        orientation = "horizontal"
+        row = list(rows)[0]
+        min_col = min(cols)
+        max_col = max(cols)
+        while min_col > 0 and tiles[row][min_col - 1]:
+            min_col -= 1
+        while max_col < GRID_SIZE - 1 and tiles[row][max_col + 1]:
+            max_col += 1
+        main_word_tiles = [(row, c, tiles[row][c]) for c in range(min_col, max_col + 1)]
+    elif len(cols) == 1:
+        orientation = "vertical"
+        col = list(cols)[0]
+        min_row = min(rows)
+        max_row = max(rows)
+        while min_row > 0 and tiles[min_row - 1][col]:
+            min_row -= 1
+        while max_row < GRID_SIZE - 1 and tiles[max_row + 1][col]:
+            max_row += 1
+        main_word_tiles = [(r, col, tiles[r][col]) for r in range(min_row, max_row + 1)]
+
+    if main_word_tiles:
+        signature = tuple(sorted(main_word_tiles))
+        if signature not in seen_signatures:
+            all_word_structures.append(main_word_tiles)
+            seen_signatures.add(signature)
+
+    # Find cross word structures
+    if orientation:
+        for r_tile, c_tile, l_tile in new_tiles:
+            cross_word = []
+            if orientation == "horizontal": # Find vertical cross words
+                min_row, max_row = r_tile, r_tile
+                while min_row > 0 and tiles[min_row - 1][c_tile]:
+                    min_row -= 1
+                while max_row < GRID_SIZE - 1 and tiles[max_row + 1][c_tile]:
+                    max_row += 1
+                if min_row != max_row:
+                    cross_word = [(r, c_tile, tiles[r][c_tile]) for r in range(min_row, max_row + 1)]
+            elif orientation == "vertical": # Find horizontal cross words
+                min_col, max_col = c_tile, c_tile
+                while min_col > 0 and tiles[r_tile][min_col - 1]:
+                    min_col -= 1
+                while max_col < GRID_SIZE - 1 and tiles[r_tile][max_col + 1]:
+                    max_col += 1
+                if min_col != max_col:
+                    cross_word = [(r_tile, c, tiles[r_tile][c]) for c in range(min_col, max_col + 1)]
+            
+            if cross_word:
+                signature = tuple(sorted(cross_word))
+                if signature not in seen_signatures:
+                    all_word_structures.append(cross_word)
+                    seen_signatures.add(signature)
+    elif len(new_tiles) == 1: # Single tile play, can form two words
+        r_tile, c_tile, l_tile = new_tiles[0]
+        # Horizontal check
+        min_col, max_col = c_tile, c_tile
+        while min_col > 0 and tiles[r_tile][min_col - 1]: min_col -= 1
+        while max_col < GRID_SIZE - 1 and tiles[r_tile][max_col + 1]: max_col += 1
+        if min_col != max_col:
+            h_word = [(r_tile, c, tiles[r_tile][c]) for c in range(min_col, max_col + 1)]
+            signature = tuple(sorted(h_word))
+            if signature not in seen_signatures:
+                all_word_structures.append(h_word)
+                seen_signatures.add(signature)
+        # Vertical check
+        min_row, max_row = r_tile, r_tile
+        while min_row > 0 and tiles[min_row - 1][c_tile]: min_row -= 1
+        while max_row < GRID_SIZE - 1 and tiles[max_row + 1][c_tile]: max_row += 1
+        if min_row != max_row:
+            v_word = [(r, c_tile, tiles[r][c_tile]) for r in range(min_row, max_row + 1)]
+            signature = tuple(sorted(v_word))
+            if signature not in seen_signatures:
+                all_word_structures.append(v_word)
+                seen_signatures.add(signature)
+
+    return all_word_structures
 
 
-# In Scrabble AE - 11JUN25 - Cython Optimize
+
+
+
 
 def _handle_keydown_typing_on_board(event, state):
     """
@@ -8838,7 +8840,12 @@ def _handle_keydown_typing_on_board(event, state):
                 allow_anyway = show_allow_invalid_word_dialog(invalid_words_list)
                 if allow_anyway:
                     proceed_with_play = True
-                    score_val_play = ai_engine.calculate_score(newly_placed_details, state['board'], temp_tiles_for_validation, state['blanks'])
+                    # --- THIS IS THE ONLY CHANGE IN THE ENTIRE FUNCTION ---
+                    # 1. Get the word structures using our new Python helper function.
+                    words_to_score = _get_all_word_structures_for_phony_scoring(newly_placed_details, temp_tiles_for_validation)
+                    # 2. Call the Cython calculate_score function with the correct number of arguments.
+                    score_val_play = ai_engine.calculate_score(newly_placed_details, state['board'], temp_tiles_for_validation, state['blanks'], words_to_score)
+                    # --- END CHANGE ---
                     if not is_silent_run:
                         print(f"Player allowed invalid word(s): {invalid_words_list}")
                 else: # Player chose not to allow invalid words
@@ -8905,7 +8912,7 @@ def _handle_keydown_typing_on_board(event, state):
                         practice_mode_allows_play = False
                 elif state['practice_mode'] == "eight_letter":
                     # Get the primary word formed by the play
-                    all_words_details_8l = ai_engine.find_all_words_formed(newly_placed_details, temp_tiles_for_validation)
+                    all_words_details_8l = ai_engine.get_words_formed_for_python(newly_placed_details, temp_tiles_for_validation)
                     played_word_str_8l = ""
                     played_primary_tiles_8l = []
                     newly_placed_coords_8l = set((r_8l,c_8l) for r_8l,c_8l,_ in newly_placed_details)
@@ -11333,74 +11340,57 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                     break
                 
                 
-
+                # --- THIS IS THE CORRECTED LOGIC FLOW ---
                 current_state_dict['gaddag_loading_status'] = gaddag_loading_status 
                 current_state_dict['GADDAG_STRUCTURE'] = GADDAG_STRUCTURE
-
                 current_state_dict['bag_count'] = len(current_state_dict.get('bag', []))
 
-                current_state_dict = handle_deferred_practice_init(current_state_dict)
-                if not current_state_dict['running_inner']:
-                    if current_state_dict.get('batch_stop_requested', False): 
-                        _module_level_batch_stop_requested_internal = True
-                    if current_state_dict.get('return_to_mode_selection', False):
-                        _return_to_mode_selection_internal = True
-                    break
-
-                current_state_dict['current_preview_score'] = update_preview_score(current_state_dict)
-                current_state_dict = handle_turn_start_updates(current_state_dict)
-                current_state_dict = handle_ai_turn_trigger(current_state_dict)
-
-                if current_state_dict['gaddag_loading_status'] == 'loading' and \
-                   (0 <= current_state_dict['turn'] - 1 < len(current_state_dict['is_ai']) and \
-                    current_state_dict['is_ai'][current_state_dict['turn'] - 1]):
-                    if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
-                        pygame.time.wait(100) 
-
-                current_state_dict = handle_practice_messages(current_state_dict)
+                # 1. Handle user input first
                 event_flags = process_game_events(current_state_dict, current_state_dict['drawn_rects'])
-
                 _visual_batch_esc_stop_pending_internal = current_state_dict.get('visual_batch_esc_stop_pending', False)
 
+                if event_flags.get('batch_stop_requested_from_event', False): _module_level_batch_stop_requested_internal = True
+                if event_flags.get('return_to_mode_selection_from_event', False): _return_to_mode_selection_internal = True
+                if event_flags.get('start_new_game_same_mode_from_event', False): _local_start_new_game_same_mode_internal = True
+                if not event_flags.get('running_inner_from_event', True): current_state_dict['running_inner'] = False
+                if not current_state_dict['running_inner']: break
 
-                if event_flags.get('batch_stop_requested_from_event', False):
-                    _module_level_batch_stop_requested_internal = True
-                if event_flags.get('return_to_mode_selection_from_event', False):
-                    _return_to_mode_selection_internal = True
-                if event_flags.get('start_new_game_same_mode_from_event', False):
-                    _local_start_new_game_same_mode_internal = True
-                if not event_flags.get('running_inner_from_event', True):
-                    current_state_dict['running_inner'] = False
+                # 2. Handle state updates based on turn changes or practice mode needs
+                current_state_dict = handle_deferred_practice_init(current_state_dict)
+                if not current_state_dict['running_inner']:
+                    if current_state_dict.get('batch_stop_requested', False): _module_level_batch_stop_requested_internal = True
+                    if current_state_dict.get('return_to_mode_selection', False): _return_to_mode_selection_internal = True
+                    break
+                
+                current_state_dict['current_preview_score'] = update_preview_score(current_state_dict)
+                current_state_dict = handle_turn_start_updates(current_state_dict)
+                current_state_dict = handle_practice_messages(current_state_dict)
+                current_state_dict = handle_practice_restart(current_state_dict)
+                if not current_state_dict['running_inner']:
+                    if current_state_dict.get('batch_stop_requested', False): _module_level_batch_stop_requested_internal = True
+                    if current_state_dict.get('return_to_mode_selection', False): _return_to_mode_selection_internal = True
+                    break
 
-
+                # 3. Check for game over condition
                 if not current_state_dict.get('typing', False):
                     current_state_dict = check_and_handle_game_over(current_state_dict)
                 if current_state_dict['game_over_state'] and _local_start_new_game_same_mode_internal:
                      current_state_dict['running_inner'] = False 
+                     break
 
-                if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
-                    if current_state_dict['game_over_state'] and not previous_game_over_state_in_loop:
-                        previous_game_over_state_in_loop = True
-                    elif not current_state_dict['game_over_state']:
-                        previous_game_over_state_in_loop = False
-
-
-                current_state_dict = handle_practice_restart(current_state_dict)
-                if not current_state_dict['running_inner']:
-                    if current_state_dict.get('batch_stop_requested', False):
-                         _module_level_batch_stop_requested_internal = True
-                    if current_state_dict.get('return_to_mode_selection', False):
-                         _return_to_mode_selection_internal = True
-                    break
-
+                # 4. Draw the screen with the current state
                 if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
                     current_state_dict['drawn_rects'] = draw_game_screen(screen, current_state_dict)
                     pygame.display.flip()
-                    # --- MODIFICATION START: Tick the clock ---
                     clock.tick(60)
-                    # --- MODIFICATION END ---
                 elif is_batch_running: 
                     pygame.time.wait(1) 
+
+                # 5. ONLY NOW, after drawing, check if the AI should take its turn
+                #    AND ONLY IF THE GAME IS NOT PAUSED FOR PRACTICE.
+                if not current_state_dict.get('paused_for_power_tile') and not current_state_dict.get('paused_for_bingo_practice'):
+                    current_state_dict = handle_ai_turn_trigger(current_state_dict)
+                # --- END CORRECTED LOGIC FLOW ---
 
 
             game_mode = current_state_dict['game_mode']
