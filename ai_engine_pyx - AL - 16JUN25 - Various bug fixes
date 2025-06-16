@@ -1,8 +1,7 @@
 # ai_engine.pyx
 
-#ai_engine_pyx - AK - 16JUN25
-#<3s batch
-#Ready for multithreading
+#ai_engine_pyx - AL - 16JUN25
+#<Various bug fixes
 
 
 
@@ -169,7 +168,6 @@ cpdef set get_anchor_points(list tiles, bint is_first_play):
         
     return anchors
 
-@cython.cdivision(True)
 cdef _gaddag_traverse(
     object anchor_pos, int[27] rack_counts_c, list tiles, list board, set blanks, dict cross_check_sets, object gaddag_node,
     list current_word_tiles, bint is_reversed, str current_axis, list all_found_moves, set unique_move_signatures,
@@ -199,7 +197,8 @@ cdef _gaddag_traverse(
                 newly_placed_list_details.append((r_item, c_item, l_item))
 
         if newly_placed_list_details:
-            new_tiles_sig = tuple(sorted(newly_placed_list_details))
+            newly_placed_list_details.sort()
+            new_tiles_sig = tuple(newly_placed_list_details)
             if new_tiles_sig not in unique_move_signatures:
                 temp_tiles_for_validation = [row[:] for row in original_tiles_state]
                 temp_blanks_for_validation = set(blanks)
@@ -438,6 +437,8 @@ cdef _gaddag_traverse(
                 is_silent_batch_run_param
             )
             current_word_tiles.pop()
+
+
 
 @cython.cdivision(True)
 cdef _gaddag_traverse_for_max_score(
@@ -734,7 +735,8 @@ cdef _gaddag_traverse_for_best_move(
                 newly_placed_list_details.append((r_item, c_item, l_item))
 
         if newly_placed_list_details:
-            new_tiles_sig = tuple(sorted(newly_placed_list_details))
+            newly_placed_list_details.sort()
+            new_tiles_sig = tuple(newly_placed_list_details)
             if new_tiles_sig not in unique_move_signatures:
                 temp_tiles_for_validation = [row[:] for row in original_tiles_state]
                 temp_blanks_for_validation = set(blanks)
@@ -903,6 +905,9 @@ cdef _gaddag_traverse_for_best_move(
                 full_rack_size, max_len, max_score_ref, best_move_ref, depth + 1
             )
             current_word_tiles.pop()
+
+
+
 
 cpdef object find_best_move_gaddag(
     list rack, list tiles, list board, set blanks,
@@ -1786,6 +1791,8 @@ cpdef tuple find_best_exchange_option(list rack, list game_tiles, set game_blank
             
     return best_overall_exchange_tiles, best_overall_estimated_value
 
+
+
 @cython.cdivision(True)
 @cython.boundscheck(False)
 @cython.wraparound(False)
@@ -1798,11 +1805,11 @@ cpdef list run_ai_simulation(list initial_ai_moves_list, list ai_rack, int oppon
     """
     cdef list all_ai_moves, top_ai_moves_candidates, simulation_results, final_evaluated_moves
     cdef list sim_tiles_after_ai, sim_rack_after_ai, sim_bag_after_ai, drawn_ai, sim_opponent_rack
-    cdef set sim_blanks_after_ai, move_blanks, allowed_letters_v, allowed_letters_h
-    cdef dict ai_move, move_result, ai_move_dict, unseen_pool_dict, sim_cross_check_sets
+    cdef set sim_blanks_after_ai, move_blanks, affected_squares_for_cross_check, allowed_letters_v, allowed_letters_h
+    cdef dict ai_move, move_result, ai_move_dict, unseen_pool_dict, initial_cross_check_sets, sim_cross_check_sets
     cdef float total_opponent_score_for_this_move, average_opponent_score, ai_raw_score, leave_value, final_eval_score
     cdef float avg_opp_score
-    cdef int i, sim_run, newly_placed_count, num_to_draw_ai, actual_opponent_rack_len, r, c, rr, cc
+    cdef int i, sim_run, newly_placed_count, num_to_draw_ai, actual_opponent_rack_len, r, c, rr, cc, dr, dc, nr, nc
     cdef bint valid_placement
     cdef str letter, up_word, down_word, left_word, right_word, letter_char
     cdef object temp_drawn_ai_counts
@@ -1817,7 +1824,6 @@ cpdef list run_ai_simulation(list initial_ai_moves_list, list ai_rack, int oppon
     if not all_ai_moves:
         return []
 
-    # This function assumes the incoming list is already sorted by prelim_equity
     top_ai_moves_candidates = all_ai_moves[:num_ai_candidates]
     
     simulation_results = []
@@ -1833,17 +1839,46 @@ cpdef list run_ai_simulation(list initial_ai_moves_list, list ai_rack, int oppon
         unseen_pool_counts_c[tile_idx] = count
         total_unseen_tiles += count
 
+    # --- OPTIMIZATION: Pre-calculate the cross-check sets for the ORIGINAL board state just ONCE. ---
+    initial_cross_check_sets = {}
+    for r in range(GRID_SIZE_C):
+        for c in range(GRID_SIZE_C):
+            if not tiles[r][c]:
+                up_word = ""; rr = r - 1
+                while rr >= 0 and tiles[rr][c]: up_word = tiles[rr][c] + up_word; rr -= 1
+                down_word = ""; rr = r + 1
+                while rr < GRID_SIZE_C and tiles[rr][c]: down_word += tiles[rr][c]; rr += 1
+                allowed_letters_v = set()
+                if not up_word and not down_word: allowed_letters_v = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ ')
+                else:
+                    for letter_char in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
+                        if DAWG_C.search(up_word + letter_char + down_word): allowed_letters_v.add(letter_char)
+                    if allowed_letters_v: allowed_letters_v.add(' ')
+
+                left_word = ""; cc = c - 1
+                while cc >= 0 and tiles[r][cc]: left_word = tiles[r][cc] + left_word; cc -= 1
+                right_word = ""; cc = c + 1
+                while cc < GRID_SIZE_C and tiles[r][cc]: right_word += tiles[r][cc]; cc += 1
+                allowed_letters_h = set()
+                if not left_word and not right_word: allowed_letters_h = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ ')
+                else:
+                    for letter_char in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
+                        if DAWG_C.search(left_word + letter_char + right_word): allowed_letters_h.add(letter_char)
+                    if allowed_letters_h: allowed_letters_h.add(' ')
+                initial_cross_check_sets[(r, c)] = {'V': allowed_letters_v, 'H': allowed_letters_h}
+
     for i, ai_move in enumerate(top_ai_moves_candidates):
         total_opponent_score_for_this_move = 0.0
-        newly_placed_count = len(ai_move.get('newly_placed', []))
-
+        
         sim_tiles_after_ai = [row[:] for row in tiles]
         sim_blanks_after_ai = blanks.copy()
         sim_rack_after_ai = ai_rack[:]
-        sim_bag_after_ai = bag[:]
         move_blanks = ai_move.get('blanks', set())
         valid_placement = True
         
+        # --- NEW, SIMPLER INCREMENTAL UPDATE LOGIC ---
+        # 1. Identify only the squares adjacent to the new tiles
+        affected_squares_for_cross_check = set()
         for r, c, letter in ai_move.get('newly_placed', []):
             if 0 <= r < GRID_SIZE_C and 0 <= c < GRID_SIZE_C:
                 sim_tiles_after_ai[r][c] = letter
@@ -1854,18 +1889,53 @@ cpdef list run_ai_simulation(list initial_ai_moves_list, list ai_rack, int oppon
                 else:
                     if letter in sim_rack_after_ai: sim_rack_after_ai.remove(letter)
                     else: valid_placement = False; break
-            else: valid_placement = False; break
+                
+                # Add adjacent squares to the set of squares to update
+                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    nr, nc = r + dr, c + dc
+                    if 0 <= nr < GRID_SIZE_C and 0 <= nc < GRID_SIZE_C:
+                        affected_squares_for_cross_check.add((nr, nc))
+            else: 
+                valid_placement = False
+                break
         if not valid_placement:
             continue
 
-        num_to_draw_ai = newly_placed_count
-        drawn_ai = []
-        for _ in range(num_to_draw_ai):
-            if sim_bag_after_ai: drawn_ai.append(sim_bag_after_ai.pop())
-        
+        # 2. Create a copy and only update the affected squares
+        sim_cross_check_sets = initial_cross_check_sets.copy()
+        for r, c in affected_squares_for_cross_check:
+            if not sim_tiles_after_ai[r][c]: # Only update for empty squares
+                up_word = ""; rr = r - 1
+                while rr >= 0 and sim_tiles_after_ai[rr][c]: up_word = sim_tiles_after_ai[rr][c] + up_word; rr -= 1
+                down_word = ""; rr = r + 1
+                while rr < GRID_SIZE_C and sim_tiles_after_ai[rr][c]: down_word += sim_tiles_after_ai[rr][c]; rr += 1
+                allowed_letters_v = set()
+                if not up_word and not down_word: allowed_letters_v = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ ')
+                else:
+                    for letter_char in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
+                        if DAWG_C.search(up_word + letter_char + down_word): allowed_letters_v.add(letter_char)
+                    if allowed_letters_v: allowed_letters_v.add(' ')
+
+                left_word = ""; cc = c - 1
+                while cc >= 0 and sim_tiles_after_ai[r][cc]: left_word = sim_tiles_after_ai[r][cc] + left_word; cc -= 1
+                right_word = ""; cc = c + 1
+                while cc < GRID_SIZE_C and sim_tiles_after_ai[r][cc]: right_word += sim_tiles_after_ai[r][cc]; cc += 1
+                allowed_letters_h = set()
+                if not left_word and not right_word: allowed_letters_h = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ ')
+                else:
+                    for letter_char in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
+                        if DAWG_C.search(left_word + letter_char + right_word): allowed_letters_h.add(letter_char)
+                    if allowed_letters_h: allowed_letters_h.add(' ')
+                sim_cross_check_sets[(r, c)] = {'V': allowed_letters_v, 'H': allowed_letters_h}
+        # --- END OF OPTIMIZED UPDATE LOGIC ---
+
         opponent_pool_counts_c = unseen_pool_counts_c[:]
         total_opponent_tiles = total_unseen_tiles
         
+        drawn_ai = []
+        for _ in range(len(ai_move.get('newly_placed', []))):
+            if bag: drawn_ai.append(bag[-(_ + 1)])
+
         temp_drawn_ai_counts = Counter(drawn_ai)
         for tile, count in temp_drawn_ai_counts.items():
             if tile == ' ':
@@ -1874,33 +1944,6 @@ cpdef list run_ai_simulation(list initial_ai_moves_list, list ai_rack, int oppon
                 tile_idx = ord(tile) - ord('A')
             opponent_pool_counts_c[tile_idx] -= count
             total_opponent_tiles -= count
-
-        sim_cross_check_sets = {}
-        for r in range(GRID_SIZE_C):
-            for c in range(GRID_SIZE_C):
-                if not sim_tiles_after_ai[r][c]:
-                    up_word = ""; rr = r - 1
-                    while rr >= 0 and sim_tiles_after_ai[rr][c]: up_word = sim_tiles_after_ai[rr][c] + up_word; rr -= 1
-                    down_word = ""; rr = r + 1
-                    while rr < GRID_SIZE_C and sim_tiles_after_ai[rr][c]: down_word += sim_tiles_after_ai[rr][c]; rr += 1
-                    allowed_letters_v = set()
-                    if not up_word and not down_word: allowed_letters_v = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ ')
-                    else:
-                        for letter_char in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
-                            if DAWG_C.search(up_word + letter_char + down_word): allowed_letters_v.add(letter_char)
-                        if allowed_letters_v: allowed_letters_v.add(' ')
-
-                    left_word = ""; cc = c - 1
-                    while cc >= 0 and sim_tiles_after_ai[r][cc]: left_word = sim_tiles_after_ai[r][cc] + left_word; cc -= 1
-                    right_word = ""; cc = c + 1
-                    while cc < GRID_SIZE_C and sim_tiles_after_ai[r][cc]: right_word += sim_tiles_after_ai[r][cc]; cc += 1
-                    allowed_letters_h = set()
-                    if not left_word and not right_word: allowed_letters_h = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ ')
-                    else:
-                        for letter_char in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
-                            if DAWG_C.search(left_word + letter_char + right_word): allowed_letters_h.add(letter_char)
-                        if allowed_letters_h: allowed_letters_h.add(' ')
-                    sim_cross_check_sets[(r, c)] = {'V': allowed_letters_v, 'H': allowed_letters_h}
 
         for sim_run in range(num_opponent_sims):
             sim_opponent_rack = []
@@ -1958,6 +2001,8 @@ cpdef list run_ai_simulation(list initial_ai_moves_list, list ai_rack, int oppon
     final_evaluated_moves.sort(key=_sort_key_final_eval, reverse=True)
 
     return final_evaluated_moves
+
+
 
 cpdef tuple determine_best_action(
     list rack, list tiles, list board, set blanks, list bag, bint first_play,
