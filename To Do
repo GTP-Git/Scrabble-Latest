@@ -1,8 +1,20 @@
 To-Do List
 
--- In Lookup dialog, give option to search for leave values
 
--- Set up batch games to run in threads/cores. (Tried, failed, will try again)
+-- Blank usage is not optimal, Batch game blanks often left on rack at end of game
+
+-- In Insights, allow options to provide turn-by-turn board analysis (it says Insights, after all).
+Provide info like open lanes, scoring opportunites (hot spots), current player's game needs (open, close,
+ahead, behind), hot spot analysis (with your current tiles you could play XY, allowing XYZ next turn, scoring 1,000 pts.
+There is also a 27% chance to draw the W next turn, allowing you extend XYZ. Maybe? Give scores to different board
+dynamics, like Openness score (35%).
+
+-- In Lookup, also show probability for words. If I type a 5-letter word in, it'll give me the probability of that
+word among the 5's.
+
+-- Lookup should also allow the ability to anagram words.                                   
+
+-- Set up batch games to run in threads/cores. Tried, failed. Will try again.
 
 -- Can the Lookup feature also serve as a word search, for ex., LO? returns LOG, LOT..., etc. Can it also return the probability of each word, within it's length? For ex, LOVED is 2880 w/in the fives.
 
@@ -17,8 +29,6 @@ To-Do List
 -- Allow what-if scenarios, where the main_branch_game_state is saved, but players can make different plays, choose different racks, explore endgames, etc., Have a reset button that backs the main_branch_game_state to continue play. 
 
 -- Create a constants.py file, can be used by my Batch Analysis program and Scrabble Game.py.
-
--- In Replay Mode, the console buttons can still override the Options options, requiring a very precise click to get an option to fire.
 
 -- In All Words, have a search/filter function so you can look up a word from the list, which is updated and sorted in realtime based on text string search (how important is this, really? Not sure I'd use it much).
 
@@ -81,7 +91,6 @@ TOOLTIP_TEXTS = {
     # Add more tooltips here using unique keys
 }
 
--- use cProfile (and snakeviz to visualize) where my program is slow and inefficient
 
 -- Get Endgame Solver working more efficiently. Will likely need to compile this function down to C. "C" below for details.
 
@@ -236,4 +245,8 @@ ________________________________________________
                                                                                                                                                              -- Simulation results should show as many results as you sim, instead of just the top five.
 -- Create a batch setting that runs games where the AI only picks move based on highest score and calculates nothing else. Call it Plaid. :)
 
--- Gamified 8LB with increasing/decreasing difficulty depending on puzzle success
+-- use cProfile (and snakeviz to visualize) where my program is slow and inefficient
+
+-- Load Game should look in subfolders as well as the main folder for the saved games
+
+                                                                                                                                                        
