@@ -1,7 +1,7 @@
 # ai_engine.pyx
 
-#ai_engine_pyx - AN - 17JUN25
-#Lookup feature
+#ai_engine_pyx - AO - 18JUN25
+#Implementing Phase 1 of Insights - Open//Closed Boards
 
 
 
@@ -2538,3 +2538,219 @@ cpdef object solve_endgame(list rack_player, list opponent_rack, list tiles, set
         return evaluated_lines[0]['sequence'][0]
     else:
         return "PASS"
+
+
+
+#########################################
+#///////////Insights Code////////////////
+#########################################
+
+
+cdef tuple _calculate_openness_score(list tiles, set anchors, list board):
+    """
+    Calculates a raw score based on accessible bonus squares.
+    Returns (raw_score, list_of_hotspots).
+    """
+    cdef int score = 0
+    cdef list hotspots = []
+    cdef int r, c
+    cdef tuple square_color
+    for r, c in anchors:
+        square_color = board[r][c]
+        if square_color == RED_C:
+            score += 15
+            hotspots.append(f"TWS at {get_coord((r,c), 'H')}")
+        elif square_color == PINK_C:
+            score += 7
+            hotspots.append(f"DWS at {get_coord((r,c), 'H')}")
+        elif square_color == BLUE_C:
+            score += 3
+        elif square_color == LIGHT_BLUE_C:
+            score += 2
+            
+    return score, hotspots
+
+
+
+cdef list _find_bingo_lanes(list tiles, set anchors):
+    """
+    Finds open lanes of 7+ squares that are connected to the board.
+    """
+    cdef list lanes = []
+    cdef int r, c, length, start
+    cdef bint has_anchor
+    # Horizontal lanes
+    for r in range(GRID_SIZE_C):
+        length = 0
+        for c in range(GRID_SIZE_C):
+            if not tiles[r][c]:
+                length += 1
+            else:
+                if length >= 7:
+                    start = c - length
+                    has_anchor = any((r, i) in anchors for i in range(start, c))
+                    if has_anchor:
+                        lanes.append(f"Row {r+1} (Cols {LETTERS_C[start]}-{LETTERS_C[c-1]})")
+                length = 0
+        if length >= 7:
+            start = GRID_SIZE_C - length
+            has_anchor = any((r, i) in anchors for i in range(start, GRID_SIZE_C))
+            if has_anchor:
+                lanes.append(f"Row {r+1} (Cols {LETTERS_C[start]}-{LETTERS_C[GRID_SIZE_C-1]})")
+
+    # Vertical lanes
+    for c in range(GRID_SIZE_C):
+        length = 0
+        for r in range(GRID_SIZE_C):
+            if not tiles[r][c]:
+                length += 1
+            else:
+                if length >= 7:
+                    start = r - length
+                    has_anchor = any((i, c) in anchors for i in range(start, r))
+                    if has_anchor:
+                        lanes.append(f"Col {LETTERS_C[c]} (Rows {start+1}-{r})")
+                length = 0
+        if length >= 7:
+            start = GRID_SIZE_C - length
+            has_anchor = any((i, c) in anchors for i in range(start, GRID_SIZE_C))
+            if has_anchor:
+                lanes.append(f"Col {LETTERS_C[c]} (Rows {start+1}-{GRID_SIZE_C})")
+                
+    return lanes
+
+
+
+
+cdef list _find_live_hooks(list tiles, dict unseen_tiles_pool, set anchors):
+    """
+    Finds all 'live' hooks on the board and calculates the probability
+    of the opponent having/drawing a tile for them.
+    This version is more robust by iterating through anchors.
+    """
+    cdef list live_hooks_details = []
+    cdef int r, c, r_word, c_word, start_r, end_r, start_c, end_c, total_unseen_count, live_letter_pool_count
+    cdef str tile_on_board, word_str, hook_letter, up_word, down_word, left_word, right_word, full_alphabet
+    cdef list live_letters_for_hook
+    cdef set processed_hooks = set()
+    cdef float probability
+    cdef int rr, cc
+    full_alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' # Use the full alphabet for checking
+
+    total_unseen_count = sum(unseen_tiles_pool.values())
+    if total_unseen_count == 0:
+        return []
+
+    for r, c in anchors:
+        # Check for vertical word formation (placing a tile at r,c)
+        up_word = ""
+        rr = r - 1
+        while rr >= 0 and tiles[rr][c]:
+            up_word = tiles[rr][c] + up_word
+            rr -= 1
+        
+        down_word = ""
+        rr = r + 1
+        while rr < GRID_SIZE_C and tiles[rr][c]:
+            down_word += tiles[rr][c]
+            rr += 1
+        
+        if up_word or down_word:
+            live_letters_for_hook = []
+            live_letter_pool_count = 0
+            for hook_letter in full_alphabet:
+                if unseen_tiles_pool.get(hook_letter, 0) > 0:
+                    if DAWG_C.search(up_word + hook_letter + down_word):
+                        live_letters_for_hook.append(hook_letter)
+                        live_letter_pool_count += unseen_tiles_pool[hook_letter]
+            
+            if live_letters_for_hook:
+                hook_sig = (r, c, 'V', tuple(sorted(live_letters_for_hook)))
+                if hook_sig not in processed_hooks:
+                    probability = (live_letter_pool_count / total_unseen_count) * 100
+                    word_context = f"'{up_word}_{down_word}'"
+                    live_hooks_details.append(f"Hook at {get_coord((r,c), 'V')} on {word_context}. Live: {', '.join(live_letters_for_hook)}. Prob: {probability:.1f}%")
+                    processed_hooks.add(hook_sig)
+
+        # Check for horizontal word formation
+        left_word = ""
+        cc = c - 1
+        while cc >= 0 and tiles[r][cc]:
+            left_word = tiles[r][cc] + left_word
+            cc -= 1
+            
+        right_word = ""
+        cc = c + 1
+        while cc < GRID_SIZE_C and tiles[r][cc]:
+            right_word += tiles[r][cc]
+            cc += 1
+
+        if left_word or right_word:
+            live_letters_for_hook = []
+            live_letter_pool_count = 0
+            for hook_letter in full_alphabet:
+                if unseen_tiles_pool.get(hook_letter, 0) > 0:
+                    if DAWG_C.search(left_word + hook_letter + right_word):
+                        live_letters_for_hook.append(hook_letter)
+                        live_letter_pool_count += unseen_tiles_pool[hook_letter]
+
+            if live_letters_for_hook:
+                hook_sig = (r, c, 'H', tuple(sorted(live_letters_for_hook)))
+                if hook_sig not in processed_hooks:
+                    probability = (live_letter_pool_count / total_unseen_count) * 100
+                    word_context = f"'{left_word}_{right_word}'"
+                    live_hooks_details.append(f"Hook at {get_coord((r,c), 'H')} on {word_context}. Live: {', '.join(live_letters_for_hook)}. Prob: {probability:.1f}%")
+                    processed_hooks.add(hook_sig)
+
+    return live_hooks_details
+
+
+
+
+cpdef dict analyze_board_state(list tiles, set blanks, list bag, list opponent_rack, list board):
+    """
+    Analyzes the current board state to produce strategic insights.
+    This is the main orchestrator for the analysis.
+    """
+    cdef set anchors
+    cdef int openness_score_raw, openness_score_normalized
+    cdef list hotspots, bingo_lanes, live_hooks
+    cdef dict unseen_tiles
+    # 1. Get anchor points
+    anchors = get_anchor_points(tiles, False) # Assume not first play for analysis
+
+    # 2. Calculate openness from multipliers
+    openness_score_raw, hotspots = _calculate_openness_score(tiles, anchors, board)
+
+    # 3. Find bingo lanes
+    bingo_lanes = _find_bingo_lanes(tiles, anchors)
+    openness_score_raw += len(bingo_lanes) * 10 # Add points for each lane
+
+    # 4. Find live hooks
+    # To find live hooks, we need the pool of all tiles NOT on the board.
+    # The player's own rack is irrelevant for calculating opponent's chances.
+    unseen_tiles = get_remaining_tiles([], tiles, blanks) # Get all tiles not on board
+    live_hooks = _find_live_hooks(tiles, unseen_tiles, anchors)
+    openness_score_raw += len(live_hooks) # Add a point for each live hook
+
+    # 5. Normalize score to 0-100
+    # This max_raw_score is an estimate and can be tuned.
+    # A board with all bonus squares open + many lanes/hooks might score ~250.
+    cdef int max_raw_score = 250
+    openness_score_normalized = min(100, int((openness_score_raw / max_raw_score) * 100)) if max_raw_score > 0 else 0
+
+    return {
+        'openness_score': openness_score_normalized,
+        'hotspots': hotspots,
+        'bingo_lanes': bingo_lanes,
+        'live_hooks': live_hooks
+    }
+
+
+
+
+
+
+
+
+
