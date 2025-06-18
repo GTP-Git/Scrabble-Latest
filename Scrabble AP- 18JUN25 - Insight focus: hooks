@@ -3,8 +3,8 @@
 
 
 #python
-#Scrabble AO
-#Implementing Phase 1 of Insights - Open//Closed Boards
+#Scrabble AP
+#Insight focus: hooks
 
 #18JUN25
 
@@ -7440,12 +7440,22 @@ def _handle_general_mouse_down(event, state, drawn_rects):
                 show_message_dialog("Error: Cannot run analysis, game data is missing.", "Error")
                 return updated_state_flags
 
-            historical_tiles, historical_blanks, _, sim_racks, sim_bag, sim_turn = get_sgs_replay_state(
+            historical_tiles, historical_blanks, _, sim_racks, sim_bag, turn_of_last_move = get_sgs_replay_state(
                 sgs_data, target_turn_for_state, is_silent_batch_run_param=True
             )
             
+            # Determine the correct player for the analysis.
+            # The turn number returned by get_sgs_replay_state is for the player who made the last move
+            # to get to this state. The player to analyze is the *next* player.
+            if target_turn_for_state == 0:
+                # If no moves have been made, it's Player 1's turn.
+                current_player_turn_num = 1
+            else:
+                # Otherwise, it's the other player's turn.
+                current_player_turn_num = 3 - turn_of_last_move
+            
             # 2. Run the simulation to get top plays
-            sim_player_idx = sim_turn - 1
+            sim_player_idx = current_player_turn_num - 1
             sim_opponent_idx = 1 - sim_player_idx
             sim_ai_rack = sim_racks[sim_player_idx]
             sim_opponent_rack_len = len(sim_racks[sim_opponent_idx])
@@ -7468,10 +7478,8 @@ def _handle_general_mouse_down(event, state, drawn_rects):
                 historical_tiles, historical_blanks, sim_bag, sim_racks[sim_opponent_idx], state['board']
             )
 
-            # 4. Draw the static background and then show the modal dialog
-            draw_game_screen(screen, state)
-            pygame.display.flip()
-            show_insights_dialog(analysis_data, simulation_results)
+            # 4. Show the modal dialog, passing the full state for background drawing
+            show_insights_dialog(analysis_data, simulation_results, state)
             
             # This return is the key fix. It stops the event from being processed further.
             return updated_state_flags
@@ -11373,14 +11381,29 @@ def show_gamify_goal_exceeded_dialog(current_goal, new_difficulty):
 
 
 
-def show_insights_dialog(analysis_data, simulation_results):
+def show_insights_dialog(analysis_data, simulation_results, state):
     """
     Displays a modal dialog showing the board state analysis and simulation results.
-    This dialog is now movable and scrollable.
+    This dialog is now movable and scrollable, with dynamic width for hook display.
     """
     global screen, dialog_font, ui_font, button_font, DIALOG_COLOR, BLACK, WHITE, BUTTON_COLOR, BUTTON_HOVER, SCROLL_SPEED
 
-    dialog_width, dialog_height = 700, 550
+    # --- Pre-calculate required width for hooks ---
+    min_dialog_width = 700
+    padding = 20
+    max_line_width = 0
+    
+    live_hooks = analysis_data.get('live_hooks', [])
+    if live_hooks:
+        for hook in live_hooks:
+            live_letters_str = ", ".join(hook.get('live_letters', []))
+            line1_text = f"Hook at {hook.get('coord', '?')} on '{hook.get('context', '_')}': Live: {live_letters_str}"
+            line_width = ui_font.size(line1_text)[0]
+            if line_width > max_line_width:
+                max_line_width = line_width
+    
+    dialog_width = max(min_dialog_width, max_line_width + (padding * 2))
+    dialog_height = 550
     dialog_x = (WINDOW_WIDTH - dialog_width) // 2
     dialog_y = (WINDOW_HEIGHT - dialog_height) // 2
 
@@ -11410,14 +11433,25 @@ def show_insights_dialog(analysis_data, simulation_results):
         content_lines.append(("  None", ui_font))
     content_lines.append(("", ui_font))
 
-    live_hooks = analysis_data.get('live_hooks', [])
-    content_lines.append((f"Live Hooks ({len(live_hooks)}):", ui_font))
+    # --- MODIFICATION: Label change and multi-line formatting ---
+    content_lines.append(("Live Hooks (Top 5):", ui_font))
     if live_hooks:
         for hook in live_hooks:
-            content_lines.append((f"  - {hook}", ui_font))
+            live_letters_str = ", ".join(hook.get('live_letters', []))
+            line1_text = f"Hook at {hook.get('coord', '?')} on '{hook.get('context', '_')}': Live: {live_letters_str}"
+            
+            base_score = hook.get('base_score', 0)
+            avg_score = hook.get('avg_score', 0.0)
+            prob = hook.get('probability', 0.0)
+            line2_text = f"  Prob: {prob:.1f}% - Base Score: {base_score} - Avg New Score: {avg_score:.1f}"
+            
+            content_lines.append((line1_text, ui_font))
+            content_lines.append((line2_text, ui_font))
+            content_lines.append(("", ui_font)) # Spacer after each hook
     else:
         content_lines.append(("  None", ui_font))
     content_lines.append(("", ui_font))
+    # --- END MODIFICATION ---
 
     # Simulation Section
     content_lines.append(("Top Simulated Plays:", dialog_font))
@@ -11478,6 +11512,8 @@ def show_insights_dialog(analysis_data, simulation_results):
 
 
         # Drawing
+        draw_game_screen(screen, state)
+        
         pygame.draw.rect(screen, DIALOG_COLOR, (dialog_x, dialog_y, dialog_width, dialog_height))
         pygame.draw.rect(screen, BLACK, (dialog_x, dialog_y, dialog_width, dialog_height), 2)
 
