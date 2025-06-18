@@ -1,7 +1,7 @@
 # ai_engine.pyx
 
-#ai_engine_pyx - AO - 18JUN25
-#Implementing Phase 1 of Insights - Open//Closed Boards
+#ai_engine_pyx - AP - 18JUN25
+#Insight focus: hooks
 
 
 
@@ -2622,87 +2622,248 @@ cdef list _find_bingo_lanes(list tiles, set anchors):
 
 
 
-cdef list _find_live_hooks(list tiles, dict unseen_tiles_pool, set anchors):
+cdef int _calculate_word_score_on_board(list word_tiles, set blanks):
     """
-    Finds all 'live' hooks on the board and calculates the probability
-    of the opponent having/drawing a tile for them.
-    This version is more robust by iterating through anchors.
+    Calculates the raw score of a word already on the board, without multipliers.
     """
-    cdef list live_hooks_details = []
-    cdef int r, c, r_word, c_word, start_r, end_r, start_c, end_c, total_unseen_count, live_letter_pool_count
-    cdef str tile_on_board, word_str, hook_letter, up_word, down_word, left_word, right_word, full_alphabet
-    cdef list live_letters_for_hook
-    cdef set processed_hooks = set()
-    cdef float probability
-    cdef int rr, cc
-    full_alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' # Use the full alphabet for checking
+    cdef int score = 0
+    cdef int r, c
+    cdef str letter
+    cdef bint is_blank
+    for r, c, letter in word_tiles:
+        is_blank = (r, c) in blanks
+        if not is_blank and letter in TILE_DISTRIBUTION_C:
+            score += TILE_DISTRIBUTION_C[letter][1]
+    return score
 
+
+
+
+cdef int _get_best_play_through_hook(
+    int hook_r, int hook_c, str hook_letter,
+    list rack, list tiles, list board, set blanks, dict cross_check_sets
+):
+    """
+    Finds the highest scoring move that can be made by placing a specific
+    `hook_letter` at `(hook_r, hook_c)`.
+    This is a targeted version of the main move generator.
+    """
+    cdef list all_found_moves = []
+    cdef set unique_move_signatures = set()
+    cdef int[27] rack_counts_c
+    cdef int letter_idx
+    cdef object next_node
+    cdef list initial_tiles, original_tiles_state
+
+    # Convert Python rack to C array for the traversal function
+    rack_counts_c = [0] * 27
+    for tile_char in rack:
+        if tile_char == ' ':
+            rack_counts_c[26] += 1
+        else:
+            rack_counts_c[ord(tile_char) - ord('A')] += 1
+
+    original_tiles_state = [row[:] for row in tiles]
+    
+    # The move must start by placing the hook_letter on the hook square
+    letter_idx = ord(hook_letter) - ord('A')
+    if GADDAG_ROOT_C.children.get(hook_letter):
+        next_node = GADDAG_ROOT_C.children[hook_letter]
+        
+        # Path 1: Using a regular tile from the rack
+        if rack_counts_c[letter_idx] > 0:
+            rack_counts_c[letter_idx] -= 1
+            initial_tiles = [(hook_r, hook_c, hook_letter, False, True)]
+            # Traverse both horizontally and vertically from this forced placement
+            _gaddag_traverse((hook_r, hook_c), rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, 'H', all_found_moves, unique_move_signatures, original_tiles_state, False, 7, GRID_SIZE_C, 0, True)
+            _gaddag_traverse((hook_r, hook_c), rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, 'V', all_found_moves, unique_move_signatures, original_tiles_state, False, 7, GRID_SIZE_C, 0, True)
+            rack_counts_c[letter_idx] += 1
+
+        # Path 2: Using a blank tile from the rack
+        if rack_counts_c[26] > 0:
+            rack_counts_c[26] -= 1
+            initial_tiles = [(hook_r, hook_c, hook_letter, True, True)]
+            _gaddag_traverse((hook_r, hook_c), rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, 'H', all_found_moves, unique_move_signatures, original_tiles_state, False, 7, GRID_SIZE_C, 0, True)
+            _gaddag_traverse((hook_r, hook_c), rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, 'V', all_found_moves, unique_move_signatures, original_tiles_state, False, 7, GRID_SIZE_C, 0, True)
+            rack_counts_c[26] += 1
+
+    if not all_found_moves:
+        return 0
+    
+    # Return the score of the best move found
+    return max(move.get('score', 0) for move in all_found_moves)
+
+
+
+
+cdef list _find_live_hooks(list tiles, dict unseen_tiles_pool, set anchors, list board, set blanks):
+    """
+    Finds all 'live' hooks, calculates an importance score for each, and returns
+    a sorted list of hook data dictionaries.
+    This version uses a targeted move generator to find the true best play through a hook.
+    """
+    cdef list all_hooks_data = []
+    cdef int r, c, total_unseen_count, live_letter_pool_count, bonus_score, s_hook_bonus
+    cdef str hook_letter, up_word, down_word, left_word, right_word, full_alphabet, word_context
+    cdef str cross_word_str
+    cdef list live_letters_for_hook, base_word_tiles, opponent_sim_rack
+    cdef set processed_hooks = set()
+    cdef float probability, total_estimated_score, avg_estimated_score, importance_score
+    cdef int rr, cc, base_word_score, best_score_for_letter
+    cdef tuple square_color, hook_sig
+    cdef bint is_primary_valid, is_cross_valid
+    cdef dict cross_check_sets
+    
+    full_alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
     total_unseen_count = sum(unseen_tiles_pool.values())
     if total_unseen_count == 0:
         return []
 
+    # Pre-calculate cross-check sets for the current board state once
+    cross_check_sets = {}
+    for r_ccs in range(GRID_SIZE_C):
+        for c_ccs in range(GRID_SIZE_C):
+            if not tiles[r_ccs][c_ccs]:
+                up_word_ccs = ""; rr_ccs = r_ccs - 1
+                while rr_ccs >= 0 and tiles[rr_ccs][c_ccs]: up_word_ccs = tiles[rr_ccs][c_ccs] + up_word_ccs; rr_ccs -= 1
+                down_word_ccs = ""; rr_ccs = r_ccs + 1
+                while rr_ccs < GRID_SIZE_C and tiles[rr_ccs][c_ccs]: down_word_ccs += tiles[rr_ccs][c_ccs]; rr_ccs += 1
+                allowed_v = set()
+                if not up_word_ccs and not down_word_ccs: allowed_v = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ ')
+                else:
+                    for letter_char in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
+                        if DAWG_C.search(up_word_ccs + letter_char + down_word_ccs): allowed_v.add(letter_char)
+                    if allowed_v: allowed_v.add(' ')
+
+                left_word_ccs = ""; cc_ccs = c_ccs - 1
+                while cc_ccs >= 0 and tiles[r_ccs][cc_ccs]: left_word_ccs = tiles[r_ccs][cc_ccs] + left_word_ccs; cc_ccs -= 1
+                right_word_ccs = ""; cc_ccs = c_ccs + 1
+                while cc_ccs < GRID_SIZE_C and tiles[r_ccs][cc_ccs]: right_word_ccs += tiles[r_ccs][cc_ccs]; cc_ccs += 1
+                allowed_h = set()
+                if not left_word_ccs and not right_word_ccs: allowed_h = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ ')
+                else:
+                    for letter_char in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
+                        if DAWG_C.search(left_word_ccs + letter_char + right_word_ccs): allowed_h.add(letter_char)
+                    if allowed_h: allowed_h.add(' ')
+                cross_check_sets[(r_ccs, c_ccs)] = {'V': allowed_v, 'H': allowed_h}
+
+    # Simulate a generic opponent rack from the unseen pool for the helper function
+    opponent_sim_rack = []
+    temp_pool = unseen_tiles_pool.copy()
+    for _ in range(7):
+        if not temp_pool: break
+        tile_to_add = random.choice([t for t, count in temp_pool.items() for _ in range(count)])
+        opponent_sim_rack.append(tile_to_add)
+        temp_pool[tile_to_add] -= 1
+        if temp_pool[tile_to_add] == 0:
+            del temp_pool[tile_to_add]
+
     for r, c in anchors:
-        # Check for vertical word formation (placing a tile at r,c)
-        up_word = ""
-        rr = r - 1
-        while rr >= 0 and tiles[rr][c]:
-            up_word = tiles[rr][c] + up_word
-            rr -= 1
-        
-        down_word = ""
-        rr = r + 1
-        while rr < GRID_SIZE_C and tiles[rr][c]:
-            down_word += tiles[rr][c]
-            rr += 1
+        # --- Check for vertical word formation (placing a tile at r,c) ---
+        up_word = ""; rr = r - 1
+        while rr >= 0 and tiles[rr][c]: up_word = tiles[rr][c] + up_word; rr -= 1
+        down_word = ""; rr = r + 1
+        while rr < GRID_SIZE_C and tiles[rr][c]: down_word += tiles[rr][c]; rr += 1
         
         if up_word or down_word:
             live_letters_for_hook = []
             live_letter_pool_count = 0
+            
+            left_word = ""; cc = c - 1
+            while cc >= 0 and tiles[r][cc]: left_word = tiles[r][cc] + left_word; cc -= 1
+            right_word = ""; cc = c + 1
+            while cc < GRID_SIZE_C and tiles[r][cc]: right_word += tiles[r][cc]; cc += 1
+
             for hook_letter in full_alphabet:
                 if unseen_tiles_pool.get(hook_letter, 0) > 0:
-                    if DAWG_C.search(up_word + hook_letter + down_word):
+                    is_primary_valid = DAWG_C.search(up_word + hook_letter + down_word)
+                    cross_word_str = left_word + hook_letter + right_word
+                    is_cross_valid = (len(cross_word_str) <= 1) or DAWG_C.search(cross_word_str)
+                    if is_primary_valid and is_cross_valid:
                         live_letters_for_hook.append(hook_letter)
                         live_letter_pool_count += unseen_tiles_pool[hook_letter]
             
             if live_letters_for_hook:
                 hook_sig = (r, c, 'V', tuple(sorted(live_letters_for_hook)))
                 if hook_sig not in processed_hooks:
-                    probability = (live_letter_pool_count / total_unseen_count) * 100
-                    word_context = f"'{up_word}_{down_word}'"
-                    live_hooks_details.append(f"Hook at {get_coord((r,c), 'V')} on {word_context}. Live: {', '.join(live_letters_for_hook)}. Prob: {probability:.1f}%")
+                    total_estimated_score = 0.0
+                    for hook_letter in live_letters_for_hook:
+                        best_score_for_letter = _get_best_play_through_hook(r, c, hook_letter, opponent_sim_rack, tiles, board, blanks, cross_check_sets)
+                        total_estimated_score += best_score_for_letter
+                    
+                    avg_estimated_score = total_estimated_score / len(live_letters_for_hook) if live_letters_for_hook else 0.0
+                    probability = (live_letter_pool_count / total_unseen_count) * 100 if total_unseen_count > 0 else 0.0
+                    
+                    square_color = board[r][c]
+                    bonus_score = 0
+                    if square_color == RED_C: bonus_score = 25
+                    elif square_color == PINK_C: bonus_score = 15
+                    elif square_color == BLUE_C: bonus_score = 8
+                    elif square_color == LIGHT_BLUE_C: bonus_score = 4
+                    s_hook_bonus = 20 if 'S' in live_letters_for_hook else 0
+                    importance_score = (avg_estimated_score * 1.5) + (probability * 0.3) + bonus_score + s_hook_bonus
+                    
+                    all_hooks_data.append({
+                        'coord': get_coord((r,c), 'V'), 'context': f"{up_word}_{down_word}",
+                        'live_letters': live_letters_for_hook, 'probability': probability,
+                        'avg_score': avg_estimated_score, 'base_score': 0, # Base score is now implicit in the avg_score
+                        'importance_score': importance_score
+                    })
                     processed_hooks.add(hook_sig)
 
-        # Check for horizontal word formation
-        left_word = ""
-        cc = c - 1
-        while cc >= 0 and tiles[r][cc]:
-            left_word = tiles[r][cc] + left_word
-            cc -= 1
-            
-        right_word = ""
-        cc = c + 1
-        while cc < GRID_SIZE_C and tiles[r][cc]:
-            right_word += tiles[r][cc]
-            cc += 1
+        # --- Check for horizontal word formation ---
+        left_word = ""; cc = c - 1
+        while cc >= 0 and tiles[r][cc]: left_word = tiles[r][cc] + left_word; cc -= 1
+        right_word = ""; cc = c + 1
+        while cc < GRID_SIZE_C and tiles[r][cc]: right_word += tiles[r][cc]; cc += 1
 
         if left_word or right_word:
             live_letters_for_hook = []
             live_letter_pool_count = 0
+            up_word = ""; rr = r - 1
+            while rr >= 0 and tiles[rr][c]: up_word = tiles[rr][c] + up_word; rr -= 1
+            down_word = ""; rr = r + 1
+            while rr < GRID_SIZE_C and tiles[rr][c]: down_word += tiles[rr][c]; rr += 1
+
             for hook_letter in full_alphabet:
                 if unseen_tiles_pool.get(hook_letter, 0) > 0:
-                    if DAWG_C.search(left_word + hook_letter + right_word):
+                    is_primary_valid = DAWG_C.search(left_word + hook_letter + right_word)
+                    cross_word_str = up_word + hook_letter + down_word
+                    is_cross_valid = (len(cross_word_str) <= 1) or DAWG_C.search(cross_word_str)
+                    if is_primary_valid and is_cross_valid:
                         live_letters_for_hook.append(hook_letter)
                         live_letter_pool_count += unseen_tiles_pool[hook_letter]
 
             if live_letters_for_hook:
                 hook_sig = (r, c, 'H', tuple(sorted(live_letters_for_hook)))
                 if hook_sig not in processed_hooks:
-                    probability = (live_letter_pool_count / total_unseen_count) * 100
-                    word_context = f"'{left_word}_{right_word}'"
-                    live_hooks_details.append(f"Hook at {get_coord((r,c), 'H')} on {word_context}. Live: {', '.join(live_letters_for_hook)}. Prob: {probability:.1f}%")
+                    total_estimated_score = 0.0
+                    for hook_letter in live_letters_for_hook:
+                        best_score_for_letter = _get_best_play_through_hook(r, c, hook_letter, opponent_sim_rack, tiles, board, blanks, cross_check_sets)
+                        total_estimated_score += best_score_for_letter
+
+                    avg_estimated_score = total_estimated_score / len(live_letters_for_hook) if live_letters_for_hook else 0.0
+                    probability = (live_letter_pool_count / total_unseen_count) * 100 if total_unseen_count > 0 else 0.0
+                    
+                    square_color = board[r][c]
+                    bonus_score = 0
+                    if square_color == RED_C: bonus_score = 25
+                    elif square_color == PINK_C: bonus_score = 15
+                    elif square_color == BLUE_C: bonus_score = 8
+                    elif square_color == LIGHT_BLUE_C: bonus_score = 4
+                    s_hook_bonus = 20 if 'S' in live_letters_for_hook else 0
+                    importance_score = (avg_estimated_score * 1.5) + (probability * 0.3) + bonus_score + s_hook_bonus
+                    
+                    all_hooks_data.append({
+                        'coord': get_coord((r,c), 'H'), 'context': f"{left_word}_{right_word}",
+                        'live_letters': live_letters_for_hook, 'probability': probability,
+                        'avg_score': avg_estimated_score, 'base_score': 0,
+                        'importance_score': importance_score
+                    })
                     processed_hooks.add(hook_sig)
 
-    return live_hooks_details
+    all_hooks_data.sort(key=lambda x: x['importance_score'], reverse=True)
+    return all_hooks_data
 
 
 
@@ -2714,7 +2875,7 @@ cpdef dict analyze_board_state(list tiles, set blanks, list bag, list opponent_r
     """
     cdef set anchors
     cdef int openness_score_raw, openness_score_normalized
-    cdef list hotspots, bingo_lanes, live_hooks
+    cdef list hotspots, bingo_lanes, all_hooks_data, top_hooks
     cdef dict unseen_tiles
     # 1. Get anchor points
     anchors = get_anchor_points(tiles, False) # Assume not first play for analysis
@@ -2730,8 +2891,13 @@ cpdef dict analyze_board_state(list tiles, set blanks, list bag, list opponent_r
     # To find live hooks, we need the pool of all tiles NOT on the board.
     # The player's own rack is irrelevant for calculating opponent's chances.
     unseen_tiles = get_remaining_tiles([], tiles, blanks) # Get all tiles not on board
-    live_hooks = _find_live_hooks(tiles, unseen_tiles, anchors)
-    openness_score_raw += len(live_hooks) # Add a point for each live hook
+    all_hooks_data = _find_live_hooks(tiles, unseen_tiles, anchors, board, blanks)
+    
+    # Take top 5 hooks to pass to the UI
+    top_hooks = all_hooks_data[:5]
+
+    # Use the total number of hooks for the openness score calculation
+    openness_score_raw += len(all_hooks_data) # Add a point for each live hook
 
     # 5. Normalize score to 0-100
     # This max_raw_score is an estimate and can be tuned.
@@ -2743,7 +2909,7 @@ cpdef dict analyze_board_state(list tiles, set blanks, list bag, list opponent_r
         'openness_score': openness_score_normalized,
         'hotspots': hotspots,
         'bingo_lanes': bingo_lanes,
-        'live_hooks': live_hooks
+        'live_hooks': top_hooks
     }
 
 
