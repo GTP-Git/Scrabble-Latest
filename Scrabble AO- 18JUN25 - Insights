@@ -3,13 +3,10 @@
 
 
 #python
-#Scrabble AN
-#Added subfolder Load Game ability
-#Added probability and anagramming to Lookup feature
-#Fixed Score Preview not working bug
-#Fixed blank calculation error in post-game Statistics
+#Scrabble AO
+#Implementing Phase 1 of Insights - Open//Closed Boards
 
-#17JUN25
+#18JUN25
 
 
 
@@ -7396,15 +7393,14 @@ def _handle_general_mouse_down(event, state, drawn_rects):
     Modifies state directly.
     Returns a dictionary of flags (currently empty, but for future use if needed).
     MODIFIED: Removed redundant replay button click handling that used state['replay_..._rect'].
-              Ensures replay button clicks are handled by _handle_mouse_down_replay_buttons using drawn_rects.
+    Ensures replay button clicks are handled by _handle_mouse_down_replay_buttons using drawn_rects.
     MODIFIED: Added click handling for the Analyzer checkbox and its items for preview.
-              Ensures correct board state is set before previewing IW items.
+    Ensures correct board state is set before previewing IW items.
     MODIFIED: Added diagnostic print for analyzer_show toggle.
     """
     global DEV_VISUALIZE_BATCH_ENABLED_SESSION # For conditional printing
     global insights_data_for_replay # Access global for insights data
     global sgs_loaded_game_data # Access if needed by get_sgs_replay_state indirectly via state
-
     is_silent_run_local = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
     updated_state_flags = {}
     x, y = event.pos
@@ -7431,6 +7427,55 @@ def _handle_general_mouse_down(event, state, drawn_rects):
             if state.get('last_scoreboard_click_idx') == -1: 
                  state = clear_current_preview(state)
             return updated_state_flags
+
+        # --- MODIFICATION START: Handle Insights Button Click ---
+        insights_button_rect = drawn_rects.get('insights_button_rect')
+        if insights_button_rect and insights_button_rect.collidepoint(x, y):
+            print("Insights button clicked. Running analysis...")
+            
+            # 1. Get the correct board state for analysis
+            target_turn_for_state = max(0, state['current_replay_turn'] - 1)
+            sgs_data = state.get('sgs_loaded_game_data')
+            if not sgs_data:
+                show_message_dialog("Error: Cannot run analysis, game data is missing.", "Error")
+                return updated_state_flags
+
+            historical_tiles, historical_blanks, _, sim_racks, sim_bag, sim_turn = get_sgs_replay_state(
+                sgs_data, target_turn_for_state, is_silent_batch_run_param=True
+            )
+            
+            # 2. Run the simulation to get top plays
+            sim_player_idx = sim_turn - 1
+            sim_opponent_idx = 1 - sim_player_idx
+            sim_ai_rack = sim_racks[sim_player_idx]
+            sim_opponent_rack_len = len(sim_racks[sim_opponent_idx])
+            
+            all_moves_for_sim = ai_engine.generate_all_moves_gaddag(
+                sim_ai_rack, historical_tiles, state['board'], historical_blanks, is_silent_batch_run_param=True
+            )
+            
+            simulation_results = ai_engine.run_ai_simulation(
+                all_moves_for_sim, sim_ai_rack, sim_opponent_rack_len, 
+                historical_tiles, historical_blanks, state['board'], sim_bag,
+                state.get('ai_sim_num_candidates_cfg', DEFAULT_AI_CANDIDATES),
+                state.get('ai_sim_num_opponent_sims_cfg', DEFAULT_OPPONENT_SIMULATIONS),
+                state.get('ai_sim_num_post_sim_candidates_cfg', DEFAULT_POST_SIM_CANDIDATES),
+                is_silent_batch_run_param=True
+            )
+
+            # 3. Run the new board state analysis
+            analysis_data = ai_engine.analyze_board_state(
+                historical_tiles, historical_blanks, sim_bag, sim_racks[sim_opponent_idx], state['board']
+            )
+
+            # 4. Draw the static background and then show the modal dialog
+            draw_game_screen(screen, state)
+            pygame.display.flip()
+            show_insights_dialog(analysis_data, simulation_results)
+            
+            # This return is the key fix. It stops the event from being processed further.
+            return updated_state_flags
+        # --- MODIFICATION END ---
 
         analyzer_checkbox_rect_local = drawn_rects.get('analyzer_checkbox_rect')
         if analyzer_checkbox_rect_local and analyzer_checkbox_rect_local.collidepoint(x,y):
@@ -10286,7 +10331,7 @@ def draw_game_screen(screen, state):
     MODIFIED: Correctly passes scroll_offset to draw_hint_dialog.
     """
     global DEV_VISUALIZE_BATCH_ENABLED_SESSION
-    global word_definitions_loading_status 
+    global word_definitions_loading_status
     global REPLAY_BUTTON_WIDTH, REPLAY_BUTTON_HEIGHT, REPLAY_BUTTON_GAP
     global GRID_SIZE, SQUARE_SIZE, OPTIONS_WIDTH, BUTTON_HEIGHT, BUTTON_GAP
     global WINDOW_WIDTH, WINDOW_HEIGHT, DIALOG_WIDTH, DIALOG_HEIGHT
@@ -10294,8 +10339,6 @@ def draw_game_screen(screen, state):
     global FONT_SIZE, ui_font, button_font, tile_count_font, dialog_font, font
     global WHITE, BLACK, RED, PINK, BLUE, LIGHT_BLUE, HIGHLIGHT_BLUE, YELLOW, GRAY, GREEN, DARK_GREEN, PALE_YELLOW, BUTTON_COLOR, BUTTON_HOVER, TURN_INDICATOR_COLOR, DIALOG_COLOR, DROPDOWN_COLOR, SELECTED_TILE_COLOR, GRAYED_OUT_COLOR, ARROW_COLOR, HINT_NORMAL_COLOR, HINT_SELECTED_COLOR
     global LETTERS
-
-
     is_silent_run = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
 
     # Directly use state variables that might be modified by previews
@@ -10438,7 +10481,7 @@ def draw_game_screen(screen, state):
     drawn_rects['p2_alpha_rect'] = p2_alpha_rect; drawn_rects['p2_rand_rect'] = p2_rand_rect
     drawn_rects['p1_eye_rect'] = p1_eye_rect
     drawn_rects['p2_eye_rect'] = p2_eye_rect
-    
+
     if practice_mode != "eight_letter":
         draw_remaining_tiles(unseen_tiles_for_display_dict_func, turn_to_display_for_ui_func)
 
@@ -10462,7 +10505,7 @@ def draw_game_screen(screen, state):
     profile_button_rect = None
     preview_checkbox_rect = None
     word_lookup_button_in_game_rect = None
-    
+
     if not is_batch_running_local_draw:
         top_button_x = 10 + OPTIONS_WIDTH + BUTTON_GAP
         top_button_y = OPTIONS_Y
@@ -10507,25 +10550,40 @@ def draw_game_screen(screen, state):
 
     if replay_mode or state.get('is_loaded_game', False):
         new_replay_button_y = scoreboard_display_rect.bottom + 4
-        total_width_of_all_replay_buttons = (4 * REPLAY_BUTTON_WIDTH) + (3 * REPLAY_BUTTON_GAP)
-        replay_buttons_start_x = scoreboard_display_rect.left + (scoreboard_display_rect.width - total_width_of_all_replay_buttons) // 2
-        replay_buttons_start_x = max(0, replay_buttons_start_x)
-
-        local_replay_start_rect = pygame.Rect(replay_buttons_start_x, new_replay_button_y, REPLAY_BUTTON_WIDTH, REPLAY_BUTTON_HEIGHT)
-        local_replay_prev_rect = pygame.Rect(replay_buttons_start_x + REPLAY_BUTTON_WIDTH + REPLAY_BUTTON_GAP, new_replay_button_y, REPLAY_BUTTON_WIDTH, REPLAY_BUTTON_HEIGHT)
-        local_replay_next_rect = pygame.Rect(replay_buttons_start_x + 2 * (REPLAY_BUTTON_WIDTH + REPLAY_BUTTON_GAP), new_replay_button_y, REPLAY_BUTTON_WIDTH, REPLAY_BUTTON_HEIGHT)
-        local_replay_end_rect = pygame.Rect(replay_buttons_start_x + 3 * (REPLAY_BUTTON_WIDTH + REPLAY_BUTTON_GAP), new_replay_button_y, REPLAY_BUTTON_WIDTH, REPLAY_BUTTON_HEIGHT)
         
+        # --- MODIFICATION: Account for new Insights button in centering calculation ---
+        insights_button_width = 80 # A bit wider for the text "Insights"
+        total_width_of_all_buttons = (4 * REPLAY_BUTTON_WIDTH) + insights_button_width + (4 * REPLAY_BUTTON_GAP)
+        buttons_start_x = scoreboard_display_rect.left + (scoreboard_display_rect.width - total_width_of_all_buttons) // 2
+        buttons_start_x = max(0, buttons_start_x)
+
+        local_replay_start_rect = pygame.Rect(buttons_start_x, new_replay_button_y, REPLAY_BUTTON_WIDTH, REPLAY_BUTTON_HEIGHT)
+        local_replay_prev_rect = pygame.Rect(buttons_start_x + REPLAY_BUTTON_WIDTH + REPLAY_BUTTON_GAP, new_replay_button_y, REPLAY_BUTTON_WIDTH, REPLAY_BUTTON_HEIGHT)
+        local_replay_next_rect = pygame.Rect(buttons_start_x + 2 * (REPLAY_BUTTON_WIDTH + REPLAY_BUTTON_GAP), new_replay_button_y, REPLAY_BUTTON_WIDTH, REPLAY_BUTTON_HEIGHT)
+        local_replay_end_rect = pygame.Rect(buttons_start_x + 3 * (REPLAY_BUTTON_WIDTH + REPLAY_BUTTON_GAP), new_replay_button_y, REPLAY_BUTTON_WIDTH, REPLAY_BUTTON_HEIGHT)
+        
+        # --- NEW: Define Insights Button Rect ---
+        insights_button_rect = pygame.Rect(local_replay_end_rect.right + REPLAY_BUTTON_GAP, new_replay_button_y, insights_button_width, REPLAY_BUTTON_HEIGHT)
+
         drawn_rects['replay_start_rect'] = local_replay_start_rect
         drawn_rects['replay_prev_rect'] = local_replay_prev_rect
         drawn_rects['replay_next_rect'] = local_replay_next_rect
         drawn_rects['replay_end_rect'] = local_replay_end_rect
+        drawn_rects['insights_button_rect'] = insights_button_rect # Store the rect
         
         replay_controls_to_draw = [(local_replay_start_rect, "start"), (local_replay_prev_rect, "prev"), (local_replay_next_rect, "next"), (local_replay_end_rect, "end")]
         for rect_rc, icon_type_rc in replay_controls_to_draw:
             if rect_rc:
                 hover_rc = rect_rc.collidepoint(pygame.mouse.get_pos()); color_rc = BUTTON_HOVER if hover_rc else BUTTON_COLOR
                 pygame.draw.rect(screen, color_rc, rect_rc); draw_replay_icon(screen, rect_rc, icon_type_rc)
+        
+        # --- NEW: Draw the Insights Button ---
+        hover_insights = insights_button_rect.collidepoint(pygame.mouse.get_pos())
+        color_insights = BUTTON_HOVER if hover_insights else BUTTON_COLOR
+        pygame.draw.rect(screen, color_insights, insights_button_rect)
+        insights_text = button_font.render("Insights", True, BLACK)
+        insights_text_rect = insights_text.get_rect(center=insights_button_rect.center)
+        screen.blit(insights_text, insights_text_rect)
         
         insights_checkbox_rect_val, insights_item_rects_val = draw_insights_window(screen, state) 
         drawn_rects['analyzer_checkbox_rect'] = insights_checkbox_rect_val 
@@ -10545,7 +10603,7 @@ def draw_game_screen(screen, state):
         batch_text = f"Running Game: {current_batch_game_num} / {total_batch_games}"; batch_surf = ui_font.render(batch_text, True, BLUE)
         indicator_top_y_batch = indicator_base_y + indicator_y_offset - batch_surf.get_height() - 5
         batch_rect_draw = batch_surf.get_rect(centerx=indicator_center_x, top=max(5, indicator_top_y_batch)); screen.blit(batch_surf, batch_rect_draw); indicator_y_offset += batch_surf.get_height() + 5
-    
+
     definitions_indicator_y = indicator_base_y - indicator_y_offset - 25 
     if definitions_indicator_y < 5 : definitions_indicator_y = 5 
 
@@ -11315,6 +11373,144 @@ def show_gamify_goal_exceeded_dialog(current_goal, new_difficulty):
 
 
 
+def show_insights_dialog(analysis_data, simulation_results):
+    """
+    Displays a modal dialog showing the board state analysis and simulation results.
+    This dialog is now movable and scrollable.
+    """
+    global screen, dialog_font, ui_font, button_font, DIALOG_COLOR, BLACK, WHITE, BUTTON_COLOR, BUTTON_HOVER, SCROLL_SPEED
+
+    dialog_width, dialog_height = 700, 550
+    dialog_x = (WINDOW_WIDTH - dialog_width) // 2
+    dialog_y = (WINDOW_HEIGHT - dialog_height) // 2
+
+    scroll_offset_y = 0
+    dialog_running = True
+    
+    dragging = False
+    drag_offset = (0, 0)
+
+    # --- Pre-render all text content ---
+    content_lines = []
+    line_height = ui_font.get_linesize()
+
+    # Analysis Section
+    score = analysis_data.get('openness_score', 0)
+    board_type = "Open" if score >= 50 else "Closed"
+    content_lines.append((f"Open/Closed Score (0-100): {score}", dialog_font))
+    content_lines.append((f"This is a relatively {board_type} board.", ui_font))
+    content_lines.append(("", ui_font)) # Spacer
+
+    bingo_lanes = analysis_data.get('bingo_lanes', [])
+    content_lines.append((f"Bingo Lanes ({len(bingo_lanes)}):", ui_font))
+    if bingo_lanes:
+        for lane in bingo_lanes:
+            content_lines.append((f"  - {lane}", ui_font))
+    else:
+        content_lines.append(("  None", ui_font))
+    content_lines.append(("", ui_font))
+
+    live_hooks = analysis_data.get('live_hooks', [])
+    content_lines.append((f"Live Hooks ({len(live_hooks)}):", ui_font))
+    if live_hooks:
+        for hook in live_hooks:
+            content_lines.append((f"  - {hook}", ui_font))
+    else:
+        content_lines.append(("  None", ui_font))
+    content_lines.append(("", ui_font))
+
+    # Simulation Section
+    content_lines.append(("Top Simulated Plays:", dialog_font))
+    if simulation_results:
+        for i, move_data in enumerate(simulation_results[:10]): # Show top 10
+            move = move_data.get('move', {})
+            final_score = move_data.get('final_score', 0.0)
+            word_display = move.get('word_with_blanks', move.get('word', 'N/A'))
+            coord = ai_engine.get_coord(move.get('start'), move.get('direction'))
+            score = move.get('score', 0)
+            leave_val = ai_engine.evaluate_leave(move.get('leave', []))
+            avg_opp = move.get('avg_opp_score', 0.0)
+            leave_str = "".join(sorted(l if l != ' ' else '?' for l in move.get('leave', [])))
+            
+            line = f"{i+1}. {word_display} {coord} ({int(score)}{leave_val:+0.1f}-{avg_opp:.1f}={int(final_score)}) L:{leave_str}"
+            content_lines.append((line, ui_font))
+    else:
+        content_lines.append(("No plays found or simulation not run.", ui_font))
+
+    # Create surfaces for each line
+    rendered_surfaces = [(font.render(text, True, BLACK), font.get_linesize()) for text, font in content_lines]
+    total_content_height = sum(h for _, h in rendered_surfaces)
+
+    # --- Dialog Loop ---
+    while dialog_running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE or event.key == pygame.K_RETURN:
+                    dialog_running = False
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1: # Left click
+                    ok_button_rect = pygame.Rect(dialog_x + (dialog_width - BUTTON_WIDTH) // 2, dialog_y + dialog_height - BUTTON_HEIGHT - 10, BUTTON_WIDTH, BUTTON_HEIGHT)
+                    title_bar_rect = pygame.Rect(dialog_x, dialog_y, dialog_width, 40)
+                    if ok_button_rect.collidepoint(event.pos):
+                        dialog_running = False
+                    elif title_bar_rect.collidepoint(event.pos):
+                        dragging = True
+                        drag_offset = (event.pos[0] - dialog_x, event.pos[1] - dialog_y)
+
+                elif event.button == 4: # Scroll up
+                    scroll_offset_y = max(0, scroll_offset_y - SCROLL_SPEED)
+                elif event.button == 5: # Scroll down
+                    max_scroll = max(0, total_content_height - (dialog_height - 60))
+                    scroll_offset_y = min(max_scroll, scroll_offset_y + SCROLL_SPEED)
+            
+            if event.type == pygame.MOUSEBUTTONUP:
+                if event.button == 1:
+                    dragging = False
+
+            if event.type == pygame.MOUSEMOTION and dragging:
+                dialog_x = event.pos[0] - drag_offset[0]
+                dialog_y = event.pos[1] - drag_offset[1]
+                dialog_x = max(0, min(dialog_x, WINDOW_WIDTH - dialog_width))
+                dialog_y = max(0, min(dialog_y, WINDOW_HEIGHT - dialog_height))
+
+
+        # Drawing
+        pygame.draw.rect(screen, DIALOG_COLOR, (dialog_x, dialog_y, dialog_width, dialog_height))
+        pygame.draw.rect(screen, BLACK, (dialog_x, dialog_y, dialog_width, dialog_height), 2)
+
+        # Content Area
+        content_area = pygame.Rect(dialog_x + 10, dialog_y + 10, dialog_width - 20, dialog_height - 60)
+        
+        # Create a clipping area for the content
+        clip_rect = screen.get_clip()
+        screen.set_clip(content_area)
+
+        y_pos = content_area.top - scroll_offset_y
+        for surf, height in rendered_surfaces:
+            if y_pos + height > content_area.top and y_pos < content_area.bottom:
+                screen.blit(surf, (content_area.left + 5, y_pos))
+            y_pos += height
+        
+        # Restore the original clipping area
+        screen.set_clip(clip_rect)
+
+        # OK Button
+        ok_button_rect = pygame.Rect(dialog_x + (dialog_width - BUTTON_WIDTH) // 2, dialog_y + dialog_height - BUTTON_HEIGHT - 10, BUTTON_WIDTH, BUTTON_HEIGHT)
+        hover_ok = ok_button_rect.collidepoint(pygame.mouse.get_pos())
+        color_ok = BUTTON_HOVER if hover_ok else BUTTON_COLOR
+        pygame.draw.rect(screen, color_ok, ok_button_rect)
+        ok_text_surf = button_font.render("OK", True, BLACK)
+        screen.blit(ok_text_surf, ok_text_surf.get_rect(center=ok_button_rect.center))
+
+        pygame.display.flip()
+        pygame.time.Clock().tick(30)
+
+
+
+
 
 def handle_practice_messages(state):
     """
@@ -11791,12 +11987,7 @@ def execute_game_session(is_initialized_from_outer_loop_param):
             current_state_dict['ai_sim_num_opponent_sims_cfg'] = ai_sim_num_opponent_sims_global
             current_state_dict['ai_sim_num_post_sim_candidates_cfg'] = ai_sim_num_post_sim_candidates_global
 
-            # --- DIAGNOSTIC: Dead Man's Switch Initialization ---
-            last_turn_processed_time = time.perf_counter()
-            last_known_turn_number = current_state_dict.get('turn', -1)
-            hang_report_printed = False
-            HANG_DETECTION_SECONDS = 2.0
-            # --- END DIAGNOSTIC ---
+            
 
             while current_state_dict['running_inner']:
                 if _module_level_batch_stop_requested_internal:
