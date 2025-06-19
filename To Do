@@ -1,6 +1,10 @@
 To-Do List
 
 
+-- Bug where AI exchanged six and only six tiles were on rack, early in game
+
+-- AI score in Game Over dialog is float, needs to be int
+
 -- Blank usage is not optimal, Batch game blanks often left on rack at end of game
 
 -- In Insights, allow options to provide turn-by-turn board analysis (it says Insights, after all).
@@ -9,10 +13,7 @@ ahead, behind), hot spot analysis (with your current tiles you could play XY, al
 There is also a 27% chance to draw the W next turn, allowing you extend XYZ. Maybe? Give scores to different board
 dynamics, like Openness score (35%).
 
--- In Lookup, also show probability for words. If I type a 5-letter word in, it'll give me the probability of that
-word among the 5's.
-
--- Lookup should also allow the ability to anagram words.                                   
+                                   
 
 -- Set up batch games to run in threads/cores. Tried, failed. Will try again.
 
@@ -23,8 +24,6 @@ word among the 5's.
 -- Replay/Loaded game should start with both initial racks shown...now it shows the racks at the end of the game when Replay is first started.
 
 -- Start up should show a landing screen, maybe with Scrabble quotes running across it?
-
--- For BatchStats, see if playing <=3 unique letters on the opening move is more/less better than playing >3 unique letters. The theory is that less unique letters allows for less 8-letter bingo opportunities for your opponent.
 
 -- Allow what-if scenarios, where the main_branch_game_state is saved, but players can make different plays, choose different racks, explore endgames, etc., Have a reset button that backs the main_branch_game_state to continue play. 
 
@@ -249,4 +248,10 @@ ________________________________________________
 
 -- Load Game should look in subfolders as well as the main folder for the saved games
 
-                                                                                                                                                        
+-- In Lookup, also show probability for words. If I type a 5-letter word in, it'll give me the probability of that
+word among the 5's.
+
+-- Lookup should also allow the ability to anagram words.
+
+-- Need a Solve Endgame option in Replay Mode.
+                                                                                                                                                      
