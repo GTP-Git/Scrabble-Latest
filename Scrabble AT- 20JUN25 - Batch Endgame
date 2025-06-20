@@ -3,9 +3,8 @@
 
 
 #python
-#Scrabble AS
-#Added window to show Endgame Solver results
-#Fixed float --> int UI bug
+#Scrabble AT
+#Added Batch Endgame, but don't know if it works, endgames solve too slowly
 
 #20JUN25
 
@@ -2732,14 +2731,17 @@ def mode_selection_screen():
                         else:
                             batch_info = get_batch_game_dialog() 
                             if batch_info is not None:
-                                num_games, plaid_mode_checked = batch_info # Unpack the tuple
+                                # --- MODIFICATION: Unpack the new tuple ---
+                                num_games, plaid_mode_checked, endgame_scenarios_checked = batch_info
                                 if not (True and not dev_visualize_batch_checked):
                                     print(f"--- mode_selection_screen(): Starting batch of {num_games} games ---")
                                 selected_mode = "BATCH_MODE"
+                                # --- MODIFICATION: Pass the new flag ---
                                 loaded_game_data = (current_selected_game_mode, player_names, human_player, \
                                                     use_endgame_solver_checked, use_ai_simulation_checked, num_games,\
                                                     dev_cprofile_checked, dev_visualize_batch_checked, \
-                                                    ai_sim_num_candidates, ai_sim_num_opponent_sims, ai_sim_num_post_sim_candidates)
+                                                    ai_sim_num_candidates, ai_sim_num_opponent_sims, ai_sim_num_post_sim_candidates, \
+                                                    plaid_mode_checked, endgame_scenarios_checked)
                                 break 
                             else:
                                 print("--- mode_selection_screen(): Batch game setup cancelled ---")
@@ -2885,7 +2887,23 @@ def mode_selection_screen():
                                             print(f"--- mode_selection_screen(): Only Fives setup successful. Selected mode: {selected_mode} ---")
                                             break
                                         elif selected_practice_option == "End Game":
-                                            print("End Game practice selected - Not implemented yet")
+                                            # --- MODIFICATION: Placeholder logic for Endgame Practice ---
+                                            print("End Game practice selected.")
+                                            endgame_dir = "Endgame Practice"
+                                            if not os.path.exists(endgame_dir) or not any(f.endswith('.sge') for f in os.listdir(endgame_dir)):
+                                                show_message_dialog(
+                                                    "No endgame scenarios found.\n\nPlease generate scenarios first using the 'Batch Games' option.",
+                                                    "Endgame Practice"
+                                                )
+                                            else:
+                                                # In the future, this will open the scenario selection dialog.
+                                                # For now, it's just a placeholder.
+                                                num_scenarios = len([f for f in os.listdir(endgame_dir) if f.endswith('.sge')])
+                                                show_message_dialog(
+                                                    f"Endgame Practice Mode is coming soon!\n\nFound {num_scenarios} scenarios in the '{endgame_dir}' folder.",
+                                                    "Coming Soon"
+                                                )
+                                            # --- END MODIFICATION ---
                                         break 
                                 if not clicked_option and not dropdown_rect.collidepoint(x,y): 
                                     dropdown_open = False
@@ -5051,15 +5069,16 @@ def get_tile_under_mouse(x, y, rack_start_x, rack_y, rack_len):
 
 def get_batch_game_dialog():
     """Displays a dialog to get the number of batch games."""
-    # --- MODIFIED: Increased height for the new checkbox ---
-    dialog_width, dialog_height = 300, 200
+    # --- MODIFICATION: Increased height for the new checkbox ---
+    dialog_width, dialog_height = 350, 230 # Increased width and height
     dialog_x = (WINDOW_WIDTH - dialog_width) // 2
     dialog_y = (WINDOW_HEIGHT - dialog_height) // 2
     input_text = ""
     input_active = True
     error_msg = None
-    # --- NEW: State for the Plaid mode checkbox ---
+    # --- MODIFICATION: Add state for the new checkbox ---
     plaid_mode_checked = False
+    endgame_scenarios_checked = False
 
     while True:
         screen.fill(WHITE) # Or redraw the mode selection screen behind it
@@ -5084,13 +5103,19 @@ def get_batch_game_dialog():
             cursor_y2 = input_rect.y + input_rect.height - 5
             pygame.draw.line(screen, BLACK, (cursor_x, cursor_y1), (cursor_x, cursor_y2), 1)
 
-        # --- NEW: Draw the Plaid checkbox ---
-        plaid_checkbox_y = input_rect.bottom + 10
+        # --- MODIFICATION: Draw both checkboxes ---
+        plaid_checkbox_y = input_rect.bottom + 15
         plaid_checkbox_rect = pygame.Rect(dialog_x + 10, plaid_checkbox_y, 20, 20)
         draw_checkbox(screen, plaid_checkbox_rect.x, plaid_checkbox_rect.y, plaid_mode_checked)
-        plaid_label_surf = ui_font.render("Plaid", True, BLACK)
+        plaid_label_surf = ui_font.render("Plaid Mode (Score Only)", True, BLACK)
         screen.blit(plaid_label_surf, (plaid_checkbox_rect.right + 5, plaid_checkbox_rect.y + 2))
-        # --- END NEW ---
+
+        endgame_checkbox_y = plaid_checkbox_rect.bottom + 10
+        endgame_checkbox_rect = pygame.Rect(dialog_x + 10, endgame_checkbox_y, 20, 20)
+        draw_checkbox(screen, endgame_checkbox_rect.x, endgame_checkbox_rect.y, endgame_scenarios_checked)
+        endgame_label_surf = ui_font.render("Generate Endgame Scenarios", True, BLACK)
+        screen.blit(endgame_label_surf, (endgame_checkbox_rect.right + 5, endgame_checkbox_rect.y + 2))
+        # --- END MODIFICATION ---
 
         # --- MODIFIED: Adjusted button Y position ---
         ok_rect = pygame.Rect(dialog_x + 40, dialog_y + dialog_height - BUTTON_HEIGHT - 15, BUTTON_WIDTH, BUTTON_HEIGHT)
@@ -5104,7 +5129,7 @@ def get_batch_game_dialog():
 
         if error_msg:
             error_surf = ui_font.render(error_msg, True, RED)
-            screen.blit(error_surf, (dialog_x + 10, plaid_checkbox_rect.bottom + 5))
+            screen.blit(error_surf, (dialog_x + 10, endgame_checkbox_rect.bottom + 5))
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -5115,17 +5140,23 @@ def get_batch_game_dialog():
                 input_active = input_rect.collidepoint(x, y)
                 error_msg = None # Clear error on click
 
-                # --- NEW: Handle click on Plaid checkbox ---
+                # --- MODIFICATION: Handle clicks on both checkboxes with mutual exclusion ---
                 if plaid_checkbox_rect.collidepoint(x, y):
                     plaid_mode_checked = not plaid_mode_checked
-                # --- END NEW ---
+                    if plaid_mode_checked:
+                        endgame_scenarios_checked = False # Uncheck the other
+                elif endgame_checkbox_rect.collidepoint(x, y):
+                    endgame_scenarios_checked = not endgame_scenarios_checked
+                    if endgame_scenarios_checked:
+                        plaid_mode_checked = False # Uncheck the other
+                # --- END MODIFICATION ---
 
                 if ok_rect.collidepoint(x, y):
                     try:
                         num_games = int(input_text)
                         if num_games > 0:
-                            # --- MODIFIED: Return a tuple with the plaid mode state ---
-                            return num_games, plaid_mode_checked
+                            # --- MODIFIED: Return a tuple with all three states ---
+                            return num_games, plaid_mode_checked, endgame_scenarios_checked
                         else:
                             error_msg = "Enter a positive number."
                     except ValueError:
@@ -5139,8 +5170,8 @@ def get_batch_game_dialog():
                         try:
                             num_games = int(input_text)
                             if num_games > 0:
-                                # --- MODIFIED: Return a tuple with the plaid mode state ---
-                                return num_games, plaid_mode_checked
+                                # --- MODIFIED: Return a tuple with all three states ---
+                                return num_games, plaid_mode_checked, endgame_scenarios_checked
                             else:
                                 error_msg = "Enter a positive number."
                         except ValueError:
@@ -6144,10 +6175,9 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
 
     _is_potentially_silent_batch = False
     if selected_mode_result == "BATCH_MODE":
-        # Check based on new signature with plaid mode
-        if len(return_data) == 12 and not return_data[7]:
+        # Check for visualize flag in various tuple lengths
+        if len(return_data) >= 12 and not return_data[7]:
             _is_potentially_silent_batch = True
-        # Check based on old signatures
         elif len(return_data) == 11 and not return_data[7]:
             _is_potentially_silent_batch = True
         elif len(return_data) == 8 and not return_data[7]:
@@ -6205,27 +6235,32 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                     dev_cprofile_checked_init = return_data[1]
 
         elif selected_mode_result == "BATCH_MODE":
-            plaid_mode_checked = False # Default
-            if len(return_data) == 12: # New signature with plaid_mode
+            # --- MODIFICATION: Unpack new tuple from batch dialog ---
+            plaid_mode_checked = False
+            endgame_scenarios_checked = False
+            if len(return_data) == 13: # New signature with endgame scenarios
+                game_mode_tuple, player_names_sel, human_player_sel, use_endgame_solver_checked, \
+                use_ai_simulation_checked, num_games, dev_cprofile_checked_init, dev_visualize_batch_checked_init, \
+                ai_sim_num_cand_batch, ai_sim_num_opp_batch, ai_sim_num_post_batch, \
+                plaid_mode_checked, endgame_scenarios_checked = return_data
+                ai_sim_num_candidates_init = ai_sim_num_cand_batch
+                ai_sim_num_opponent_sims_init = ai_sim_num_opp_batch
+                ai_sim_num_post_sim_candidates_init = ai_sim_num_post_batch
+            elif len(return_data) == 12: # Fallback for old signature with plaid_mode
                 game_mode_tuple, player_names_sel, human_player_sel, use_endgame_solver_checked, \
                 use_ai_simulation_checked, num_games, dev_cprofile_checked_init, dev_visualize_batch_checked_init, \
                 ai_sim_num_cand_batch, ai_sim_num_opp_batch, ai_sim_num_post_batch, plaid_mode_checked = return_data
                 ai_sim_num_candidates_init = ai_sim_num_cand_batch
                 ai_sim_num_opponent_sims_init = ai_sim_num_opp_batch
                 ai_sim_num_post_sim_candidates_init = ai_sim_num_post_batch
-            elif len(return_data) == 11: # Old signature without plaid
-                game_mode_tuple, player_names_sel, human_player_sel, use_endgame_solver_checked, \
-                use_ai_simulation_checked, num_games, dev_cprofile_checked_init, dev_visualize_batch_checked_init, \
-                ai_sim_num_candidates_init, ai_sim_num_opponent_sims_init, ai_sim_num_post_sim_candidates_init = return_data
-            elif len(return_data) == 8: # Older signature
-                game_mode_tuple, player_names_sel, human_player_sel, use_endgame_solver_checked, \
-                use_ai_simulation_checked, num_games, dev_cprofile_checked_init, dev_visualize_batch_checked_init = return_data
+            # --- END MODIFICATION ---
             else:
                 if not _is_potentially_silent_batch: print("Error: Unexpected data structure for BATCH_MODE in initialize_game (main logic).")
                 return None
 
             # Set globals from batch config
-            USE_ENDGAME_SOLVER = use_endgame_solver_checked
+            # Endgame scenario generation forces endgame solver ON
+            USE_ENDGAME_SOLVER = use_endgame_solver_checked or endgame_scenarios_checked
             # Plaid mode overrides simulation
             USE_AI_SIMULATION = use_ai_simulation_checked and not plaid_mode_checked
 
@@ -6247,12 +6282,12 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                 except ValueError:
                     bbb_8l_max_prob_init = 1000
             elif len(return_data) == 13: 
-                player_names_sel, human_player_sel, practice_mode_sel, letter_checks_sel, \
+                 player_names_sel, human_player_sel, practice_mode_sel, letter_checks_sel, \
                 number_checks_sel, use_endgame_solver_sel, use_ai_simulation_sel, \
                 practice_state_from_mode_sel, dev_cprofile_checked_init, dev_visualize_batch_checked_init, \
                 ai_sim_num_candidates_init, ai_sim_num_opponent_sims_init, ai_sim_num_post_sim_candidates_init = return_data
-                USE_ENDGAME_SOLVER = use_endgame_solver_sel
-                USE_AI_SIMULATION = use_ai_simulation_sel
+                 USE_ENDGAME_SOLVER = use_endgame_solver_sel
+                 USE_AI_SIMULATION = use_ai_simulation_sel
             elif len(return_data) == 10: 
                  player_names_sel, human_player_sel, practice_mode_sel, letter_checks_sel, \
                 number_checks_sel, use_endgame_solver_sel, use_ai_simulation_sel, \
@@ -6394,7 +6429,7 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                     loading_text_surf = ui_font.render("Generating Insights for Loaded Game...", True, BLUE)
                     screen.blit(loading_text_surf, ( (WINDOW_WIDTH - loading_text_surf.get_width()) // 2, (WINDOW_HEIGHT - loading_text_surf.get_height()) // 2))
                     pygame.display.flip()
-                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_run_param=is_silent_run_for_init)
+                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_batch_run_param=is_silent_run_for_init)
             else:
                 insights_data_for_replay = [] 
                 if not is_silent_run_for_init and gaddag_loading_status == 'loading':
@@ -6418,7 +6453,7 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                     loading_text_surf = ui_font.render("Generating Insights...", True, BLUE)
                     screen.blit(loading_text_surf, ( (WINDOW_WIDTH - loading_text_surf.get_width()) // 2, (WINDOW_HEIGHT - loading_text_surf.get_height()) // 2))
                     pygame.display.flip()
-                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_run_param=is_silent_run_for_init)
+                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_batch_run_param=is_silent_run_for_init)
             else:
                 insights_data_for_replay = []
                 if not is_silent_run_for_init and gaddag_loading_status == 'loading':
@@ -6461,7 +6496,8 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
             'ai_sim_num_post_sim_candidates': ai_sim_num_post_sim_candidates_init,
             'bbb_7l_max_prob': bbb_7l_max_prob_init, 
             'bbb_8l_max_prob': bbb_8l_max_prob_init,
-            'plaid_mode': plaid_mode_checked
+            'plaid_mode': plaid_mode_checked,
+            'is_endgame_scenario_gen': endgame_scenarios_checked # Add the new flag
         }
         player_names = player_names_sel
         human_player = human_player_sel
@@ -12038,8 +12074,11 @@ def execute_game_session(is_initialized_from_outer_loop_param):
             current_state_dict['ai_sim_num_candidates_cfg'] = ai_sim_num_candidates_global
             current_state_dict['ai_sim_num_opponent_sims_cfg'] = ai_sim_num_opponent_sims_global
             current_state_dict['ai_sim_num_post_sim_candidates_cfg'] = ai_sim_num_post_sim_candidates_global
-
             
+            # --- MODIFICATION: Add flag for scenario generation ---
+            current_state_dict['is_endgame_scenario_gen'] = initial_game_config.get('is_endgame_scenario_gen', False)
+            current_state_dict['endgame_scenario_saved_this_game'] = False
+            # --- END MODIFICATION ---
 
             while current_state_dict['running_inner']:
                 if _module_level_batch_stop_requested_internal:
@@ -12077,6 +12116,53 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                     if current_state_dict.get('batch_stop_requested', False): _module_level_batch_stop_requested_internal = True
                     if current_state_dict.get('return_to_mode_selection', False): _return_to_mode_selection_internal = True
                     break
+
+                # --- MODIFICATION: Add endgame scenario saving logic ---
+                if current_state_dict.get('is_endgame_scenario_gen') and \
+                   not current_state_dict.get('endgame_scenario_saved_this_game') and \
+                   len(current_state_dict.get('bag', [])) == 0:
+                    
+                    print(f"--- Endgame Scenario Triggered (Game {current_batch_game_num}) ---")
+                    current_state_dict['endgame_scenario_saved_this_game'] = True # Prevent re-triggering
+
+                    # Gather all necessary state for the solver
+                    player_idx_solve = current_state_dict['turn'] - 1
+                    opponent_idx_solve = 1 - player_idx_solve
+                    rack_player_solve = current_state_dict['racks'][player_idx_solve]
+                    rack_opponent_solve = current_state_dict['racks'][opponent_idx_solve]
+                    score_diff_solve = current_state_dict['scores'][player_idx_solve] - current_state_dict['scores'][opponent_idx_solve]
+                    
+                    # Solve the endgame
+                    _, formatted_lines_solve = ai_engine.solve_endgame(
+                        rack_player_solve, rack_opponent_solve, current_state_dict['tiles'], current_state_dict['blanks'], 
+                        current_state_dict['board'], score_diff_solve, is_silent_batch_run_param=True
+                    )
+
+                    if formatted_lines_solve:
+                        # Package the data for saving
+                        scenario_data_to_save = {
+                            'sge_version': "1.0",
+                            'board_tiles': current_state_dict['tiles'],
+                            'board_blanks': current_state_dict['blanks'],
+                            'player_rack': rack_player_solve,
+                            'opponent_rack': rack_opponent_solve,
+                            'score_diff': score_diff_solve,
+                            'solution_lines': formatted_lines_solve
+                        }
+                        
+                        # Create a unique filename
+                        now_sge = datetime.datetime.now()
+                        sge_filename = f"Endgame-{now_sge.strftime('%Y%m%d-%H%M%S-%f')}.sge"
+                        sge_filepath = os.path.join("Endgame Practice", sge_filename)
+                        
+                        # Save the file
+                        try:
+                            with open(sge_filepath, 'wb') as f_sge:
+                                pickle.dump(scenario_data_to_save, f_sge)
+                            print(f"  > Saved scenario to: {sge_filepath}")
+                        except Exception as e_sge:
+                            print(f"  > ERROR saving endgame scenario to {sge_filepath}: {e_sge}")
+                # --- END MODIFICATION ---
 
                 # 3. Check for game over condition
                 if not current_state_dict.get('typing', False):
@@ -12309,6 +12395,16 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
             _load_word_definitions_background() # Call directly
             print("--- Main: All data loaded. ---")
         
+        # --- MODIFICATION: Create Endgame Practice directory if it doesn't exist ---
+        endgame_dir = "Endgame Practice"
+        if not os.path.exists(endgame_dir):
+            try:
+                os.makedirs(endgame_dir)
+                print(f"--- Created directory: '{endgame_dir}' for endgame scenarios. ---")
+            except OSError as e:
+                print(f"--- ERROR: Could not create directory '{endgame_dir}': {e} ---")
+        # --- END MODIFICATION ---
+
         # --- NEW: Initialize the Cython AI Engine with constants ---
         # This is done once to pass all necessary data to the Cython module,
         # avoiding slow Python-to-C calls during move generation.
