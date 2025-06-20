@@ -1,8 +1,7 @@
 # ai_engine.pyx
 
-#ai_engine_pyx - AS - 20JUN25
-#Added window to show Endgame Solver results
-#Fixed float --> int UI bug
+#ai_engine_pyx - AT - 20JUN25
+#Added Batch Endgame, but don't know if it works, endgames solve too slowly
 
 
 
