@@ -1,9 +1,15 @@
 To-Do List
 
 
--- Bug where AI exchanged six and only six tiles were on rack, early in game
+-- In Club_DB, add Player contact info (phone number, email)
 
--- AI score in Game Over dialog is float, needs to be int
+-- In 8LB mode, if user guesses incorrect word, correct word should be shown. Maybe also show other
+possbile bingos.
+
+-- Batch Endgames...set up batch games that solve for the endgame. Save those results and then when
+Endgame Practice mode is chosen, load one of the already solved endgames for the player to solve.
+
+-- Bug where AI exchanged six and only six tiles were on rack, early in game
 
 -- Blank usage is not optimal, Batch game blanks often left on rack at end of game
 
@@ -254,4 +260,10 @@ word among the 5's.
 -- Lookup should also allow the ability to anagram words.
 
 -- Need a Solve Endgame option in Replay Mode.
+
+-- In Replay Mode, when Solver finishes, best endgame path should show in a window,
+instead of just printing to the console.
+
+-- AI score in Game Over dialog is float, needs to be int
+
                                                                                                                                                       
