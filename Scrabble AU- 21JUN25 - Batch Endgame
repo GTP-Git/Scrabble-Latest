@@ -3,10 +3,12 @@
 
 
 #python
-#Scrabble AT
-#Added Batch Endgame, but don't know if it works, endgames solve too slowly
+#Scrabble AU
+#Added several Endgame optimizatons: transposition tables, cross-checking only relevant square,
+#More aggressive pruning guaranteed inferior lines, 2nd-to-move AI simply uses already solved endgame
+#But not sure if these are being properly called or used, endgames still VERY slow
 
-#20JUN25
+#21JUN25
 
 
 
@@ -103,6 +105,8 @@ LEAVE_LOOKUP_TABLE = {}
 
 EXCHANGE_PREFERENCE_THRESHOLD = 10
 LOW_SCORE_THRESHOLD = 15
+
+ENDGAME_SOLVER_TILE_THRESHOLD = 6
 
 
 DEV_CPROFILE_ENABLED_SESSION = False
@@ -1257,6 +1261,46 @@ def load_game_sgs(filename, is_silent_batch_run_param=False): # Added is_silent_
         # Error messages should always print
         print(f"An unexpected error occurred while loading {filepath_to_load}: {e}")
         show_message_dialog(f"Unexpected error loading SGS file:\n{filepath_to_load}\n\nDetails: {e}", "SGS Load Error")
+        return None
+
+
+
+
+
+# In Scrabble Game.py, can be placed near load_game_sgs
+
+def load_endgame_scenario(filepath):
+    """
+    Loads a specific endgame scenario from an .sge file.
+
+    Args:
+        filepath (str): The full path to the .sge file.
+
+    Returns:
+        dict or None: The loaded scenario data dictionary, or None if loading fails.
+    """
+    try:
+        with open(filepath, 'rb') as f_load:
+            loaded_data = pickle.load(f_load)
+        
+        if not isinstance(loaded_data, dict) or 'sge_version' not in loaded_data:
+            print(f"Error: {filepath} is not a valid SGE file or is corrupted.")
+            show_message_dialog(f"Error: Not a valid SGE scenario file:\n{filepath}", "SGE Load Error")
+            return None
+            
+        print(f"Endgame scenario loaded successfully from {filepath}")
+        return loaded_data
+    except FileNotFoundError:
+        print(f"Error: SGE file not found at '{filepath}'.")
+        show_message_dialog(f"Error: File not found:\n{filepath}", "SGE Load Error")
+        return None
+    except (pickle.UnpicklingError, EOFError) as e:
+        print(f"Error unpickling scenario data from {filepath}: {e}")
+        show_message_dialog(f"Error reading SGE file (corrupted or invalid format):\n{filepath}\n\nDetails: {e}", "SGE Load Error")
+        return None
+    except Exception as e:
+        print(f"An unexpected error occurred while loading {filepath}: {e}")
+        show_message_dialog(f"Unexpected error loading SGE file:\n{filepath}\n\nDetails: {e}", "SGE Load Error")
         return None
 
 
@@ -2463,15 +2507,15 @@ def is_word_length_allowed(word_len, number_checks):
 
 
 
+# In Scrabble Game.py
+
 def mode_selection_screen():
     """Display and handle the game mode selection screen, including Load Game via a dedicated dialog."""
     print("--- mode_selection_screen() entered ---")
     global main_called
     global pyperclip_available, pyperclip # Used by show_load_game_dialog
     global DEV_CPROFILE_ENABLED_SESSION, DEV_VISUALIZE_BATCH_ENABLED_SESSION
-    # --- NEW: Access definition loading status ---
     global word_definitions_loading_status, WORD_DEFINITIONS
-    # --- END NEW ---
 
     try:
         print("--- mode_selection_screen(): Attempting to load background image... ---")
@@ -2536,16 +2580,13 @@ def mode_selection_screen():
         option_rects = [] 
         name_rect_x = content_left + (content_width - 200) // 2
 
-        # --- Button Definitions ---
         play_later_rect = pygame.Rect(WINDOW_WIDTH - BUTTON_WIDTH - 10, WINDOW_HEIGHT - BUTTON_HEIGHT - 10, BUTTON_WIDTH, BUTTON_HEIGHT)
         load_game_button_rect = pygame.Rect(play_later_rect.left - BUTTON_GAP - BUTTON_WIDTH, play_later_rect.top, BUTTON_WIDTH, BUTTON_HEIGHT)
         batch_game_button_rect = pygame.Rect(load_game_button_rect.left - BUTTON_GAP - BUTTON_WIDTH, play_later_rect.top, BUTTON_WIDTH, BUTTON_HEIGHT)
         
-        # --- NEW: Word Lookup Button ---
-        word_lookup_button_width = 130 # Slightly wider for "Word Lookup"
+        word_lookup_button_width = 130
         word_lookup_button_rect = pygame.Rect(batch_game_button_rect.left - BUTTON_GAP - word_lookup_button_width, play_later_rect.top, word_lookup_button_width, BUTTON_HEIGHT)
         start_game_button_rect = pygame.Rect(word_lookup_button_rect.left - BUTTON_GAP - BUTTON_WIDTH, play_later_rect.top, BUTTON_WIDTH, BUTTON_HEIGHT)
-        # --- END NEW ---
 
         dev_tools_button_width = 150
         dev_tools_button_rect = pygame.Rect(10, WINDOW_HEIGHT - BUTTON_HEIGHT - 10, dev_tools_button_width, BUTTON_HEIGHT)
@@ -2582,7 +2623,7 @@ def mode_selection_screen():
             dropdown_x = name_rect_x 
             dropdown_button_y = p2_y_pos + BUTTON_HEIGHT + 10 
             dropdown_y = dropdown_button_y + 30 
-            options = ["Power Tiles", "8-Letter Bingos", "Bingo, Bango, Bongo", "Only Fives", "End Game"]
+            options = ["Power Tiles", "8-Letter Bingos", "Bingo, Bango, Bongo", "Only Fives", "Endgame Practice"]
             for i, option in enumerate(options):
                 option_rect = pygame.Rect(dropdown_x, dropdown_y + 30 * i, 200, 30)
                 option_rects.append(option_rect)
@@ -2731,12 +2772,10 @@ def mode_selection_screen():
                         else:
                             batch_info = get_batch_game_dialog() 
                             if batch_info is not None:
-                                # --- MODIFICATION: Unpack the new tuple ---
                                 num_games, plaid_mode_checked, endgame_scenarios_checked = batch_info
                                 if not (True and not dev_visualize_batch_checked):
                                     print(f"--- mode_selection_screen(): Starting batch of {num_games} games ---")
                                 selected_mode = "BATCH_MODE"
-                                # --- MODIFICATION: Pass the new flag ---
                                 loaded_game_data = (current_selected_game_mode, player_names, human_player, \
                                                     use_endgame_solver_checked, use_ai_simulation_checked, num_games,\
                                                     dev_cprofile_checked, dev_visualize_batch_checked, \
@@ -2745,7 +2784,6 @@ def mode_selection_screen():
                                 break 
                             else:
                                 print("--- mode_selection_screen(): Batch game setup cancelled ---")
-                    # --- NEW: Word Lookup Button Click ---
                     elif word_lookup_button_rect.collidepoint(x, y):
                         print("--- mode_selection_screen(): Word Lookup button clicked ---")
                         if word_definitions_loading_status == 'loading':
@@ -2753,10 +2791,9 @@ def mode_selection_screen():
                         elif word_definitions_loading_status == 'error' or not WORD_DEFINITIONS:
                             show_message_dialog("Word definitions are unavailable. Lookup feature disabled.", "Error")
                         elif word_definitions_loading_status == 'loaded':
-                            show_word_lookup_dialog() # This will run its own loop
-                        else: # idle, should not happen if loading was triggered
+                            show_word_lookup_dialog()
+                        else:
                              show_message_dialog("Word definitions not yet loaded. Please try again shortly.", "Notice")
-                    # --- END NEW ---
                     elif start_game_button_rect.collidepoint(x, y):
                         selected_mode = modes[current_input]
                         is_starting_batch_silent = (selected_mode == MODE_AVA and not dev_visualize_batch_checked)
@@ -2830,7 +2867,7 @@ def mode_selection_screen():
                                 dropdown_open = not dropdown_open
                             elif dropdown_open: 
                                 clicked_option = False
-                                current_options = ["Power Tiles", "8-Letter Bingos", "Bingo, Bango, Bongo", "Only Fives", "End Game"]
+                                current_options = ["Power Tiles", "8-Letter Bingos", "Bingo, Bango, Bongo", "Only Fives", "Endgame Practice"]
                                 for i_dd_option, option_rect_dd in enumerate(option_rects): 
                                     if option_rect_dd.collidepoint(x, y):
                                         clicked_option = True
@@ -2850,7 +2887,7 @@ def mode_selection_screen():
                                                     "board": p_board, "tiles": p_tiles, "racks": p_racks,
                                                     "blanks": p_blanks, "bag": p_bag, "first_play": False,
                                                     "scores": [0, 0], "turn": 1,
-                                                    "practice_params": practice_params # Store the new params dict
+                                                    "practice_params": practice_params
                                                 }
                                                 print(f"--- mode_selection_screen(): 8-Letter practice setup successful. Selected mode: {selected_mode} ---")
                                                 break 
@@ -2886,9 +2923,9 @@ def mode_selection_screen():
                                             practice_state = None
                                             print(f"--- mode_selection_screen(): Only Fives setup successful. Selected mode: {selected_mode} ---")
                                             break
-                                        elif selected_practice_option == "End Game":
-                                            # --- MODIFICATION: Placeholder logic for Endgame Practice ---
-                                            print("End Game practice selected.")
+                                        # --- MODIFICATION START: Handle Endgame Practice selection ---
+                                        elif selected_practice_option == "Endgame Practice":
+                                            print("Endgame Practice selected.")
                                             endgame_dir = "Endgame Practice"
                                             if not os.path.exists(endgame_dir) or not any(f.endswith('.sge') for f in os.listdir(endgame_dir)):
                                                 show_message_dialog(
@@ -2896,14 +2933,17 @@ def mode_selection_screen():
                                                     "Endgame Practice"
                                                 )
                                             else:
-                                                # In the future, this will open the scenario selection dialog.
-                                                # For now, it's just a placeholder.
-                                                num_scenarios = len([f for f in os.listdir(endgame_dir) if f.endswith('.sge')])
-                                                show_message_dialog(
-                                                    f"Endgame Practice Mode is coming soon!\n\nFound {num_scenarios} scenarios in the '{endgame_dir}' folder.",
-                                                    "Coming Soon"
-                                                )
-                                            # --- END MODIFICATION ---
+                                                # Use a simple dialog to get filename
+                                                sge_filename = show_load_game_dialog() # Re-using this dialog
+                                                if sge_filename:
+                                                    sge_filepath = os.path.join(endgame_dir, sge_filename)
+                                                    scenario_data = load_endgame_scenario(sge_filepath)
+                                                    if scenario_data:
+                                                        selected_mode = "ENDGAME_PRACTICE"
+                                                        practice_mode = "endgame_practice"
+                                                        loaded_game_data = scenario_data # Store data here
+                                                        break # Exit the mode selection loop
+                                        # --- MODIFICATION END ---
                                         break 
                                 if not clicked_option and not dropdown_rect.collidepoint(x,y): 
                                     dropdown_open = False
@@ -2991,9 +3031,7 @@ def mode_selection_screen():
         batch_game_text_rect = batch_game_text_surf.get_rect(center=batch_game_button_rect.center)
         screen.blit(batch_game_text_surf, batch_game_text_rect)
 
-        # --- NEW: Draw Word Lookup Button ---
         draw_word_lookup_button_mode_select(screen, word_lookup_button_rect)
-        # --- END NEW ---
 
         hover = start_game_button_rect.collidepoint(pygame.mouse.get_pos())
         color = BUTTON_HOVER if hover else BUTTON_COLOR
@@ -3041,7 +3079,7 @@ def mode_selection_screen():
             text_rect = text_surf.get_rect(center=dropdown_rect.center)
             screen.blit(text_surf, text_rect)
             if dropdown_open: 
-                current_options = ["Power Tiles", "8-Letter Bingos", "Bingo, Bango, Bongo", "Only Fives", "End Game"]
+                current_options = ["Power Tiles", "8-Letter Bingos", "Bingo, Bango, Bongo", "Only Fives", "Endgame Practice"]
                 for i_dd_draw, option_rect_dd_draw in enumerate(option_rects): 
                      hover = option_rect_dd_draw.collidepoint(pygame.mouse.get_pos())
                      color = BUTTON_HOVER if hover else DROPDOWN_COLOR
@@ -3129,6 +3167,11 @@ def mode_selection_screen():
     if selected_mode == "LOADED_GAME":
         return selected_mode, (loaded_game_data, dev_cprofile_checked, dev_visualize_batch_checked,
                                ai_sim_num_candidates, ai_sim_num_opponent_sims, ai_sim_num_post_sim_candidates)
+    # --- MODIFICATION START: Handle new Endgame Practice mode ---
+    elif selected_mode == "ENDGAME_PRACTICE":
+        return selected_mode, (loaded_game_data, dev_cprofile_checked, dev_visualize_batch_checked,
+                               ai_sim_num_candidates, ai_sim_num_opponent_sims, ai_sim_num_post_sim_candidates)
+    # --- MODIFICATION END ---
     elif selected_mode == "BATCH_MODE":
         return selected_mode, loaded_game_data
     else: 
@@ -5992,33 +6035,33 @@ def draw_simulation_config_dialog(input_texts, active_input_index, state):
 
 
 
+# In Scrabble Game.py
+
 def ai_turn(state):
     """
     Handles the AI's turn by calling the unified Cython decision-making function
     and then executing the returned action.
     """
-    # Add a guard clause at the top to prevent any action if the game is already paused for practice.
     if state.get('paused_for_power_tile') or state.get('paused_for_bingo_practice'):
         return state
 
     global last_played_highlight_coords, is_solving_endgame
     global USE_AI_SIMULATION, USE_ENDGAME_SOLVER
     global seven_letter_words, eight_letter_words, bbb_7l_max_prob_global, bbb_8l_max_prob_global
+    global ENDGAME_SOLVER_TILE_THRESHOLD
 
     is_silent_batch_run_param = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
     
-    # Unpack needed state
     turn = state['turn']
     player_idx = turn - 1
     opponent_idx = 1 - player_idx
     current_rack = state['racks'][player_idx][:] if 0 <= player_idx < len(state['racks']) and state['racks'][player_idx] is not None else []
+    opponent_rack = state['racks'][opponent_idx][:] if 0 <= opponent_idx < len(state['racks']) and state['racks'][opponent_idx] is not None else []
     
-    # Prepare arguments for the Cython function
-    opponent_rack_len = len(state['racks'][opponent_idx]) if 0 <= opponent_idx < len(state['racks']) and state['racks'][opponent_idx] is not None else 7
+    opponent_rack_len = len(opponent_rack)
     current_score_diff = state['scores'][player_idx] - state['scores'][opponent_idx]
     is_plaid_mode = state.get('initial_game_config', {}).get('plaid_mode', False)
     
-    # Prepare BBB thresholds to pass to Cython
     bbb_thresholds = {
         '7L_words': seven_letter_words,
         '8L_words': eight_letter_words,
@@ -6026,18 +6069,45 @@ def ai_turn(state):
         '8L_max': bbb_8l_max_prob_global
     }
 
-    # Call the unified Cython AI brain
-    action_chosen, details = ai_engine.determine_best_action(
-        current_rack, state['tiles'], state['board'], state['blanks'], state['bag'], state['first_play'],
-        USE_AI_SIMULATION, USE_ENDGAME_SOLVER, is_plaid_mode,
-        opponent_rack_len, state.get('ai_sim_num_candidates_cfg', DEFAULT_AI_CANDIDATES),
-        state.get('ai_sim_num_opponent_sims_cfg', DEFAULT_OPPONENT_SIMULATIONS),
-        state.get('ai_sim_num_post_sim_candidates_cfg', DEFAULT_POST_SIM_CANDIDATES),
-        current_score_diff, state['practice_mode'], state['letter_checks'], bbb_thresholds,
-        is_silent_batch_run_param=is_silent_batch_run_param
-    )
+    # --- MODIFICATION START: Capture the full solved path ---
+    # Check if the endgame solver should be triggered
+    bag_count = len(state['bag'])
+    total_tiles_on_racks = len(current_rack) + opponent_rack_len
+    
+    if USE_ENDGAME_SOLVER and bag_count == 0 and total_tiles_on_racks <= ENDGAME_SOLVER_TILE_THRESHOLD:
+        # Call the solver, which returns the best first move AND the full sequence
+        best_first_move, full_sequence = ai_engine.solve_endgame(
+            current_rack, opponent_rack, state['tiles'], state['blanks'], state['board'],
+            current_score_diff, is_silent_batch_run_param
+        )
+        # Store the full sequence in the state
+        state['endgame_solved_path'] = full_sequence
+        
+        # Determine the action based on the best first move from the sequence
+        if best_first_move == "PASS":
+            action_chosen = 'pass'
+            details = None
+        elif isinstance(best_first_move, dict):
+            action_chosen = 'play'
+            details = best_first_move
+        else:
+            action_chosen = 'pass' # Default to pass if solver returns something unexpected
+            details = None
+    else:
+        # If not in the endgame, use the standard decision-making process
+        action_chosen, details = ai_engine.determine_best_action(
+            current_rack, opponent_rack,
+            state['tiles'], state['board'], state['blanks'], state['bag'], state['first_play'],
+            USE_AI_SIMULATION, USE_ENDGAME_SOLVER, is_plaid_mode,
+            opponent_rack_len, state.get('ai_sim_num_candidates_cfg', DEFAULT_AI_CANDIDATES),
+            state.get('ai_sim_num_opponent_sims_cfg', DEFAULT_OPPONENT_SIMULATIONS),
+            state.get('ai_sim_num_post_sim_candidates_cfg', DEFAULT_POST_SIM_CANDIDATES),
+            current_score_diff, state['practice_mode'], state['letter_checks'], bbb_thresholds,
+            ENDGAME_SOLVER_TILE_THRESHOLD,
+            is_silent_batch_run_param=is_silent_batch_run_param
+        )
+    # --- MODIFICATION END ---
 
-    # --- Process the result from the Cython function ---
     if action_chosen == 'PAUSE':
         if details['type'] == 'power_tile':
             state['paused_for_power_tile'] = True
@@ -6050,17 +6120,10 @@ def ai_turn(state):
             if not is_silent_batch_run_param:
                 print(f"AI turn PAUSING for Bingo, Bango, Bongo.")
         
-        # --- THIS IS THE FIX ---
-        # Signal that an action (pausing) has been taken for this turn.
-        #state['human_played'] = True 
-        # --- END FIX ---
+        return state
 
-        return state # Return early, turn does not advance
-
-    # If not pausing, proceed with play/exchange/pass
     move_rack_before = state['racks'][player_idx][:] if 0 <= player_idx < len(state['racks']) and state['racks'][player_idx] is not None else []
     
-    # This logic is now common for all actions
     expected_single_draw_value_for_turn = ai_engine.get_expected_single_draw_value(current_rack, state['tiles'], state['blanks'])
     luck_factor = 0.0
     total_expected_value_of_this_draw = 0.0
@@ -6143,6 +6206,8 @@ def ai_turn(state):
 
 
 
+# In Scrabble Game.py
+
 def initialize_game(selected_mode_result, return_data, main_called_flag):
     """
     Initializes the game state based on the selected mode and data.
@@ -6175,7 +6240,6 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
 
     _is_potentially_silent_batch = False
     if selected_mode_result == "BATCH_MODE":
-        # Check for visualize flag in various tuple lengths
         if len(return_data) >= 12 and not return_data[7]:
             _is_potentially_silent_batch = True
         elif len(return_data) == 11 and not return_data[7]:
@@ -6188,7 +6252,7 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
 
     if not main_called_flag:
         sgs_loaded_game_data_from_param = None 
-        if selected_mode_result == "LOADED_GAME":
+        if selected_mode_result == "LOADED_GAME" or selected_mode_result == "ENDGAME_PRACTICE": # MODIFIED
             if len(return_data) == 6:
                 sgs_loaded_game_data_from_param = return_data[0]
                 dev_cprofile_checked_init = return_data[1]
@@ -6235,10 +6299,9 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                     dev_cprofile_checked_init = return_data[1]
 
         elif selected_mode_result == "BATCH_MODE":
-            # --- MODIFICATION: Unpack new tuple from batch dialog ---
             plaid_mode_checked = False
             endgame_scenarios_checked = False
-            if len(return_data) == 13: # New signature with endgame scenarios
+            if len(return_data) == 13:
                 game_mode_tuple, player_names_sel, human_player_sel, use_endgame_solver_checked, \
                 use_ai_simulation_checked, num_games, dev_cprofile_checked_init, dev_visualize_batch_checked_init, \
                 ai_sim_num_cand_batch, ai_sim_num_opp_batch, ai_sim_num_post_batch, \
@@ -6246,22 +6309,18 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                 ai_sim_num_candidates_init = ai_sim_num_cand_batch
                 ai_sim_num_opponent_sims_init = ai_sim_num_opp_batch
                 ai_sim_num_post_sim_candidates_init = ai_sim_num_post_batch
-            elif len(return_data) == 12: # Fallback for old signature with plaid_mode
+            elif len(return_data) == 12:
                 game_mode_tuple, player_names_sel, human_player_sel, use_endgame_solver_checked, \
                 use_ai_simulation_checked, num_games, dev_cprofile_checked_init, dev_visualize_batch_checked_init, \
                 ai_sim_num_cand_batch, ai_sim_num_opp_batch, ai_sim_num_post_batch, plaid_mode_checked = return_data
                 ai_sim_num_candidates_init = ai_sim_num_cand_batch
                 ai_sim_num_opponent_sims_init = ai_sim_num_opp_batch
                 ai_sim_num_post_sim_candidates_init = ai_sim_num_post_batch
-            # --- END MODIFICATION ---
             else:
                 if not _is_potentially_silent_batch: print("Error: Unexpected data structure for BATCH_MODE in initialize_game (main logic).")
                 return None
 
-            # Set globals from batch config
-            # Endgame scenario generation forces endgame solver ON
             USE_ENDGAME_SOLVER = use_endgame_solver_checked or endgame_scenarios_checked
-            # Plaid mode overrides simulation
             USE_AI_SIMULATION = use_ai_simulation_checked and not plaid_mode_checked
 
         elif selected_mode_result is not None: 
@@ -6460,6 +6519,53 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                      print("Insights generation skipped for replay: GADDAG not ready.")
         if not is_silent_run_for_init:
             print(f"--- initialize_game(): Loaded SGS Game. Players: {player_names}, Moves: {len(move_history)} ---")
+    
+    # --- MODIFICATION START: Handle new Endgame Practice mode ---
+    elif selected_mode_result == "ENDGAME_PRACTICE":
+        if not is_silent_run_for_init:
+            print("--- initialize_game(): Handling ENDGAME_PRACTICE setup ---")
+        scenario_data = sgs_loaded_game_data_from_param # In this case, it's scenario data
+        if not scenario_data or not isinstance(scenario_data, dict):
+            print("Error: No valid SGE data provided for endgame practice.")
+            return None
+        
+        game_mode = MODE_HVH # It's a human playing against the solution
+        practice_mode = "endgame_practice"
+        is_loaded_game = True # Treat it like a loaded game for UI purposes
+        is_batch_running = False
+        player_names = ["You", "Optimal"]
+        is_ai = [False, True] # Player 2 (Optimal) is effectively an AI
+        human_player = 1
+        
+        # Set up the board state from the scenario file
+        tiles_init = scenario_data.get('board_tiles', tiles_init)
+        blanks_init = scenario_data.get('board_blanks', set())
+        
+        # Set up racks
+        racks_init[0] = scenario_data.get('player_rack', [])
+        racks_init[1] = scenario_data.get('opponent_rack', [])
+        initial_racks_at_game_start = [r[:] for r in racks_init]
+        
+        # Set scores based on the initial difference
+        score_diff = scenario_data.get('score_diff', 0)
+        scores_init = [score_diff, 0] # P1 starts with the score advantage/disadvantage
+        
+        bag_init = [] # Bag is always empty in endgame
+        sgs_initial_bag = []
+        first_play = False # Never the first play in an endgame scenario
+        turn = 1
+        
+        # Store the solution path to be used by the AI
+        # We will need a new state variable for this, let's call it 'practice_solution_path'
+        active_practice_state_data = {'solution_path': scenario_data.get('solution_lines', [])}
+        
+        # Reset other game variables
+        move_history = []
+        game_over_at_init = False
+        final_scores_at_init = None
+        replay_mode = False
+        rack_visibility = [True, True]
+    # --- MODIFICATION END ---
 
     elif selected_mode_result == "BATCH_MODE":
         is_batch_running = True
@@ -6497,7 +6603,7 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
             'bbb_7l_max_prob': bbb_7l_max_prob_init, 
             'bbb_8l_max_prob': bbb_8l_max_prob_init,
             'plaid_mode': plaid_mode_checked,
-            'is_endgame_scenario_gen': endgame_scenarios_checked # Add the new flag
+            'is_endgame_scenario_gen': endgame_scenarios_checked
         }
         player_names = player_names_sel
         human_player = human_player_sel
@@ -6559,7 +6665,6 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                     initial_game_config['gamify_min_prob'] = gamified_params.get('min', 500)
                     initial_game_config['gamify_max_goal'] = gamified_params.get('max_goal', 3500)
                     initial_game_config['gamify_increment'] = gamified_params.get('increment', 250)
-                    # Set the starting dynamic range
                     initial_game_config['gamify_current_max_prob'] = initial_game_config['gamify_min_prob'] + initial_game_config['gamify_increment']
 
             
@@ -6969,9 +7074,9 @@ def _handle_mouse_down_rack_ui_elements(event, state, drawn_rects):
 
 
 
-# In Scrabble Game.py, can be placed near other dialog functions
+# In Scrabble Game.py
 
-def show_endgame_results_dialog(result_lines, state):
+def show_endgame_results_dialog(result_lines, state, duration_str):
     """
     Displays a modal dialog showing the endgame solver results.
     This dialog is movable, scrollable, and dynamically sized for readability.
@@ -7007,7 +7112,16 @@ def show_endgame_results_dialog(result_lines, state):
     drag_offset = (0, 0)
 
     # --- Pre-render content ---
-    rendered_surfaces = [(mono_font.render(line, True, BLACK), mono_font.get_linesize()) for line in result_lines]
+    rendered_surfaces = []
+    
+    # --- MODIFICATION START: Add duration string to rendered content ---
+    if duration_str:
+        rendered_surfaces.append((ui_font.render(duration_str, True, BLACK), ui_font.get_linesize()))
+        # Add a blank line for spacing
+        rendered_surfaces.append((ui_font.render("", True, BLACK), ui_font.get_linesize() // 2))
+    # --- MODIFICATION END ---
+
+    rendered_surfaces.extend([(mono_font.render(line, True, BLACK), mono_font.get_linesize()) for line in result_lines])
     total_content_height = sum(h for _, h in rendered_surfaces)
 
     # --- Main Dialog Loop ---
@@ -7522,6 +7636,7 @@ def _handle_mouse_down_replay_buttons(event, state, drawn_rects):
 
 
 
+
 # In Scrabble Game.py
 
 def _handle_general_mouse_down(event, state, drawn_rects):
@@ -7656,15 +7771,25 @@ def _handle_general_mouse_down(event, state, drawn_rects):
                     print(f"  Opponent Rack (Reconstructed): {rack_opponent}")
                     print(f"  Score Diff: {score_diff}")
 
+                # --- MODIFICATION START: Add Timer ---
+                start_time = time.perf_counter()
+                
                 _, formatted_lines = ai_engine.solve_endgame(
                     rack_player, rack_opponent, board_state_tiles, board_state_blanks, 
                     state['board'], score_diff, is_silent_batch_run_param=True
                 )
                 
+                end_time = time.perf_counter()
+                duration = end_time - start_time
+                duration_str = f"Endgame solver took {duration:.2f} seconds."
+                # --- MODIFICATION END ---
+                
                 state['is_solving_endgame'] = False
                 
                 if formatted_lines:
-                    show_endgame_results_dialog(formatted_lines, state)
+                    # --- MODIFICATION START: Pass duration string to dialog ---
+                    show_endgame_results_dialog(formatted_lines, state, duration_str)
+                    # --- MODIFICATION END ---
                 else:
                     show_message_dialog("Endgame solver found no valid lines or moves.", "Solver Results")
 
@@ -11693,6 +11818,8 @@ def update_preview_score(state):
 
 
 
+# In Scrabble Game.py
+
 def reset_per_game_variables():
     """
     Resets common UI state, turn counters, and temporary variables
@@ -11799,13 +11926,15 @@ def reset_per_game_variables():
         'replay_prev_rect': None,
         'replay_next_rect': None,
         'replay_end_rect': None,
-        # New state variables for the Analyzer window
-        'analyzer_show': False, # Controls visibility of analyzer content
+        'analyzer_show': False,
         'analyzer_scroll_offset': 0,
-        'analyzer_selected_move_index': None, # Index of the selected move within the current turn's analysis list
-        'analyzer_window_rect_store': None, # To store the calculated rect of the analyzer window
-        'analyzer_checkbox_rect_store': None, # To store the rect of the "Show Analysis" checkbox
-        'last_turn_end_time': time.perf_counter() # Initialize with current high-res time
+        'analyzer_selected_move_index': None,
+        'analyzer_window_rect_store': None,
+        'analyzer_checkbox_rect_store': None,
+        'last_turn_end_time': time.perf_counter(),
+        # --- MODIFICATION START: Add new state variable ---
+        'endgame_solved_path': []
+        # --- MODIFICATION END ---
     }
     return reset_values
 
@@ -11942,6 +12071,8 @@ def save_sgs_batch(sgs_data_buffer, is_silent_run):
 
 
 
+# In Scrabble Game.py
+
 def execute_game_session(is_initialized_from_outer_loop_param):
     # MODULE-LEVEL GLOBALS that this function and its helpers will use/modify
     global USE_AI_SIMULATION, USE_ENDGAME_SOLVER
@@ -12005,14 +12136,10 @@ def execute_game_session(is_initialized_from_outer_loop_param):
 
     previous_game_over_state_in_loop = False
     
-    # --- MODIFICATION START: Add Pygame Clock ---
     clock = pygame.time.Clock()
-    # --- MODIFICATION END ---
 
-    # --- NEW: Initialize SGS data buffer for batch runs ---
     sgs_data_buffer = []
     SGS_WRITE_BATCH_SIZE = 1000
-    # --- END NEW ---
 
     try:
         for game_num_loop_internal in range(1, num_loops_exec + 1):
@@ -12075,23 +12202,18 @@ def execute_game_session(is_initialized_from_outer_loop_param):
             current_state_dict['ai_sim_num_opponent_sims_cfg'] = ai_sim_num_opponent_sims_global
             current_state_dict['ai_sim_num_post_sim_candidates_cfg'] = ai_sim_num_post_sim_candidates_global
             
-            # --- MODIFICATION: Add flag for scenario generation ---
             current_state_dict['is_endgame_scenario_gen'] = initial_game_config.get('is_endgame_scenario_gen', False)
             current_state_dict['endgame_scenario_saved_this_game'] = False
-            # --- END MODIFICATION ---
 
             while current_state_dict['running_inner']:
                 if _module_level_batch_stop_requested_internal:
                     current_state_dict['running_inner'] = False
                     break
                 
-                
-                # --- THIS IS THE CORRECTED LOGIC FLOW ---
                 current_state_dict['gaddag_loading_status'] = gaddag_loading_status 
                 current_state_dict['GADDAG_STRUCTURE'] = GADDAG_STRUCTURE
                 current_state_dict['bag_count'] = len(current_state_dict.get('bag', []))
 
-                # 1. Handle user input first
                 event_flags = process_game_events(current_state_dict, current_state_dict['drawn_rects'])
                 _visual_batch_esc_stop_pending_internal = current_state_dict.get('visual_batch_esc_stop_pending', False)
 
@@ -12101,7 +12223,6 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                 if not event_flags.get('running_inner_from_event', True): current_state_dict['running_inner'] = False
                 if not current_state_dict['running_inner']: break
 
-                # 2. Handle state updates based on turn changes or practice mode needs
                 current_state_dict = handle_deferred_practice_init(current_state_dict)
                 if not current_state_dict['running_inner']:
                     if current_state_dict.get('batch_stop_requested', False): _module_level_batch_stop_requested_internal = True
@@ -12117,29 +12238,30 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                     if current_state_dict.get('return_to_mode_selection', False): _return_to_mode_selection_internal = True
                     break
 
-                # --- MODIFICATION: Add endgame scenario saving logic ---
                 if current_state_dict.get('is_endgame_scenario_gen') and \
                    not current_state_dict.get('endgame_scenario_saved_this_game') and \
                    len(current_state_dict.get('bag', [])) == 0:
                     
                     print(f"--- Endgame Scenario Triggered (Game {current_batch_game_num}) ---")
-                    current_state_dict['endgame_scenario_saved_this_game'] = True # Prevent re-triggering
+                    current_state_dict['endgame_scenario_saved_this_game'] = True 
 
-                    # Gather all necessary state for the solver
                     player_idx_solve = current_state_dict['turn'] - 1
                     opponent_idx_solve = 1 - player_idx_solve
                     rack_player_solve = current_state_dict['racks'][player_idx_solve]
                     rack_opponent_solve = current_state_dict['racks'][opponent_idx_solve]
                     score_diff_solve = current_state_dict['scores'][player_idx_solve] - current_state_dict['scores'][opponent_idx_solve]
                     
-                    # Solve the endgame
+                    start_time_sge = time.perf_counter()
+
                     _, formatted_lines_solve = ai_engine.solve_endgame(
                         rack_player_solve, rack_opponent_solve, current_state_dict['tiles'], current_state_dict['blanks'], 
                         current_state_dict['board'], score_diff_solve, is_silent_batch_run_param=True
                     )
+                    
+                    end_time_sge = time.perf_counter()
+                    duration_sge = end_time_sge - start_time_sge
 
                     if formatted_lines_solve:
-                        # Package the data for saving
                         scenario_data_to_save = {
                             'sge_version': "1.0",
                             'board_tiles': current_state_dict['tiles'],
@@ -12147,54 +12269,89 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                             'player_rack': rack_player_solve,
                             'opponent_rack': rack_opponent_solve,
                             'score_diff': score_diff_solve,
-                            'solution_lines': formatted_lines_solve
+                            'solution_lines': formatted_lines_solve,
+                            'solve_duration_seconds': duration_sge
                         }
                         
-                        # Create a unique filename
                         now_sge = datetime.datetime.now()
                         sge_filename = f"Endgame-{now_sge.strftime('%Y%m%d-%H%M%S-%f')}.sge"
                         sge_filepath = os.path.join("Endgame Practice", sge_filename)
                         
-                        # Save the file
                         try:
                             with open(sge_filepath, 'wb') as f_sge:
                                 pickle.dump(scenario_data_to_save, f_sge)
-                            print(f"  > Saved scenario to: {sge_filepath}")
+                            print(f"  > Saved scenario to: {sge_filepath} (Solve time: {duration_sge:.2f}s)")
                         except Exception as e_sge:
                             print(f"  > ERROR saving endgame scenario to {sge_filepath}: {e_sge}")
-                # --- END MODIFICATION ---
 
-                # 3. Check for game over condition
                 if not current_state_dict.get('typing', False):
                     current_state_dict = check_and_handle_game_over(current_state_dict)
                 if current_state_dict['game_over_state'] and _local_start_new_game_same_mode_internal:
                      current_state_dict['running_inner'] = False 
                      break
 
-                # 4. Draw the screen with the current state
                 if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
                     current_state_dict['drawn_rects'] = draw_game_screen(screen, current_state_dict)
                     pygame.display.flip()
-                    # --- MODIFICATION: Use the new flag to skip ticking during UI simulation ---
                     if not current_state_dict.get('is_simulating_for_ui', False):
                         clock.tick(60)
                 elif is_batch_running and not current_state_dict.get('is_simulating_for_ui', False): 
                     pygame.time.wait(1) 
 
-                # 5. ONLY NOW, after drawing, check if the AI should take its turn
-                #    AND ONLY IF THE GAME IS NOT PAUSED FOR PRACTICE.
-                if not current_state_dict.get('paused_for_power_tile') and not current_state_dict.get('paused_for_bingo_practice'):
+                # --- MODIFICATION START: Add "Solved Path" Execution Logic ---
+                if current_state_dict.get('endgame_solved_path'):
+                    # If a solved path exists, play the next move from it instantly.
+                    is_silent_run_local = current_state_dict.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
+                    
+                    # Get the next move object from the stored path
+                    next_move_obj = current_state_dict['endgame_solved_path'].pop(0)
+                    
+                    player_idx_path = current_state_dict['turn'] - 1
+                    move_rack_before_path = current_state_dict['racks'][player_idx_path][:] if 0 <= player_idx_path < len(current_state_dict['racks']) and current_state_dict['racks'][player_idx_path] is not None else []
+                    
+                    if isinstance(next_move_obj, dict): # It's a 'play' move
+                        next_turn_val, drawn_tiles, newly_placed, tiles_consumed = play_hint_move(
+                            next_move_obj, current_state_dict['tiles'], current_state_dict['racks'], current_state_dict['blanks'],
+                            current_state_dict['scores'], current_state_dict['turn'], current_state_dict['bag'],
+                            current_state_dict['board'], current_state_dict['is_ai'], current_state_dict['practice_mode'],
+                            is_silent_batch_run_param=is_silent_run_local
+                        )
+                        next_move_obj.update({
+                            'player': current_state_dict['turn'], 'move_type': 'place', 'rack': move_rack_before_path, 'drawn': drawn_tiles,
+                            'newly_placed': newly_placed, 'tiles_played_from_rack': tiles_consumed,
+                            'coord': ai_engine.get_coord(next_move_obj.get('start', (0,0)), next_move_obj.get('direction', 'right'), is_silent_batch_run_param=is_silent_run_local)
+                        })
+                        current_state_dict['first_play'] = False
+                        current_state_dict['consecutive_zero_point_turns'] = 0
+                        current_state_dict['pass_count'] = 0
+                        current_state_dict['exchange_count'] = 0
+                        current_state_dict['last_played_highlight_coords'] = set((pos[0], pos[1]) for pos in next_move_obj.get('positions', []))
+                        current_state_dict['turn'] = next_turn_val
+                        current_state_dict['move_history'].append(next_move_obj)
+
+                    elif next_move_obj == "PASS":
+                        current_state_dict['consecutive_zero_point_turns'] += 1
+                        current_state_dict['pass_count'] += 1
+                        pass_move_data = {
+                            'player': current_state_dict['turn'], 'move_type': 'pass', 'rack': move_rack_before_path, 'score': 0,
+                            'word': '', 'coord': '', 'blanks': set(), 'positions': [], 'drawn': [], 'is_bingo': False,
+                            'word_with_blanks': '', 'turn_duration': 0.0, 'luck_factor': 0.0,
+                            'tiles_played_from_rack': [], 'leave': move_rack_before_path
+                        }
+                        current_state_dict['move_history'].append(pass_move_data)
+                        current_state_dict['turn'] = 3 - current_state_dict['turn']
+                        current_state_dict['last_played_highlight_coords'] = set()
+                
+                # If not following a solved path, check if it's a standard AI turn
+                elif not current_state_dict.get('paused_for_power_tile') and not current_state_dict.get('paused_for_bingo_practice'):
                     current_state_dict = handle_ai_turn_trigger(current_state_dict)
-                # --- END CORRECTED LOGIC FLOW ---
+                # --- MODIFICATION END ---
 
 
-            # --- MODIFICATION START: Batch SGS writing logic ---
             if is_batch_running and current_state_dict.get('game_over_state'):
-                # This block runs after a single batch game's inner loop has finished.
                 batch_prefix = initial_game_config.get('batch_filename_prefix', 'UNKNOWN-BATCH')
                 individual_sgs_filename = f"{batch_prefix}-GAME-{current_batch_game_num}.sgs"
                 
-                # Construct the game data dictionary to be saved
                 batch_game_settings = {
                     'use_endgame_solver': initial_game_config.get('use_endgame_solver', False),
                     'use_ai_simulation': initial_game_config.get('use_ai_simulation', False),
@@ -12223,14 +12380,11 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                     'game_settings': batch_game_settings
                 }
                 
-                # Append the filename and data to the buffer instead of writing immediately
                 sgs_data_buffer.append((individual_sgs_filename, game_data_for_sgs))
 
-                # Check if it's time to write the batch of SGS files
                 if (game_num_loop_internal % SGS_WRITE_BATCH_SIZE == 0) or (game_num_loop_internal == total_batch_games):
                     save_sgs_batch(sgs_data_buffer, is_silent_run=(not DEV_VISUALIZE_BATCH_ENABLED_SESSION))
-                    sgs_data_buffer.clear() # Clear the buffer after writing
-            # --- MODIFICATION END ---
+                    sgs_data_buffer.clear()
 
 
             game_mode = current_state_dict['game_mode']
@@ -12276,12 +12430,10 @@ def execute_game_session(is_initialized_from_outer_loop_param):
             _return_to_mode_selection_internal = True 
 
     finally:
-        # --- NEW: This block ensures any remaining buffered SGS files are saved ---
         if is_batch_running and sgs_data_buffer:
             print(f"--- Interruption/End of Batch: Saving remaining {len(sgs_data_buffer)} buffered SGS files... ---")
             save_sgs_batch(sgs_data_buffer, is_silent_run=(not DEV_VISUALIZE_BATCH_ENABLED_SESSION))
             sgs_data_buffer.clear()
-        # --- END NEW ---
 
     if is_batch_running and batch_results: 
         total_batch_duration_seconds = time.perf_counter() - batch_start_time
