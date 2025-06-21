@@ -1,7 +1,9 @@
 # ai_engine.pyx
 
-#ai_engine_pyx - AT - 20JUN25
-#Added Batch Endgame, but don't know if it works, endgames solve too slowly
+#ai_engine_pyx - AU - 21JUN25
+#Added several Endgame optimizatons: transposition tables, cross-checking only relevant square,
+#More aggressive pruning guaranteed inferior lines, 2nd-to-move AI simply uses already solved endgame
+#But not sure if these are being properly called or used, endgames still VERY slow
 
 
 
@@ -27,6 +29,7 @@ srand(<unsigned int>time(NULL))
 
 # --- Sorting Helper Functions for Cython ---
 # These replace the lambda functions which are not fully supported in cpdef functions.
+
 def _sort_key_raw_score(m):
     return m.get('score', 0)
 
@@ -39,8 +42,13 @@ def _sort_key_final_eval(m):
 def _sort_key_prelim_equity(m):
     return m.get('prelim_equity', 0.0)
 
+def _sort_key_equity(m):
+    return m.get('equity', -1000.0)
+
 def _sort_key_solve_endgame(line_data):
     return line_data['score_diff']
+
+
 
 # --- Globals to be initialized from Python ---
 cdef int GRID_SIZE_C
@@ -58,6 +66,8 @@ cdef str VC_INVALID_STRUCTURE_NO_WORDS_C, VC_INVALID_STRUCTURE_NOT_CENTER_C
 cdef str VC_INVALID_STRUCTURE_NOT_CONNECTED_C, VC_INVALID_STRUCTURE_EMPTY_PLAY_C
 # Colors for scoring
 cdef tuple LIGHT_BLUE_C, BLUE_C, PINK_C, RED_C
+
+cdef dict endgame_transposition_table = {}
 
 # --- NEW: Cythonized DAWG/Trie classes ---
 cdef class TrieNode:
@@ -2042,12 +2052,16 @@ cdef bint _does_move_form_five_letter_word_cython(dict move, list current_tiles)
 
 
 
+# In ai_engine.pyx
+
 cpdef tuple determine_best_action(
-    list rack, list tiles, list board, set blanks, list bag, bint first_play,
+    list rack, list opponent_rack, # MODIFICATION: Added opponent_rack
+    list tiles, list board, set blanks, list bag, bint first_play,
     bint use_simulation, bint use_endgame_solver, bint is_plaid_mode,
     int opponent_rack_len, int num_ai_candidates, int num_opponent_sims, int num_post_sim_candidates,
     int current_score_diff_for_endgame,
-    str practice_mode, list letter_checks, object bbb_thresholds, # New practice mode params
+    str practice_mode, list letter_checks, object bbb_thresholds,
+    int endgame_tile_threshold,
     bint is_silent_batch_run_param=False
 ):
     """
@@ -2071,17 +2085,18 @@ cpdef tuple determine_best_action(
     player_rack_len = len(rack)
     total_tiles_on_racks = player_rack_len + opponent_rack_len
 
-
-
-
-    if use_endgame_solver and bag_count == 0:
-        # Unpack the tuple, ignoring the formatted lines for this function's purpose
+    if use_endgame_solver and bag_count == 0 and total_tiles_on_racks <= endgame_tile_threshold:
+        # --- MODIFICATION START: Pass the correct opponent_rack to the solver ---
         best_first_move_endgame, _ = solve_endgame(
-            rack, [], tiles, blanks, board, current_score_diff_for_endgame, True
+            rack, opponent_rack, tiles, blanks, board, current_score_diff_for_endgame, True
         )
-        if best_first_move_endgame == "PASS": return 'pass', None
-        elif isinstance(best_first_move_endgame, dict): return 'play', best_first_move_endgame
-        else: return 'pass', None
+        # --- MODIFICATION END ---
+        if best_first_move_endgame == "PASS":
+            return 'pass', None
+        elif isinstance(best_first_move_endgame, dict):
+            return 'play', best_first_move_endgame
+        else:
+            return 'pass', None
 
     if is_plaid_mode:
         best_plaid_move = find_best_move_gaddag(rack, tiles, board, blanks, None)
@@ -2098,20 +2113,17 @@ cpdef tuple determine_best_action(
         checked_power_tiles = {power_tile_letters[i] for i in range(4) if letter_checks[i]}
         power_tiles_on_rack = [tile for tile in rack if tile in checked_power_tiles]
         if power_tiles_on_rack:
-            # Return a PAUSE action with the specific tile to practice
             return 'PAUSE', {'type': 'power_tile', 'tile': power_tiles_on_rack[0]}
 
     # --- Generate moves ONCE for standard and BBB modes ---
     all_moves = generate_all_moves_gaddag(rack, tiles, board, blanks, None, is_silent_batch_run_param)
     if all_moves is None: all_moves = []
 
-    # --- NEW: Filter for "Only Fives" practice mode ---
     if practice_mode == "only_fives":
         all_moves = [
             move for move in all_moves 
             if _does_move_form_five_letter_word_cython(move, tiles)
         ]
-    # --- END NEW ---
 
     if practice_mode == "bingo_bango_bongo":
         bingo_plays = []
@@ -2154,21 +2166,17 @@ cpdef tuple determine_best_action(
     can_exchange = bag_count > 0
 
     if can_play:
-        # Calculate preliminary equity (score + leave) for all moves once.
         for move in all_moves:
             raw_score = move.get('score', 0)
             leave_value = evaluate_leave(move.get('leave', []), True)
             move['prelim_equity'] = raw_score + leave_value
         
-        # Sort all moves by this equity.
         all_moves.sort(key=_sort_key_prelim_equity, reverse=True)
         
-        # The best non-simulation move is now the first in the list.
         best_raw_plus_leave_play_candidate = all_moves[0]
         best_raw_plus_leave_evaluation = best_raw_plus_leave_play_candidate.get('prelim_equity', -1000000.0)
 
     if use_simulation and can_play:
-        # Pass the pre-sorted list to the simulation function.
         sim_results = run_ai_simulation(
             all_moves, rack, opponent_rack_len, tiles, blanks, board, bag,
             num_ai_candidates, num_opponent_sims, num_post_sim_candidates, True
@@ -2193,6 +2201,9 @@ cpdef tuple determine_best_action(
         return 'exchange', best_exchange_tiles
     else:
         return 'pass', None
+
+
+
 
 ####Endgame Solver Helper Functions####
 
@@ -2304,24 +2315,47 @@ cdef str format_end_state_for_print(list final_rack_p1_sim, list final_rack_p2_s
 
     return "[end ?]"
 
+
+# In ai_engine.pyx
+
 @cython.cdivision(True)
 @cython.boundscheck(False)
 @cython.wraparound(False)
 cpdef tuple negamax_endgame(list rack_player, list rack_opponent, list tiles, set blanks, list board,
                             int current_score_diff, float alpha, float beta, int depth, int pass_count,
-                            int max_depth, int search_depth_limit, bint is_silent_batch_run_param=False):
+                            int max_depth, int search_depth_limit, bint is_silent_batch_run_param=False,
+                            object cross_check_sets=None):
     """
     Negamax solver for the endgame (empty bag) with depth limit. (Cythonized)
+    Now with transposition tables, incremental cross-checks, and playout pruning.
     """
-    cdef float heuristic_score, value, best_value
-    cdef int final_diff, move_index, sim_pass_count, move_score
-    cdef list possible_moves, playout_moves, other_moves, ordered_moves, best_sequence, subsequent_sequence
+    cdef float heuristic_score, value, best_value, original_alpha, best_playout_score
+    cdef int final_diff, move_index, sim_pass_count, move_score, stored_depth
+    cdef list possible_moves, ordered_moves, best_sequence, subsequent_sequence
     cdef list sim_tiles, sim_rack_player, sim_rack_opponent, temp_rack, newly_placed_details
-    cdef set sim_blanks, move_blanks_coords
-    cdef bint can_pass, valid_placement
-    cdef object move, current_move_details
-    cdef int r_np, c_np
-    cdef str letter_np
+    cdef set sim_blanks, move_blanks_coords, affected_squares_for_cross_check, allowed_letters_v, allowed_letters_h
+    cdef bint can_pass, valid_placement, has_playout
+    cdef object move, current_move_details, sim_cross_check_sets, stored_entry, stored_score
+    cdef int r_np, c_np, r, c, rr, cc, dr, dc, nr, nc
+    cdef str letter_np, up_word, down_word, left_word, right_word, letter_char, stored_flag
+    cdef tuple state_key
+
+    original_alpha = alpha
+    state_key = (tuple(sorted(rack_player)), tuple(sorted(rack_opponent)), tuple(map(tuple, tiles)))
+    
+    stored_entry = endgame_transposition_table.get(state_key)
+    if stored_entry is not None:
+        stored_score, stored_depth, stored_flag = stored_entry
+        if stored_depth >= (max_depth - depth):
+            if stored_flag == 'EXACT':
+                return stored_score, []
+            elif stored_flag == 'LOWERBOUND':
+                alpha = max(alpha, stored_score)
+            elif stored_flag == 'UPPERBOUND':
+                beta = min(beta, stored_score)
+            
+            if alpha >= beta:
+                return stored_score, []
 
     if depth >= search_depth_limit:
         heuristic_score = evaluate_endgame_heuristic(rack_player, rack_opponent, current_score_diff)
@@ -2331,21 +2365,76 @@ cpdef tuple negamax_endgame(list rack_player, list rack_opponent, list tiles, se
         final_diff = calculate_endgame_score_diff(rack_player, rack_opponent, current_score_diff)
         return final_diff, []
 
-    possible_moves = generate_all_moves_gaddag(rack_player, tiles, board, blanks, None, True)
+    if cross_check_sets is None:
+        cross_check_sets = {}
+        for r in range(GRID_SIZE_C):
+            for c in range(GRID_SIZE_C):
+                if not tiles[r][c]:
+                    up_word = ""; rr = r - 1
+                    while rr >= 0 and tiles[rr][c]: up_word = tiles[rr][c] + up_word; rr -= 1
+                    down_word = ""; rr = r + 1
+                    while rr < GRID_SIZE_C and tiles[rr][c]: down_word += tiles[rr][c]; rr += 1
+                    allowed_letters_v = set()
+                    if not up_word and not down_word: allowed_letters_v = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ ')
+                    else:
+                        for letter_char in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
+                            if DAWG_C.search(up_word + letter_char + down_word): allowed_letters_v.add(letter_char)
+                        if allowed_letters_v: allowed_letters_v.add(' ')
+
+                    left_word = ""; cc = c - 1
+                    while cc >= 0 and tiles[r][cc]: left_word = tiles[r][cc] + left_word; cc -= 1
+                    right_word = ""; cc = c + 1
+                    while cc < GRID_SIZE_C and tiles[r][cc]: right_word += tiles[r][cc]; cc += 1
+                    allowed_letters_h = set()
+                    if not left_word and not right_word: allowed_letters_h = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ ')
+                    else:
+                        for letter_char in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
+                            if DAWG_C.search(left_word + letter_char + right_word): allowed_letters_h.add(letter_char)
+                        if allowed_letters_h: allowed_letters_h.add(' ')
+                    cross_check_sets[(r, c)] = {'V': allowed_letters_v, 'H': allowed_letters_h}
+
+    possible_moves = generate_all_moves_gaddag(rack_player, tiles, board, blanks, cross_check_sets, True)
 
     if possible_moves is None:
         possible_moves = []
 
-    can_pass = True
+    # --- MODIFICATION START: Playout Pruning ---
+    has_playout = False
+    best_playout_score = -1000000.0
+    for move in possible_moves:
+        if not move.get('leave'): # This is a playout move
+            has_playout = True
+            # Calculate the final score if this move is played.
+            # The player's rack will be empty, the opponent's is unchanged.
+            # The score diff is updated with this move's score.
+            playout_final_diff = calculate_endgame_score_diff(
+                [], # Player's rack is empty
+                rack_opponent, # Opponent's rack is unchanged
+                current_score_diff + move.get('score', 0)
+            )
+            if playout_final_diff > best_playout_score:
+                best_playout_score = playout_final_diff
+    
+    if has_playout:
+        # We found a guaranteed score. Use it to tighten the alpha bound.
+        alpha = max(alpha, best_playout_score)
+        if alpha >= beta:
+            # This playout move is so good it causes a cutoff.
+            # We don't need to search any other moves from this position.
+            # The sequence isn't important here, just the score.
+            return best_playout_score, []
+    # --- MODIFICATION END ---
 
+    can_pass = True
     best_value = -1000000.0
     best_sequence = None
 
-    playout_moves = [m for m in possible_moves if len(m.get('leave', rack_player)) == 0]
-    other_moves = [m for m in possible_moves if len(m.get('leave', rack_player)) > 0]
-    other_moves.sort(key=_sort_key_raw_score, reverse=True)
+    for move in possible_moves:
+        move['equity'] = move.get('score', 0) + evaluate_leave(move.get('leave', []), True)
 
-    ordered_moves = playout_moves + other_moves
+    possible_moves.sort(key=_sort_key_equity, reverse=True)
+    ordered_moves = possible_moves
+    
     if can_pass:
         ordered_moves.append("PASS")
 
@@ -2367,7 +2456,7 @@ cpdef tuple negamax_endgame(list rack_player, list rack_opponent, list tiles, se
             value, subsequent_sequence = negamax_endgame(
                 sim_rack_opponent, sim_rack_player, sim_tiles, sim_blanks, board,
                 -sim_score_diff, -beta, -alpha, depth + 1, sim_pass_count, max_depth, search_depth_limit,
-                True)
+                True, cross_check_sets)
             value = -value
         else:
             sim_pass_count = 0
@@ -2377,9 +2466,22 @@ cpdef tuple negamax_endgame(list rack_player, list rack_opponent, list tiles, se
 
             temp_rack = sim_rack_player[:]
             valid_placement = True
+            
+            affected_squares_for_cross_check = set()
+            sim_cross_check_sets = cross_check_sets.copy()
+
             for r_np, c_np, letter_np in newly_placed_details:
                 if 0 <= r_np < GRID_SIZE_C and 0 <= c_np < GRID_SIZE_C:
                     sim_tiles[r_np][c_np] = letter_np
+                    
+                    if (r_np, c_np) in sim_cross_check_sets:
+                        del sim_cross_check_sets[(r_np, c_np)]
+                    
+                    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                        nr, nc = r_np + dr, c_np + dc
+                        if 0 <= nr < GRID_SIZE_C and 0 <= nc < GRID_SIZE_C and not sim_tiles[nr][nc]:
+                            affected_squares_for_cross_check.add((nr, nc))
+
                     if (r_np, c_np) in move_blanks_coords:
                         sim_blanks.add((r_np, c_np))
                         if ' ' in temp_rack:
@@ -2402,11 +2504,35 @@ cpdef tuple negamax_endgame(list rack_player, list rack_opponent, list tiles, se
 
             sim_rack_player = temp_rack
             sim_score_diff += move_score
+            
+            for r, c in affected_squares_for_cross_check:
+                up_word = ""; rr = r - 1
+                while rr >= 0 and sim_tiles[rr][c]: up_word = sim_tiles[rr][c] + up_word; rr -= 1
+                down_word = ""; rr = r + 1
+                while rr < GRID_SIZE_C and sim_tiles[rr][c]: down_word += sim_tiles[rr][c]; rr += 1
+                allowed_letters_v = set()
+                if not up_word and not down_word: allowed_letters_v = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ ')
+                else:
+                    for letter_char in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
+                        if DAWG_C.search(up_word + letter_char + down_word): allowed_letters_v.add(letter_char)
+                    if allowed_letters_v: allowed_letters_v.add(' ')
+
+                left_word = ""; cc = c - 1
+                while cc >= 0 and sim_tiles[r][cc]: left_word = sim_tiles[r][cc] + left_word; cc -= 1
+                right_word = ""; cc = c + 1
+                while cc < GRID_SIZE_C and sim_tiles[r][cc]: right_word += sim_tiles[r][cc]; cc += 1
+                allowed_letters_h = set()
+                if not left_word and not right_word: allowed_letters_h = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ ')
+                else:
+                    for letter_char in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
+                        if DAWG_C.search(left_word + letter_char + right_word): allowed_letters_h.add(letter_char)
+                    if allowed_letters_h: allowed_letters_h.add(' ')
+                sim_cross_check_sets[(r, c)] = {'V': allowed_letters_v, 'H': allowed_letters_h}
 
             value, subsequent_sequence = negamax_endgame(
                 sim_rack_opponent, sim_rack_player, sim_tiles, sim_blanks, board,
                 -sim_score_diff, -beta, -alpha, depth + 1, sim_pass_count, max_depth, search_depth_limit,
-                True)
+                True, sim_cross_check_sets)
             value = -value
 
         if value > best_value:
@@ -2416,6 +2542,16 @@ cpdef tuple negamax_endgame(list rack_player, list rack_opponent, list tiles, se
         alpha = max(alpha, value)
         if alpha >= beta:
             break
+
+    flag_to_store = ''
+    if best_value <= original_alpha:
+        flag_to_store = 'UPPERBOUND'
+    elif best_value >= beta:
+        flag_to_store = 'LOWERBOUND'
+    else:
+        flag_to_store = 'EXACT'
+    
+    endgame_transposition_table[state_key] = (best_value, max_depth - depth, flag_to_store)
 
     if best_sequence is None:
          final_diff = calculate_endgame_score_diff(rack_player, rack_opponent, current_score_diff)
@@ -2427,7 +2563,7 @@ cpdef tuple negamax_endgame(list rack_player, list rack_opponent, list tiles, se
 
 # In ai_engine.pyx
 
-cpdef object solve_endgame(list rack_player, list opponent_rack, list tiles, set blanks, list board, int current_score_diff, bint is_silent_batch_run_param=False):
+cpdef object solve_endgame(list rack_player, list actual_opponent_rack, list tiles, set blanks, list board, int current_score_diff, bint is_silent_batch_run_param=False):
     """
     Top-level function to initiate the endgame solver.
     Returns a tuple: (best_move_object, list_of_formatted_result_strings)
@@ -2446,10 +2582,15 @@ cpdef object solve_endgame(list rack_player, list opponent_rack, list tiles, set
     cdef str letter
     cdef list playout_moves, other_moves, formatted_lines_for_gui
 
+    global endgame_transposition_table
+    endgame_transposition_table.clear()
+
     initial_tiles_board_state = [row[:] for row in tiles]
     initial_blanks_board_state = blanks.copy()
     initial_rack_player_state = rack_player[:]
-    initial_rack_opponent_state = opponent_rack[:]
+    # --- MODIFICATION START: Use the passed-in opponent rack ---
+    initial_rack_opponent_state = actual_opponent_rack[:]
+    # --- MODIFICATION END ---
     initial_score_diff_state = current_score_diff
 
     search_depth_limit = 6
@@ -2535,8 +2676,6 @@ cpdef object solve_endgame(list rack_player, list opponent_rack, list tiles, set
     
     formatted_lines_for_gui = []
     if evaluated_lines:
-        # This print is for the console header, which is fine to keep.
-        # The GUI will have its own header.
         print(f"Top Endgame Sequences Found (Score Diff for P1, Depth Limit: {actual_search_depth}):")
         
         num_to_print = 0
@@ -2585,9 +2724,7 @@ cpdef object solve_endgame(list rack_player, list opponent_rack, list tiles, set
                         sequence_str_parts.append(end_state_str)
                 
                 sequence_str_parts_str = "".join(sequence_str_parts)
-                # Print to console as before
                 print(f"{rank}.\t{current_score:+.0f}\t{sequence_str_parts_str}")
-                # Also add to list for GUI
                 formatted_lines_for_gui.append(f"{rank}.\t{current_score:+.0f}\t{sequence_str_parts_str}")
                 last_printed_score = current_score
             else:
