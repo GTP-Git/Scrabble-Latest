@@ -48,6 +48,9 @@ def _sort_key_equity(m):
 def _sort_key_solve_endgame(line_data):
     return line_data['score_diff']
 
+def _sort_key_importance_score(h):
+    return h.get('importance_score', 0.0)
+
 
 
 # --- Globals to be initialized from Python ---
@@ -2341,7 +2344,11 @@ cpdef tuple negamax_endgame(list rack_player, list rack_opponent, list tiles, se
     cdef tuple state_key
 
     original_alpha = alpha
-    state_key = (tuple(sorted(rack_player)), tuple(sorted(rack_opponent)), tuple(map(tuple, tiles)))
+    # --- MODIFICATION: Optimized state_key creation ---
+    temp_board_list = []
+    for row_list in tiles:
+        temp_board_list.append("".join(row_list))
+    state_key = (tuple(sorted(rack_player)), tuple(sorted(rack_opponent)), tuple(temp_board_list))
     
     stored_entry = endgame_transposition_table.get(state_key)
     if stored_entry is not None:
@@ -2398,32 +2405,23 @@ cpdef tuple negamax_endgame(list rack_player, list rack_opponent, list tiles, se
     if possible_moves is None:
         possible_moves = []
 
-    # --- MODIFICATION START: Playout Pruning ---
     has_playout = False
     best_playout_score = -1000000.0
     for move in possible_moves:
         if not move.get('leave'): # This is a playout move
             has_playout = True
-            # Calculate the final score if this move is played.
-            # The player's rack will be empty, the opponent's is unchanged.
-            # The score diff is updated with this move's score.
             playout_final_diff = calculate_endgame_score_diff(
-                [], # Player's rack is empty
-                rack_opponent, # Opponent's rack is unchanged
+                [], 
+                rack_opponent, 
                 current_score_diff + move.get('score', 0)
             )
             if playout_final_diff > best_playout_score:
                 best_playout_score = playout_final_diff
     
     if has_playout:
-        # We found a guaranteed score. Use it to tighten the alpha bound.
         alpha = max(alpha, best_playout_score)
         if alpha >= beta:
-            # This playout move is so good it causes a cutoff.
-            # We don't need to search any other moves from this position.
-            # The sequence isn't important here, just the score.
             return best_playout_score, []
-    # --- MODIFICATION END ---
 
     can_pass = True
     best_value = -1000000.0
@@ -2432,6 +2430,7 @@ cpdef tuple negamax_endgame(list rack_player, list rack_opponent, list tiles, se
     for move in possible_moves:
         move['equity'] = move.get('score', 0) + evaluate_leave(move.get('leave', []), True)
 
+    # --- MODIFICATION: Ensure helper function is used for sorting ---
     possible_moves.sort(key=_sort_key_equity, reverse=True)
     ordered_moves = possible_moves
     
@@ -2566,7 +2565,7 @@ cpdef tuple negamax_endgame(list rack_player, list rack_opponent, list tiles, se
 cpdef object solve_endgame(list rack_player, list actual_opponent_rack, list tiles, set blanks, list board, int current_score_diff, bint is_silent_batch_run_param=False):
     """
     Top-level function to initiate the endgame solver.
-    Returns a tuple: (best_move_object, list_of_formatted_result_strings)
+    Returns a tuple: (best_move_object, list_of_move_objects_in_sequence)
     """
     cdef list initial_tiles_board_state, initial_rack_player_state, initial_rack_opponent_state
     cdef list possible_ai_first_moves, candidate_first_moves, evaluated_lines
@@ -2588,9 +2587,7 @@ cpdef object solve_endgame(list rack_player, list actual_opponent_rack, list til
     initial_tiles_board_state = [row[:] for row in tiles]
     initial_blanks_board_state = blanks.copy()
     initial_rack_player_state = rack_player[:]
-    # --- MODIFICATION START: Use the passed-in opponent rack ---
     initial_rack_opponent_state = actual_opponent_rack[:]
-    # --- MODIFICATION END ---
     initial_score_diff_state = current_score_diff
 
     search_depth_limit = 6
@@ -2731,7 +2728,8 @@ cpdef object solve_endgame(list rack_player, list actual_opponent_rack, list til
                 break
 
     if evaluated_lines:
-        return evaluated_lines[0]['sequence'][0], formatted_lines_for_gui
+        # --- MODIFICATION: Return the actual sequence of move objects ---
+        return evaluated_lines[0]['sequence'][0], evaluated_lines[0]['sequence']
     else:
         return "PASS", []
 
@@ -3085,7 +3083,7 @@ cdef list _find_live_hooks(list tiles, dict unseen_tiles_pool, set anchors, list
             'importance_score': data['importance_score']
         })
 
-    final_hooks_list.sort(key=lambda x: x['importance_score'], reverse=True)
+    final_hooks_list.sort(key=_sort_key_importance_score, reverse=True)
     return final_hooks_list
 
 
