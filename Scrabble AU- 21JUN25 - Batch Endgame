@@ -6051,7 +6051,53 @@ def ai_turn(state):
     global ENDGAME_SOLVER_TILE_THRESHOLD
 
     is_silent_batch_run_param = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
-    
+
+    # --- MODIFICATION START: This is the critical logic fix ---
+    # 1. Check if we are already following a solved path. This is the highest priority.
+    if state.get('endgame_solved_path'):
+        if not is_silent_batch_run_param:
+            print("--- AI TRIGGER: Following pre-solved endgame path. ---")
+        
+        next_move_obj = state['endgame_solved_path'].pop(0)
+        player_idx_path = state['turn'] - 1
+        move_rack_before_path = state['racks'][player_idx_path][:] if 0 <= player_idx_path < len(state['racks']) and state['racks'][player_idx_path] is not None else []
+        
+        if isinstance(next_move_obj, dict): # It's a 'play' move
+            next_turn_val, drawn_tiles, newly_placed, tiles_consumed = play_hint_move(
+                next_move_obj, state['tiles'], state['racks'], state['blanks'],
+                state['scores'], state['turn'], state['bag'],
+                state['board'], state['is_ai'], state['practice_mode'],
+                is_silent_batch_run_param=is_silent_batch_run_param
+            )
+            next_move_obj.update({
+                'player': state['turn'], 'move_type': 'place', 'rack': move_rack_before_path, 'drawn': drawn_tiles,
+                'newly_placed': newly_placed, 'tiles_played_from_rack': tiles_consumed,
+                'coord': ai_engine.get_coord(next_move_obj.get('start', (0,0)), next_move_obj.get('direction', 'right'), is_silent_batch_run_param=is_silent_batch_run_param)
+            })
+            state['first_play'] = False
+            state['consecutive_zero_point_turns'] = 0
+            state['pass_count'] = 0
+            state['exchange_count'] = 0
+            state['last_played_highlight_coords'] = set((pos[0], pos[1]) for pos in next_move_obj.get('positions', []))
+            state['turn'] = next_turn_val
+            state['move_history'].append(next_move_obj)
+
+        elif next_move_obj == "PASS":
+            state['consecutive_zero_point_turns'] += 1
+            state['pass_count'] += 1
+            pass_move_data = {
+                'player': state['turn'], 'move_type': 'pass', 'rack': move_rack_before_path, 'score': 0,
+                'word': '', 'coord': '', 'blanks': set(), 'positions': [], 'drawn': [], 'is_bingo': False,
+                'word_with_blanks': '', 'turn_duration': 0.0, 'luck_factor': 0.0,
+                'tiles_played_from_rack': [], 'leave': move_rack_before_path
+            }
+            state['move_history'].append(pass_move_data)
+            state['turn'] = 3 - state['turn']
+            state['last_played_highlight_coords'] = set()
+        
+        return state # Return immediately after executing the move from the path
+    # --- END OF NEW LOGIC ---
+
     turn = state['turn']
     player_idx = turn - 1
     opponent_idx = 1 - player_idx
@@ -6069,21 +6115,24 @@ def ai_turn(state):
         '8L_max': bbb_8l_max_prob_global
     }
 
-    # --- MODIFICATION START: Capture the full solved path ---
-    # Check if the endgame solver should be triggered
     bag_count = len(state['bag'])
     total_tiles_on_racks = len(current_rack) + opponent_rack_len
-    
-    if USE_ENDGAME_SOLVER and bag_count == 0 and total_tiles_on_racks <= ENDGAME_SOLVER_TILE_THRESHOLD:
-        # Call the solver, which returns the best first move AND the full sequence
+    no_blanks_on_racks = ' ' not in current_rack and ' ' not in opponent_rack
+
+    # 2. If no path, check if we should initiate the endgame solver now.
+    if USE_ENDGAME_SOLVER and bag_count == 0 and total_tiles_on_racks <= ENDGAME_SOLVER_TILE_THRESHOLD and no_blanks_on_racks:
+        if not is_silent_batch_run_param:
+            print("--- AI TRIGGER: Endgame detected. Calling solver for the first time. ---")
+        
         best_first_move, full_sequence = ai_engine.solve_endgame(
             current_rack, opponent_rack, state['tiles'], state['blanks'], state['board'],
             current_score_diff, is_silent_batch_run_param
         )
-        # Store the full sequence in the state
-        state['endgame_solved_path'] = full_sequence
         
-        # Determine the action based on the best first move from the sequence
+        # Store the rest of the path for subsequent turns
+        state['endgame_solved_path'] = full_sequence[1:] if len(full_sequence) > 1 else []
+        
+        # The first move from the sequence becomes the chosen action for this turn
         if best_first_move == "PASS":
             action_chosen = 'pass'
             details = None
@@ -6091,10 +6140,12 @@ def ai_turn(state):
             action_chosen = 'play'
             details = best_first_move
         else:
-            action_chosen = 'pass' # Default to pass if solver returns something unexpected
+            action_chosen = 'pass'
             details = None
     else:
-        # If not in the endgame, use the standard decision-making process
+        # 3. If not in the endgame, use the standard decision-making process.
+        if not is_silent_batch_run_param:
+            print("--- AI TRIGGER: Executing standard AI turn logic. ---")
         action_chosen, details = ai_engine.determine_best_action(
             current_rack, opponent_rack,
             state['tiles'], state['board'], state['blanks'], state['bag'], state['first_play'],
@@ -6106,7 +6157,6 @@ def ai_turn(state):
             ENDGAME_SOLVER_TILE_THRESHOLD,
             is_silent_batch_run_param=is_silent_batch_run_param
         )
-    # --- MODIFICATION END ---
 
     if action_chosen == 'PAUSE':
         if details['type'] == 'power_tile':
@@ -11070,26 +11120,148 @@ def handle_turn_start_updates(state):
 
 
 
+# In Scrabble Game.py
+
 def handle_ai_turn_trigger(state):
     """
     Checks if it's the AI's turn and conditions are met, then calls the main
     ai_turn handler to execute the turn.
+    MODIFIED: This function now contains the primary logic for deciding whether to
+    use a pre-solved endgame path, solve the endgame for the first time, or
+    execute a standard AI turn. This prevents the solver from being called repeatedly.
     """
     # Conditions for an AI to take a turn
-    if not state['game_over_state'] and \
-       not state['replay_mode'] and \
-       not state['paused_for_power_tile'] and \
-       not state['paused_for_bingo_practice'] and \
-       state['practice_mode'] != "eight_letter" and \
-       0 <= state['turn']-1 < len(state['is_ai']) and \
-       state['is_ai'][state['turn']-1] and \
-       not state['human_played'] and \
-       not state['is_solving_endgame']:
-        
-        # Call the main AI turn processing function
-        state = ai_turn(state)
+    is_ai_turn = (
+        not state['game_over_state'] and
+        not state['replay_mode'] and
+        not state['paused_for_power_tile'] and
+        not state['paused_for_bingo_practice'] and
+        state['practice_mode'] != "eight_letter" and
+        0 <= state['turn']-1 < len(state['is_ai']) and
+        state['is_ai'][state['turn']-1] and
+        not state['human_played'] and
+        not state['is_solving_endgame']
+    )
 
-    return state
+    if not is_ai_turn:
+        return state # Not an AI's turn to act
+
+    is_silent_run_local = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
+
+    # --- NEW LOGIC HIERARCHY ---
+    # 1. Check if we are already following a solved path.
+    if state.get('endgame_solved_path'):
+        if not is_silent_run_local:
+            print("--- AI TRIGGER: Following pre-solved endgame path. ---")
+        
+        next_move_obj = state['endgame_solved_path'].pop(0)
+        player_idx_path = state['turn'] - 1
+        move_rack_before_path = state['racks'][player_idx_path][:] if 0 <= player_idx_path < len(state['racks']) and state['racks'][player_idx_path] is not None else []
+        
+        if isinstance(next_move_obj, dict): # It's a 'play' move
+            next_turn_val, drawn_tiles, newly_placed, tiles_consumed = play_hint_move(
+                next_move_obj, state['tiles'], state['racks'], state['blanks'],
+                state['scores'], state['turn'], state['bag'],
+                state['board'], state['is_ai'], state['practice_mode'],
+                is_silent_batch_run_param=is_silent_run_local
+            )
+            next_move_obj.update({
+                'player': state['turn'], 'move_type': 'place', 'rack': move_rack_before_path, 'drawn': drawn_tiles,
+                'newly_placed': newly_placed, 'tiles_played_from_rack': tiles_consumed,
+                'coord': ai_engine.get_coord(next_move_obj.get('start', (0,0)), next_move_obj.get('direction', 'right'), is_silent_batch_run_param=is_silent_run_local)
+            })
+            state['first_play'] = False
+            state['consecutive_zero_point_turns'] = 0
+            state['pass_count'] = 0
+            state['exchange_count'] = 0
+            state['last_played_highlight_coords'] = set((pos[0], pos[1]) for pos in next_move_obj.get('positions', []))
+            state['turn'] = next_turn_val
+            state['move_history'].append(next_move_obj)
+
+        elif next_move_obj == "PASS":
+            state['consecutive_zero_point_turns'] += 1
+            state['pass_count'] += 1
+            pass_move_data = {
+                'player': state['turn'], 'move_type': 'pass', 'rack': move_rack_before_path, 'score': 0,
+                'word': '', 'coord': '', 'blanks': set(), 'positions': [], 'drawn': [], 'is_bingo': False,
+                'word_with_blanks': '', 'turn_duration': 0.0, 'luck_factor': 0.0,
+                'tiles_played_from_rack': [], 'leave': move_rack_before_path
+            }
+            state['move_history'].append(pass_move_data)
+            state['turn'] = 3 - state['turn']
+            state['last_played_highlight_coords'] = set()
+        
+        return state # Return after executing the move from the path
+
+    # 2. If no path, check if we should initiate the endgame solver now.
+    # This is now the *only* place the solver is called from.
+    bag_count = len(state['bag'])
+    player_idx = state['turn'] - 1
+    opponent_idx = 1 - player_idx
+    current_rack = state['racks'][player_idx]
+    opponent_rack = state['racks'][opponent_idx]
+    total_tiles_on_racks = len(current_rack) + len(opponent_rack)
+    no_blanks_on_racks = ' ' not in current_rack and ' ' not in opponent_rack
+
+    if USE_ENDGAME_SOLVER and bag_count == 0 and total_tiles_on_racks <= ENDGAME_SOLVER_TILE_THRESHOLD and no_blanks_on_racks:
+        if not is_silent_run_local:
+            print("--- AI TRIGGER: Endgame detected. Calling solver for the first time. ---")
+        
+        current_score_diff = state['scores'][player_idx] - state['scores'][opponent_idx]
+        
+        # Call the solver, which returns the best first move AND the full sequence
+        best_first_move, full_sequence = ai_engine.solve_endgame(
+            current_rack, opponent_rack, state['tiles'], state['blanks'], state['board'],
+            current_score_diff, is_silent_run_local
+        )
+        
+        # Store the rest of the path for subsequent turns
+        state['endgame_solved_path'] = full_sequence[1:] if len(full_sequence) > 1 else []
+        
+        # Now, execute the first move from the solved path immediately
+        move_to_play = best_first_move
+        move_rack_before_solve = current_rack[:]
+        
+        if isinstance(move_to_play, dict): # It's a 'play' move
+            next_turn_val, drawn_tiles, newly_placed, tiles_consumed = play_hint_move(
+                move_to_play, state['tiles'], state['racks'], state['blanks'],
+                state['scores'], state['turn'], state['bag'],
+                state['board'], state['is_ai'], state['practice_mode'],
+                is_silent_batch_run_param=is_silent_run_local
+            )
+            move_to_play.update({
+                'player': state['turn'], 'move_type': 'place', 'rack': move_rack_before_solve, 'drawn': drawn_tiles,
+                'newly_placed': newly_placed, 'tiles_played_from_rack': tiles_consumed,
+                'coord': ai_engine.get_coord(move_to_play.get('start', (0,0)), move_to_play.get('direction', 'right'), is_silent_batch_run_param=is_silent_run_local)
+            })
+            state['first_play'] = False
+            state['consecutive_zero_point_turns'] = 0
+            state['pass_count'] = 0
+            state['exchange_count'] = 0
+            state['last_played_highlight_coords'] = set((pos[0], pos[1]) for pos in move_to_play.get('positions', []))
+            state['turn'] = next_turn_val
+            state['move_history'].append(move_to_play)
+        elif move_to_play == "PASS":
+            state['consecutive_zero_point_turns'] += 1
+            state['pass_count'] += 1
+            pass_move_data = {
+                'player': state['turn'], 'move_type': 'pass', 'rack': move_rack_before_solve, 'score': 0,
+                'word': '', 'coord': '', 'blanks': set(), 'positions': [], 'drawn': [], 'is_bingo': False,
+                'word_with_blanks': '', 'turn_duration': 0.0, 'luck_factor': 0.0,
+                'tiles_played_from_rack': [], 'leave': move_rack_before_solve
+            }
+            state['move_history'].append(pass_move_data)
+            state['turn'] = 3 - state['turn']
+            state['last_played_highlight_coords'] = set()
+        
+        return state # Return after playing the first solved move
+
+    # 3. If neither of the above, it's a standard AI turn.
+    else:
+        if not is_silent_run_local:
+            print("--- AI TRIGGER: Executing standard AI turn logic. ---")
+        state = ai_turn(state)
+        return state
 
 
     
@@ -12118,7 +12290,7 @@ def execute_game_session(is_initialized_from_outer_loop_param):
     global DEV_CPROFILE_ENABLED_SESSION, DEV_VISUALIZE_BATCH_ENABLED_SESSION
     global ai_sim_num_candidates_global, ai_sim_num_opponent_sims_global, ai_sim_num_post_sim_candidates_global
     global last_scoreboard_click_time, last_scoreboard_click_idx
-    global insights_data_for_replay, rack_visibility
+    global insights_data_for_replay
 
 
     # These were nonlocal, now local to this function and their final state returned
@@ -12238,51 +12410,69 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                     if current_state_dict.get('return_to_mode_selection', False): _return_to_mode_selection_internal = True
                     break
 
+                # --- MODIFICATION START: This is the critical logic fix for Batch Endgame mode ---
                 if current_state_dict.get('is_endgame_scenario_gen') and \
                    not current_state_dict.get('endgame_scenario_saved_this_game') and \
                    len(current_state_dict.get('bag', [])) == 0:
                     
-                    print(f"--- Endgame Scenario Triggered (Game {current_batch_game_num}) ---")
-                    current_state_dict['endgame_scenario_saved_this_game'] = True 
+                    player_idx_check = current_state_dict['turn'] - 1
+                    opponent_idx_check = 1 - player_idx_check
+                    rack_player_check = current_state_dict['racks'][player_idx_check]
+                    rack_opponent_check = current_state_dict['racks'][opponent_idx_check]
 
-                    player_idx_solve = current_state_dict['turn'] - 1
-                    opponent_idx_solve = 1 - player_idx_solve
-                    rack_player_solve = current_state_dict['racks'][player_idx_solve]
-                    rack_opponent_solve = current_state_dict['racks'][opponent_idx_solve]
-                    score_diff_solve = current_state_dict['scores'][player_idx_solve] - current_state_dict['scores'][opponent_idx_solve]
-                    
-                    start_time_sge = time.perf_counter()
+                    if ' ' in rack_player_check or ' ' in rack_opponent_check:
+                        print(f"  > Skipping endgame scenario for Game {current_batch_game_num}: Blank found on rack.")
+                        current_state_dict['game_over_state'] = True
+                        current_state_dict['reason'] = "Skipped (Blank in Endgame)"
+                        current_state_dict['running_inner'] = False # Force this game to end
+                    else:
+                        print(f"--- Endgame Scenario Triggered (Game {current_batch_game_num}) ---")
+                        current_state_dict['endgame_scenario_saved_this_game'] = True 
 
-                    _, formatted_lines_solve = ai_engine.solve_endgame(
-                        rack_player_solve, rack_opponent_solve, current_state_dict['tiles'], current_state_dict['blanks'], 
-                        current_state_dict['board'], score_diff_solve, is_silent_batch_run_param=True
-                    )
-                    
-                    end_time_sge = time.perf_counter()
-                    duration_sge = end_time_sge - start_time_sge
-
-                    if formatted_lines_solve:
-                        scenario_data_to_save = {
-                            'sge_version': "1.0",
-                            'board_tiles': current_state_dict['tiles'],
-                            'board_blanks': current_state_dict['blanks'],
-                            'player_rack': rack_player_solve,
-                            'opponent_rack': rack_opponent_solve,
-                            'score_diff': score_diff_solve,
-                            'solution_lines': formatted_lines_solve,
-                            'solve_duration_seconds': duration_sge
-                        }
+                        player_idx_solve = current_state_dict['turn'] - 1
+                        opponent_idx_solve = 1 - player_idx_solve
+                        rack_player_solve = current_state_dict['racks'][player_idx_solve]
+                        rack_opponent_solve = current_state_dict['racks'][opponent_idx_solve]
+                        score_diff_solve = current_state_dict['scores'][player_idx_solve] - current_state_dict['scores'][opponent_idx_solve]
                         
-                        now_sge = datetime.datetime.now()
-                        sge_filename = f"Endgame-{now_sge.strftime('%Y%m%d-%H%M%S-%f')}.sge"
-                        sge_filepath = os.path.join("Endgame Practice", sge_filename)
+                        start_time_sge = time.perf_counter()
+
+                        _, formatted_lines_solve = ai_engine.solve_endgame(
+                            rack_player_solve, rack_opponent_solve, current_state_dict['tiles'], current_state_dict['blanks'], 
+                            current_state_dict['board'], score_diff_solve, is_silent_batch_run_param=True
+                        )
                         
-                        try:
-                            with open(sge_filepath, 'wb') as f_sge:
-                                pickle.dump(scenario_data_to_save, f_sge)
-                            print(f"  > Saved scenario to: {sge_filepath} (Solve time: {duration_sge:.2f}s)")
-                        except Exception as e_sge:
-                            print(f"  > ERROR saving endgame scenario to {sge_filepath}: {e_sge}")
+                        end_time_sge = time.perf_counter()
+                        duration_sge = end_time_sge - start_time_sge
+
+                        if formatted_lines_solve:
+                            scenario_data_to_save = {
+                                'sge_version': "1.0",
+                                'board_tiles': current_state_dict['tiles'],
+                                'board_blanks': current_state_dict['blanks'],
+                                'player_rack': rack_player_solve,
+                                'opponent_rack': rack_opponent_solve,
+                                'score_diff': score_diff_solve,
+                                'solution_lines': formatted_lines_solve,
+                                'solve_duration_seconds': duration_sge
+                            }
+                            
+                            now_sge = datetime.datetime.now()
+                            sge_filename = f"Endgame-{now_sge.strftime('%Y%m%d-%H%M%S-%f')}.sge"
+                            sge_filepath = os.path.join("Endgame Practice", sge_filename)
+                            
+                            try:
+                                with open(sge_filepath, 'wb') as f_sge:
+                                    pickle.dump(scenario_data_to_save, f_sge)
+                                print(f"  > Saved scenario to: {sge_filepath} (Solve time: {duration_sge:.2f}s)")
+                            except Exception as e_sge:
+                                print(f"  > ERROR saving endgame scenario to {sge_filepath}: {e_sge}")
+                        
+                        # Force the current game to end so the batch can continue
+                        current_state_dict['game_over_state'] = True
+                        current_state_dict['reason'] = "Scenario Generated"
+                        current_state_dict['running_inner'] = False
+                # --- MODIFICATION END ---
 
                 if not current_state_dict.get('typing', False):
                     current_state_dict = check_and_handle_game_over(current_state_dict)
@@ -12298,54 +12488,7 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                 elif is_batch_running and not current_state_dict.get('is_simulating_for_ui', False): 
                     pygame.time.wait(1) 
 
-                # --- MODIFICATION START: Add "Solved Path" Execution Logic ---
-                if current_state_dict.get('endgame_solved_path'):
-                    # If a solved path exists, play the next move from it instantly.
-                    is_silent_run_local = current_state_dict.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
-                    
-                    # Get the next move object from the stored path
-                    next_move_obj = current_state_dict['endgame_solved_path'].pop(0)
-                    
-                    player_idx_path = current_state_dict['turn'] - 1
-                    move_rack_before_path = current_state_dict['racks'][player_idx_path][:] if 0 <= player_idx_path < len(current_state_dict['racks']) and current_state_dict['racks'][player_idx_path] is not None else []
-                    
-                    if isinstance(next_move_obj, dict): # It's a 'play' move
-                        next_turn_val, drawn_tiles, newly_placed, tiles_consumed = play_hint_move(
-                            next_move_obj, current_state_dict['tiles'], current_state_dict['racks'], current_state_dict['blanks'],
-                            current_state_dict['scores'], current_state_dict['turn'], current_state_dict['bag'],
-                            current_state_dict['board'], current_state_dict['is_ai'], current_state_dict['practice_mode'],
-                            is_silent_batch_run_param=is_silent_run_local
-                        )
-                        next_move_obj.update({
-                            'player': current_state_dict['turn'], 'move_type': 'place', 'rack': move_rack_before_path, 'drawn': drawn_tiles,
-                            'newly_placed': newly_placed, 'tiles_played_from_rack': tiles_consumed,
-                            'coord': ai_engine.get_coord(next_move_obj.get('start', (0,0)), next_move_obj.get('direction', 'right'), is_silent_batch_run_param=is_silent_run_local)
-                        })
-                        current_state_dict['first_play'] = False
-                        current_state_dict['consecutive_zero_point_turns'] = 0
-                        current_state_dict['pass_count'] = 0
-                        current_state_dict['exchange_count'] = 0
-                        current_state_dict['last_played_highlight_coords'] = set((pos[0], pos[1]) for pos in next_move_obj.get('positions', []))
-                        current_state_dict['turn'] = next_turn_val
-                        current_state_dict['move_history'].append(next_move_obj)
-
-                    elif next_move_obj == "PASS":
-                        current_state_dict['consecutive_zero_point_turns'] += 1
-                        current_state_dict['pass_count'] += 1
-                        pass_move_data = {
-                            'player': current_state_dict['turn'], 'move_type': 'pass', 'rack': move_rack_before_path, 'score': 0,
-                            'word': '', 'coord': '', 'blanks': set(), 'positions': [], 'drawn': [], 'is_bingo': False,
-                            'word_with_blanks': '', 'turn_duration': 0.0, 'luck_factor': 0.0,
-                            'tiles_played_from_rack': [], 'leave': move_rack_before_path
-                        }
-                        current_state_dict['move_history'].append(pass_move_data)
-                        current_state_dict['turn'] = 3 - current_state_dict['turn']
-                        current_state_dict['last_played_highlight_coords'] = set()
-                
-                # If not following a solved path, check if it's a standard AI turn
-                elif not current_state_dict.get('paused_for_power_tile') and not current_state_dict.get('paused_for_bingo_practice'):
-                    current_state_dict = handle_ai_turn_trigger(current_state_dict)
-                # --- MODIFICATION END ---
+                current_state_dict = handle_ai_turn_trigger(current_state_dict)
 
 
             if is_batch_running and current_state_dict.get('game_over_state'):
