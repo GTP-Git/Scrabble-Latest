@@ -8,6 +8,8 @@
 #More aggressive pruning guaranteed inferior lines, 2nd-to-move AI simply uses already solved endgame
 #But not sure if these are being properly called or used, endgames still VERY slow
 
+#Solved less <7 tiles on rack after AI exchange, will likely need to delete all batch games and star over
+
 #21JUN25
 
 
@@ -6207,16 +6209,38 @@ def ai_turn(state):
         state['turn'] = next_turn_val
 
     elif action_chosen == 'exchange' and details:
+        
+
+        # --- INSERTION START ---
         exchanged_tiles = details[:]
         current_rack_list = state['racks'][player_idx]
-        temp_rack = [tile for tile in current_rack_list if tile not in exchanged_tiles]
-        leave = temp_rack[:]
+        
+        # Create a mutable copy to work with and remove exchanged tiles one by one
+        temp_rack = list(current_rack_list)
+        for tile_to_remove in exchanged_tiles:
+            if tile_to_remove in temp_rack:
+                temp_rack.remove(tile_to_remove)
+            else:
+                # This would be an error condition, but let's handle it gracefully
+                print(f"ERROR: AI tried to exchange '{tile_to_remove}' which was not on its rack: {current_rack_list}")
+
+        leave = temp_rack[:] # The tiles left on the rack before drawing
+        
+        # Add exchanged tiles back to the bag and shuffle
         state['bag'].extend(exchanged_tiles)
         random.shuffle(state['bag'])
+        
+        # Draw new tiles
         drawn_tiles = [state['bag'].pop() for _ in range(len(exchanged_tiles)) if state['bag']]
         temp_rack.extend(drawn_tiles)
+        
+        # Sort the final rack if not in a silent batch run
         if not is_silent_batch_run_param: temp_rack.sort()
+        
+        # Update the player's rack in the main state
         state['racks'][player_idx] = temp_rack
+        # --- INSERTION END ---
+
         details = {'exchanged_tiles': exchanged_tiles, 'score': 0, 'word': '', 'positions': [], 'blanks': set(), 'is_bingo': False, 'word_with_blanks': '', 'leave': leave}
         details.update({'player': turn, 'move_type': 'exchange', 'rack': move_rack_before, 'drawn': drawn_tiles, 'coord': '', 'tiles_played_from_rack': []})
         state['consecutive_zero_point_turns'] += 1
