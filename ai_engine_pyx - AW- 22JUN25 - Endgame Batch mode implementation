@@ -1,11 +1,12 @@
 # ai_engine.pyx
 
 #ai_engine_pyx - AX - 22JUN25
-#Endgame Batch mode implementation
+##Endgame Batch mode implementation
 #Working in general, but still need program flow improvements
 #Correct/incorrect msg not working properly
-#Solutions button unresponsive
+#SFixed solutions button unresponsive
 #Pass is showing as best move when demonstrably not
+#UNKNOWN MOVE bug still happening
 
 
 
@@ -2084,8 +2085,8 @@ cpdef tuple determine_best_action(
 
 
     if use_endgame_solver and bag_count == 0:
-        # Unpack the tuple, ignoring the formatted lines for this function's purpose
-        best_first_move_endgame, _ = solve_endgame(
+        # Unpack the tuple, ignoring the formatted lines and full sequence for this function's purpose
+        best_first_move_endgame, _, _ = solve_endgame(
             rack, [], tiles, blanks, board, current_score_diff_for_endgame, True
         )
         if best_first_move_endgame == "PASS": return 'pass', None
@@ -2203,6 +2204,9 @@ cpdef tuple determine_best_action(
     else:
         return 'pass', None
 
+
+
+
 ####Endgame Solver Helper Functions####
 
 
@@ -2250,19 +2254,23 @@ cpdef int calculate_endgame_score_diff(list player_rack, list opponent_rack, int
 
     return final_diff
 
+
+
 cpdef int evaluate_endgame_heuristic(list rack_player, list rack_opponent, int current_score_diff):
     """
     Estimates the final score difference at a search depth limit. (Cythonized)
     """
     return calculate_endgame_score_diff(rack_player, rack_opponent, current_score_diff)
 
-cdef str format_single_move_for_print(object move_obj, bint is_silent_batch_run_param=False):
+
+
+cpdef str format_single_move_for_print(object move_obj, bint is_silent_batch_run_param=False):
     """
     Formats a single move object (or PASS string) for endgame sequence printing. (Cythonized)
     """
     cdef str word, coord, leave_str
     cdef int score
-    cdef list leave_list
+    cdef list leave_list, temp_leave_list
     cdef object l
 
     if move_obj == "PASS":
@@ -2274,12 +2282,22 @@ cdef str format_single_move_for_print(object move_obj, bint is_silent_batch_run_
         coord = get_coord(move_obj.get('start', (0,0)), move_obj.get('direction', '?'), is_silent_batch_run_param)
         score = move_obj.get('score',0)
         leave_list = move_obj.get('leave', [])
-        leave_str = "".join(sorted(l if l != ' ' else '?' for l in leave_list))
+        
+        temp_leave_list = []
+        for l in leave_list:
+            if l != ' ':
+                temp_leave_list.append(l)
+            else:
+                temp_leave_list.append('?')
+        leave_str = "".join(sorted(temp_leave_list))
+        
         if not leave_str:
             leave_str = "-"
         return f"[{word} {coord} {score} {leave_str}]"
     else:
         return "[?UNKNOWN_MOVE_FORMAT?]"
+
+
 
 cdef str format_end_state_for_print(list final_rack_p1_sim, list final_rack_p2_sim, bint last_player_to_move_was_p1, int pass_count_at_end):
     """
@@ -2288,10 +2306,24 @@ cdef str format_end_state_for_print(list final_rack_p1_sim, list final_rack_p2_s
     cdef str p1_rack_str, p2_rack_str
     cdef int p1_rack_val, p2_rack_val
     cdef object l
+    cdef list temp_list
 
-    p1_rack_str = "".join(sorted(l if l != ' ' else '?' for l in final_rack_p1_sim))
+    temp_list = []
+    for l in final_rack_p1_sim:
+        if l != ' ':
+            temp_list.append(l)
+        else:
+            temp_list.append('?')
+    p1_rack_str = "".join(sorted(temp_list))
     if not p1_rack_str: p1_rack_str = "-"
-    p2_rack_str = "".join(sorted(l if l != ' ' else '?' for l in final_rack_p2_sim))
+
+    temp_list = []
+    for l in final_rack_p2_sim:
+        if l != ' ':
+            temp_list.append(l)
+        else:
+            temp_list.append('?')
+    p2_rack_str = "".join(sorted(temp_list))
     if not p2_rack_str: p2_rack_str = "-"
 
     p1_rack_val = get_rack_value(final_rack_p1_sim)
@@ -2470,10 +2502,13 @@ cpdef tuple negamax_endgame(list rack_player, list rack_opponent, list tiles, se
 
 
 
+@cython.cdivision(True)
+@cython.boundscheck(False)
+@cython.wraparound(False)
 cpdef object solve_endgame(list rack_player, list opponent_rack, list tiles, set blanks, list board, int current_score_diff, bint is_silent_batch_run_param=False):
     """
     Top-level function to initiate the endgame solver.
-    Returns a tuple: (best_move_object, list_of_formatted_result_strings)
+    Returns a tuple: (best_move_object, list_of_formatted_result_strings, best_full_sequence_of_move_objects)
     """
     cdef list initial_tiles_board_state, initial_rack_player_state, initial_rack_opponent_state
     cdef list possible_ai_first_moves, candidate_first_moves, evaluated_lines
@@ -2514,7 +2549,7 @@ cpdef object solve_endgame(list rack_player, list opponent_rack, list tiles, set
 
     candidate_first_moves = possible_ai_first_moves + ["PASS"]
     if not candidate_first_moves:
-        return "PASS", []
+        return "PASS", [], ["PASS"]
 
     transposition_table = {}
     evaluated_lines = []
@@ -2638,9 +2673,9 @@ cpdef object solve_endgame(list rack_player, list opponent_rack, list tiles, set
                 break
 
     if evaluated_lines:
-        return evaluated_lines[0]['sequence'][0], formatted_lines_for_gui
+        return evaluated_lines[0]['sequence'][0], formatted_lines_for_gui, evaluated_lines[0]['sequence']
     else:
-        return "PASS", []
+        return "PASS", [], ["PASS"]
 
 
 
