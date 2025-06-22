@@ -2,9 +2,8 @@
 
 
 #python
-#Scrabble AV
-#Added endgame optimizations
-#Fixed truncated endgame search depth
+#Scrabble AW
+#Endgame Batch mode implementation
 
 #22JUN25
 
@@ -1258,6 +1257,52 @@ def load_game_sgs(filename, is_silent_batch_run_param=False): # Added is_silent_
         print(f"An unexpected error occurred while loading {filepath_to_load}: {e}")
         show_message_dialog(f"Unexpected error loading SGS file:\n{filepath_to_load}\n\nDetails: {e}", "SGS Load Error")
         return None
+
+
+
+
+
+def save_endgame_puzzle(puzzle_state, solution_sequence, batch_prefix, game_num):
+    """
+    Saves a generated endgame puzzle to a .sge file in the user's Documents folder.
+
+    Args:
+        puzzle_state (dict): The dictionary containing the board state at the trigger.
+        solution_sequence (list): The list of move dictionaries for the optimal solution.
+        batch_prefix (str): The prefix for the batch run, for organized naming.
+        game_num (int): The number of the game in the batch.
+    """
+    try:
+        # Get the user's home directory in a cross-platform way
+        home_dir = os.path.expanduser('~')
+        # Construct the target directory path
+        puzzle_dir = os.path.join(home_dir, 'Documents', 'Endgame Practice')
+
+        # Use exist_ok=True to avoid an error if the directory already exists
+        os.makedirs(puzzle_dir, exist_ok=True)
+        
+        puzzle_data = {
+            'puzzle_state': puzzle_state,
+            'solution': solution_sequence
+        }
+
+        # Generate a unique filename
+        filename = f"{batch_prefix}-GAME-{game_num}-ENDGAME.sge"
+        filepath = os.path.join(puzzle_dir, filename)
+
+        with open(filepath, 'wb') as f_save:
+            pickle.dump(puzzle_data, f_save)
+        
+        print(f"  -> Saved endgame puzzle: {filepath}")
+        return True
+
+    except IOError as e:
+        # This will catch permission errors if Documents isn't writable
+        print(f"  -> IO ERROR saving endgame puzzle to {puzzle_dir}: {e}")
+        return False
+    except Exception as e:
+        print(f"  -> UNEXPECTED ERROR saving endgame puzzle: {e}")
+        return False
 
 
 
@@ -2731,14 +2776,17 @@ def mode_selection_screen():
                         else:
                             batch_info = get_batch_game_dialog() 
                             if batch_info is not None:
-                                num_games, plaid_mode_checked = batch_info # Unpack the tuple
+                                # --- MODIFICATION START: Unpack 3-tuple ---
+                                num_games, plaid_mode_checked, generate_endgames_checked = batch_info
                                 if not (True and not dev_visualize_batch_checked):
                                     print(f"--- mode_selection_screen(): Starting batch of {num_games} games ---")
                                 selected_mode = "BATCH_MODE"
                                 loaded_game_data = (current_selected_game_mode, player_names, human_player, \
                                                     use_endgame_solver_checked, use_ai_simulation_checked, num_games,\
                                                     dev_cprofile_checked, dev_visualize_batch_checked, \
-                                                    ai_sim_num_candidates, ai_sim_num_opponent_sims, ai_sim_num_post_sim_candidates)
+                                                    ai_sim_num_candidates, ai_sim_num_opponent_sims, ai_sim_num_post_sim_candidates, \
+                                                    plaid_mode_checked, generate_endgames_checked) # Pass new flag
+                                # --- MODIFICATION END ---
                                 break 
                             else:
                                 print("--- mode_selection_screen(): Batch game setup cancelled ---")
@@ -2883,8 +2931,45 @@ def mode_selection_screen():
                                             practice_state = None
                                             print(f"--- mode_selection_screen(): Only Fives setup successful. Selected mode: {selected_mode} ---")
                                             break
+                                        # --- MODIFICATION START: Handle "End Game" practice selection ---
                                         elif selected_practice_option == "End Game":
-                                            print("End Game practice selected - Not implemented yet")
+                                            print("--- mode_selection_screen(): End Game practice selected. ---")
+                                            home_dir = os.path.expanduser('~')
+                                            puzzle_dir = os.path.join(home_dir, 'Documents', 'Endgame Practice')
+                                            
+                                            if not os.path.exists(puzzle_dir) or not os.listdir(puzzle_dir):
+                                                show_message_dialog("No endgame puzzles found.\nPlease run a batch in 'Generate Endgames' mode first.", "No Puzzles")
+                                                continue
+
+                                            try:
+                                                puzzle_files = [f for f in os.listdir(puzzle_dir) if f.endswith('.sge')]
+                                                if not puzzle_files:
+                                                    show_message_dialog("No .sge puzzle files found in the directory.", "No Puzzles")
+                                                    continue
+                                                
+                                                chosen_puzzle_file = random.choice(puzzle_files)
+                                                filepath = os.path.join(puzzle_dir, chosen_puzzle_file)
+                                                
+                                                with open(filepath, 'rb') as f_load:
+                                                    loaded_puzzle_data = pickle.load(f_load)
+                                                
+                                                # Set up the practice state from the loaded puzzle
+                                                practice_mode = "endgame"
+                                                selected_mode = MODE_HVH # Or could be HvA if we want AI to play its moves
+                                                player_names = ["Player 1", "Player 2"] # Can be customized later
+                                                human_player = 1 # Assume human plays first
+                                                
+                                                practice_state = {
+                                                    "puzzle_data": loaded_puzzle_data,
+                                                    "is_ai": [False, True] # P1 is human, P2 is AI to auto-play solution
+                                                }
+                                                print(f"--- mode_selection_screen(): Loaded endgame puzzle '{chosen_puzzle_file}' ---")
+                                                break # Exit the main selection loop
+
+                                            except Exception as e:
+                                                print(f"Error loading endgame puzzle: {e}")
+                                                show_message_dialog(f"Error loading puzzle file:\n{e}", "Load Error")
+                                        # --- MODIFICATION END ---
                                         break 
                                 if not clicked_option and not dropdown_rect.collidepoint(x,y): 
                                     dropdown_open = False
@@ -5050,15 +5135,16 @@ def get_tile_under_mouse(x, y, rack_start_x, rack_y, rack_len):
 
 def get_batch_game_dialog():
     """Displays a dialog to get the number of batch games."""
-    # --- MODIFIED: Increased height for the new checkbox ---
-    dialog_width, dialog_height = 300, 200
+    # --- MODIFIED: Increased height for the new checkboxes ---
+    dialog_width, dialog_height = 300, 230
     dialog_x = (WINDOW_WIDTH - dialog_width) // 2
     dialog_y = (WINDOW_HEIGHT - dialog_height) // 2
     input_text = ""
     input_active = True
     error_msg = None
-    # --- NEW: State for the Plaid mode checkbox ---
+    # --- State for the checkboxes ---
     plaid_mode_checked = False
+    generate_endgames_checked = False
 
     while True:
         screen.fill(WHITE) # Or redraw the mode selection screen behind it
@@ -5083,14 +5169,20 @@ def get_batch_game_dialog():
             cursor_y2 = input_rect.y + input_rect.height - 5
             pygame.draw.line(screen, BLACK, (cursor_x, cursor_y1), (cursor_x, cursor_y2), 1)
 
-        # --- NEW: Draw the Plaid checkbox ---
+        # --- Plaid checkbox ---
         plaid_checkbox_y = input_rect.bottom + 10
         plaid_checkbox_rect = pygame.Rect(dialog_x + 10, plaid_checkbox_y, 20, 20)
         draw_checkbox(screen, plaid_checkbox_rect.x, plaid_checkbox_rect.y, plaid_mode_checked)
-        plaid_label_surf = ui_font.render("Plaid", True, BLACK)
+        plaid_label_surf = ui_font.render("Plaid Mode (Score Only)", True, BLACK)
         screen.blit(plaid_label_surf, (plaid_checkbox_rect.right + 5, plaid_checkbox_rect.y + 2))
-        # --- END NEW ---
 
+        # --- NEW: Generate Endgames checkbox ---
+        endgame_checkbox_y = plaid_checkbox_rect.bottom + 10
+        endgame_checkbox_rect = pygame.Rect(dialog_x + 10, endgame_checkbox_y, 20, 20)
+        draw_checkbox(screen, endgame_checkbox_rect.x, endgame_checkbox_rect.y, generate_endgames_checked)
+        endgame_label_surf = ui_font.render("Generate Endgames", True, BLACK)
+        screen.blit(endgame_label_surf, (endgame_checkbox_rect.right + 5, endgame_checkbox_rect.y + 2))
+        
         # --- MODIFIED: Adjusted button Y position ---
         ok_rect = pygame.Rect(dialog_x + 40, dialog_y + dialog_height - BUTTON_HEIGHT - 15, BUTTON_WIDTH, BUTTON_HEIGHT)
         cancel_rect = pygame.Rect(dialog_x + dialog_width - BUTTON_WIDTH - 40, dialog_y + dialog_height - BUTTON_HEIGHT - 15, BUTTON_WIDTH, BUTTON_HEIGHT)
@@ -5103,7 +5195,7 @@ def get_batch_game_dialog():
 
         if error_msg:
             error_surf = ui_font.render(error_msg, True, RED)
-            screen.blit(error_surf, (dialog_x + 10, plaid_checkbox_rect.bottom + 5))
+            screen.blit(error_surf, (dialog_x + 10, endgame_checkbox_rect.bottom + 5))
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -5114,17 +5206,18 @@ def get_batch_game_dialog():
                 input_active = input_rect.collidepoint(x, y)
                 error_msg = None # Clear error on click
 
-                # --- NEW: Handle click on Plaid checkbox ---
                 if plaid_checkbox_rect.collidepoint(x, y):
                     plaid_mode_checked = not plaid_mode_checked
-                # --- END NEW ---
+                # --- NEW: Handle click on Generate Endgames checkbox ---
+                elif endgame_checkbox_rect.collidepoint(x, y):
+                    generate_endgames_checked = not generate_endgames_checked
 
-                if ok_rect.collidepoint(x, y):
+                elif ok_rect.collidepoint(x, y):
                     try:
                         num_games = int(input_text)
                         if num_games > 0:
-                            # --- MODIFIED: Return a tuple with the plaid mode state ---
-                            return num_games, plaid_mode_checked
+                            # --- MODIFIED: Return a tuple with all checkbox states ---
+                            return num_games, plaid_mode_checked, generate_endgames_checked
                         else:
                             error_msg = "Enter a positive number."
                     except ValueError:
@@ -5138,8 +5231,8 @@ def get_batch_game_dialog():
                         try:
                             num_games = int(input_text)
                             if num_games > 0:
-                                # --- MODIFIED: Return a tuple with the plaid mode state ---
-                                return num_games, plaid_mode_checked
+                                # --- MODIFIED: Return a tuple with all checkbox states ---
+                                return num_games, plaid_mode_checked, generate_endgames_checked
                             else:
                                 error_msg = "Enter a positive number."
                         except ValueError:
@@ -5406,9 +5499,12 @@ def save_batch_statistics(batch_results, player_names, batch_summary_filename, t
 
     is_silent_batch_statistic_run = not DEV_VISUALIZE_BATCH_ENABLED_SESSION
 
+    # --- MODIFICATION START: Check if there are any results to save ---
     if not batch_results:
-        print("No batch results to save.")
+        if not is_silent_batch_statistic_run:
+            print("No completed game results to save. This is expected for 'Generate Endgames' mode.")
         return
+    # --- MODIFICATION END ---
 
     seven_letter_words = []
     eight_letter_words = []
@@ -6149,7 +6245,7 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
     _is_potentially_silent_batch = False
     if selected_mode_result == "BATCH_MODE":
         # Check based on new signature with plaid mode
-        if len(return_data) == 12 and not return_data[7]:
+        if len(return_data) >= 12 and not return_data[7]:
             _is_potentially_silent_batch = True
         # Check based on old signatures
         elif len(return_data) == 11 and not return_data[7]:
@@ -6210,13 +6306,23 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
 
         elif selected_mode_result == "BATCH_MODE":
             plaid_mode_checked = False # Default
-            if len(return_data) == 12: # New signature with plaid_mode
+            generate_endgames_checked = False # Default
+            # --- MODIFICATION START: Handle new 13-item tuple ---
+            if len(return_data) == 13: # New signature with generate_endgames
+                game_mode_tuple, player_names_sel, human_player_sel, use_endgame_solver_checked, \
+                use_ai_simulation_checked, num_games, dev_cprofile_checked_init, dev_visualize_batch_checked_init, \
+                ai_sim_num_cand_batch, ai_sim_num_opp_batch, ai_sim_num_post_batch, plaid_mode_checked, generate_endgames_checked = return_data
+                ai_sim_num_candidates_init = ai_sim_num_cand_batch
+                ai_sim_num_opponent_sims_init = ai_sim_num_opp_batch
+                ai_sim_num_post_sim_candidates_init = ai_sim_num_post_batch
+            elif len(return_data) == 12: # Old signature with plaid_mode
                 game_mode_tuple, player_names_sel, human_player_sel, use_endgame_solver_checked, \
                 use_ai_simulation_checked, num_games, dev_cprofile_checked_init, dev_visualize_batch_checked_init, \
                 ai_sim_num_cand_batch, ai_sim_num_opp_batch, ai_sim_num_post_batch, plaid_mode_checked = return_data
                 ai_sim_num_candidates_init = ai_sim_num_cand_batch
                 ai_sim_num_opponent_sims_init = ai_sim_num_opp_batch
                 ai_sim_num_post_sim_candidates_init = ai_sim_num_post_batch
+            # --- MODIFICATION END ---
             elif len(return_data) == 11: # Old signature without plaid
                 game_mode_tuple, player_names_sel, human_player_sel, use_endgame_solver_checked, \
                 use_ai_simulation_checked, num_games, dev_cprofile_checked_init, dev_visualize_batch_checked_init, \
@@ -6251,12 +6357,12 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                 except ValueError:
                     bbb_8l_max_prob_init = 1000
             elif len(return_data) == 13: 
-                player_names_sel, human_player_sel, practice_mode_sel, letter_checks_sel, \
+                 player_names_sel, human_player_sel, practice_mode_sel, letter_checks_sel, \
                 number_checks_sel, use_endgame_solver_sel, use_ai_simulation_sel, \
                 practice_state_from_mode_sel, dev_cprofile_checked_init, dev_visualize_batch_checked_init, \
                 ai_sim_num_candidates_init, ai_sim_num_opponent_sims_init, ai_sim_num_post_sim_candidates_init = return_data
-                USE_ENDGAME_SOLVER = use_endgame_solver_sel
-                USE_AI_SIMULATION = use_ai_simulation_sel
+                 USE_ENDGAME_SOLVER = use_endgame_solver_sel
+                 USE_AI_SIMULATION = use_ai_simulation_sel
             elif len(return_data) == 10: 
                  player_names_sel, human_player_sel, practice_mode_sel, letter_checks_sel, \
                 number_checks_sel, use_endgame_solver_sel, use_ai_simulation_sel, \
@@ -6398,7 +6504,7 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                     loading_text_surf = ui_font.render("Generating Insights for Loaded Game...", True, BLUE)
                     screen.blit(loading_text_surf, ( (WINDOW_WIDTH - loading_text_surf.get_width()) // 2, (WINDOW_HEIGHT - loading_text_surf.get_height()) // 2))
                     pygame.display.flip()
-                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_run_param=is_silent_run_for_init)
+                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_batch_run_param=is_silent_run_for_init)
             else:
                 insights_data_for_replay = [] 
                 if not is_silent_run_for_init and gaddag_loading_status == 'loading':
@@ -6422,7 +6528,7 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                     loading_text_surf = ui_font.render("Generating Insights...", True, BLUE)
                     screen.blit(loading_text_surf, ( (WINDOW_WIDTH - loading_text_surf.get_width()) // 2, (WINDOW_HEIGHT - loading_text_surf.get_height()) // 2))
                     pygame.display.flip()
-                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_run_param=is_silent_run_for_init)
+                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_batch_run_param=is_silent_run_for_init)
             else:
                 insights_data_for_replay = []
                 if not is_silent_run_for_init and gaddag_loading_status == 'loading':
@@ -6456,6 +6562,7 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
             batch_seq_num = max_existing_batch_num + 1
         except OSError as e_os_err: print(f"Warning: Error listing directory for batch sequence number: {e_os_err}. Using sequence 1.")
         batch_base_filename_prefix = f"{batch_date_str}-{batch_time_str}-BATCH-{batch_seq_num}"
+        # --- MODIFICATION START: Add generate_endgames_mode to config ---
         initial_game_config = {
             'game_mode': game_mode, 'player_names': player_names_sel, 'human_player': human_player_sel,
             'use_endgame_solver': USE_ENDGAME_SOLVER, 'use_ai_simulation': USE_AI_SIMULATION,
@@ -6465,8 +6572,10 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
             'ai_sim_num_post_sim_candidates': ai_sim_num_post_sim_candidates_init,
             'bbb_7l_max_prob': bbb_7l_max_prob_init, 
             'bbb_8l_max_prob': bbb_8l_max_prob_init,
-            'plaid_mode': plaid_mode_checked
+            'plaid_mode': plaid_mode_checked,
+            'generate_endgames_mode': generate_endgames_checked
         }
+        # --- MODIFICATION END ---
         player_names = player_names_sel
         human_player = human_player_sel
         is_ai = [False, False]
@@ -6508,37 +6617,65 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
             print(f"--- initialize_game(): AI Sim Params for this game: Cands={ai_sim_num_candidates_init}, OppSims={ai_sim_num_opponent_sims_init}, PostSimCands={ai_sim_num_post_sim_candidates_init} ---")
             if practice_mode == "bingo_bango_bongo":
                 print(f"--- initialize_game(): BBB Params for this game: 7L Max Prob={bbb_7l_max_prob_init}, 8L Max Prob={bbb_8l_max_prob_init} ---")
-        if active_practice_state_data: 
-            if not is_silent_run_for_init: print(f"Loading state from practice_state for mode: {practice_mode}...")
-            board_init = active_practice_state_data["board"]
-            tiles_init = active_practice_state_data["tiles"]
-            racks_init = active_practice_state_data["racks"]
-            blanks_init = active_practice_state_data["blanks"]
-            bag_init = active_practice_state_data["bag"]
-            scores_init = active_practice_state_data["scores"]
-            turn = active_practice_state_data["turn"]
-            first_play = active_practice_state_data["first_play"]
-            sgs_initial_bag = active_practice_state_data.get("sgs_initial_bag", bag_init[:])
-            if practice_mode == "eight_letter":
-                practice_params = active_practice_state_data.get("practice_params", {})
-                initial_game_config['gamify_active'] = practice_params.get('gamify_active', False)
-                if initial_game_config['gamify_active']:
-                    gamified_params = practice_params.get('gamified_params', {})
-                    initial_game_config['gamify_min_prob'] = gamified_params.get('min', 500)
-                    initial_game_config['gamify_max_goal'] = gamified_params.get('max_goal', 3500)
-                    initial_game_config['gamify_increment'] = gamified_params.get('increment', 250)
-                    # Set the starting dynamic range
-                    initial_game_config['gamify_current_max_prob'] = initial_game_config['gamify_min_prob'] + initial_game_config['gamify_increment']
+        if active_practice_state_data:
+            # --- MODIFICATION START: Handle endgame practice setup ---
+            if practice_mode == "endgame":
+                if not is_silent_run_for_init: print(f"Loading state from endgame puzzle data...")
+                puzzle_data = active_practice_state_data.get("puzzle_data", {})
+                puzzle_state = puzzle_data.get("puzzle_state", {})
+                
+                board_init = puzzle_state.get("board", create_board()[0])
+                tiles_init = puzzle_state.get("tiles", [['' for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)])
+                blanks_init = puzzle_state.get("blanks", set())
+                scores_init = puzzle_state.get("scores", [0, 0])
+                turn = puzzle_state.get("player_to_move", 1)
+                
+                # Set up racks based on who is to move
+                player_to_move_idx = turn - 1
+                opponent_idx = 1 - player_to_move_idx
+                racks_init = [[], []]
+                racks_init[player_to_move_idx] = puzzle_state.get("rack_player_to_move", [])
+                racks_init[opponent_idx] = puzzle_state.get("rack_opponent", [])
+                
+                bag_init = [] # Bag is always empty for endgame puzzles
+                first_play = False # Never the first play in an endgame
+                sgs_initial_bag = []
+                
+                # Store the solution sequence in the main state
+                initial_game_config['endgame_practice_solution'] = puzzle_data.get("solution", [])
+                is_ai = active_practice_state_data.get("is_ai", [False, True])
+            # --- MODIFICATION END ---
+            elif practice_mode: # Existing practice modes
+                if not is_silent_run_for_init: print(f"Loading state from practice_state for mode: {practice_mode}...")
+                board_init = active_practice_state_data["board"]
+                tiles_init = active_practice_state_data["tiles"]
+                racks_init = active_practice_state_data["racks"]
+                blanks_init = active_practice_state_data["blanks"]
+                bag_init = active_practice_state_data["bag"]
+                scores_init = active_practice_state_data["scores"]
+                turn = active_practice_state_data["turn"]
+                first_play = active_practice_state_data["first_play"]
+                sgs_initial_bag = active_practice_state_data.get("sgs_initial_bag", bag_init[:])
+                if practice_mode == "eight_letter":
+                    practice_params = active_practice_state_data.get("practice_params", {})
+                    initial_game_config['gamify_active'] = practice_params.get('gamify_active', False)
+                    if initial_game_config['gamify_active']:
+                        gamified_params = practice_params.get('gamified_params', {})
+                        initial_game_config['gamify_min_prob'] = gamified_params.get('min', 500)
+                        initial_game_config['gamify_max_goal'] = gamified_params.get('max_goal', 3500)
+                        initial_game_config['gamify_increment'] = gamified_params.get('increment', 250)
+                        # Set the starting dynamic range
+                        initial_game_config['gamify_current_max_prob'] = initial_game_config['gamify_min_prob'] + initial_game_config['gamify_increment']
 
-            
-            if practice_mode == "bingo_bango_bongo":
-                bbb_7l_max_prob_init = active_practice_state_data.get('bbb_7l_max_prob', 1000)
-                bbb_8l_max_prob_init = active_practice_state_data.get('bbb_8l_max_prob', 1000)
-            if practice_mode == "eight_letter": is_ai = [False, False]
-            else:
-                is_ai = [False, False]
-                if game_mode == MODE_HVA: is_ai[2 - human_player] = True
-                elif game_mode == MODE_AVA or practice_mode == "power_tiles" or practice_mode == "bingo_bango_bongo": is_ai = [True, True]
+                
+                if practice_mode == "bingo_bango_bongo":
+                    bbb_7l_max_prob_init = active_practice_state_data.get('bbb_7l_max_prob', 1000)
+                    bbb_8l_max_prob_init = active_practice_state_data.get('bbb_8l_max_prob', 1000)
+                if practice_mode == "eight_letter": is_ai = [False, False]
+                else:
+                    is_ai = [False, False]
+                    if game_mode == MODE_HVA: is_ai[2 - human_player] = True
+                    elif game_mode == MODE_AVA or practice_mode == "power_tiles" or practice_mode == "bingo_bango_bongo": is_ai = [True, True]
         else: 
             if not is_silent_run_for_init: print("Performing standard game initialization (no pre-set practice_state)...")
             temp_full_bag = create_standard_bag()
@@ -12102,6 +12239,71 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                     if current_state_dict.get('return_to_mode_selection', False): _return_to_mode_selection_internal = True
                     break
 
+                # --- MODIFICATION START: Add Endgame Practice Logic ---
+                if current_state_dict.get('practice_mode') == 'endgame' and current_state_dict.get('human_played'):
+                    solution_sequence = current_state_dict.get('initial_game_config', {}).get('endgame_practice_solution', [])
+                    turn_index_in_solution = len(current_state_dict.get('move_history', [])) -1
+
+                    if 0 <= turn_index_in_solution < len(solution_sequence):
+                        correct_move_obj = solution_sequence[turn_index_in_solution]
+                        last_human_move = current_state_dict['move_history'][-1]
+                        
+                        # Compare newly_placed details for accuracy
+                        human_placed_sig = tuple(sorted(tuple(pos) for pos in last_human_move.get('newly_placed', [])))
+                        correct_placed_sig = tuple(sorted(tuple(pos) for pos in correct_move_obj.get('newly_placed', [])))
+
+                        if human_placed_sig == correct_placed_sig:
+                            show_message_dialog("Correct!", "Good Move")
+                            current_state_dict['human_played'] = False # Reset for next human turn
+
+                            # Check if there's an opponent move to auto-play
+                            opponent_turn_index = turn_index_in_solution + 1
+                            if opponent_turn_index < len(solution_sequence):
+                                opponent_move = solution_sequence[opponent_turn_index]
+                                # Use play_hint_move to execute the opponent's move
+                                next_turn, drawn, newly_placed, consumed = play_hint_move(
+                                    opponent_move, current_state_dict['tiles'], current_state_dict['racks'],
+                                    current_state_dict['blanks'], current_state_dict['scores'],
+                                    current_state_dict['turn'], current_state_dict['bag'],
+                                    current_state_dict['board'], current_state_dict['is_ai'],
+                                    current_state_dict['practice_mode'], is_silent_batch_run_param=True
+                                )
+                                # Update history for the opponent's move
+                                opponent_move.update({
+                                    'player': current_state_dict['turn'], 'move_type': 'place',
+                                    'rack': current_state_dict['racks'][current_state_dict['turn']-1][:],
+                                    'drawn': drawn, 'newly_placed': newly_placed,
+                                    'tiles_played_from_rack': consumed
+                                })
+                                current_state_dict['move_history'].append(opponent_move)
+                                current_state_dict['turn'] = next_turn
+                        else:
+                            show_message_dialog("Incorrect move. Try again.", "Incorrect")
+                            # Revert the human's move
+                            last_move = current_state_dict['move_history'].pop()
+                            current_state_dict['scores'][last_move['player']-1] -= last_move['score']
+                            
+                            # Restore tiles on board
+                            for r, c, _ in last_move.get('newly_placed', []):
+                                current_state_dict['tiles'][r][c] = ''
+                            
+                            # Restore blanks
+                            blanks_in_move = last_move.get('blanks', set())
+                            newly_placed_coords = set((r,c) for r,c,_ in last_move.get('newly_placed',[]))
+                            blanks_to_remove = blanks_in_move.intersection(newly_placed_coords)
+                            current_state_dict['blanks'].difference_update(blanks_to_remove)
+
+                            # Restore rack
+                            current_state_dict['racks'][last_move['player']-1] = last_move['rack'][:]
+                            current_state_dict['human_played'] = False # Reset flag
+                    
+                    # Check if the puzzle is complete
+                    if len(current_state_dict.get('move_history', [])) >= len(solution_sequence):
+                        show_message_dialog("Puzzle Solved!", "Congratulations")
+                        current_state_dict['showing_practice_end_dialog'] = True
+                        current_state_dict['practice_end_message'] = "Endgame Puzzle Solved!"
+                # --- MODIFICATION END ---
+
                 # 3. Check for game over condition
                 if not current_state_dict.get('typing', False):
                     current_state_dict = check_and_handle_game_over(current_state_dict)
@@ -12124,6 +12326,62 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                 if not current_state_dict.get('paused_for_power_tile') and not current_state_dict.get('paused_for_bingo_practice'):
                     current_state_dict = handle_ai_turn_trigger(current_state_dict)
                 # --- END CORRECTED LOGIC FLOW ---
+
+                # --- MODIFICATION START: Add Endgame Generation Logic ---
+                if is_batch_running and initial_game_config.get('generate_endgames_mode', False):
+                    # Check trigger condition after the AI turn has completed
+                    bag_len_for_trigger = len(current_state_dict.get('bag', []))
+                    racks_for_trigger = current_state_dict.get('racks', [[], []])
+                    
+                    no_blanks_on_racks = True
+                    total_tiles_on_racks = 0
+                    if len(racks_for_trigger) == 2:
+                        if ' ' in racks_for_trigger[0] or ' ' in racks_for_trigger[1]:
+                            no_blanks_on_racks = False
+                        total_tiles_on_racks = len(racks_for_trigger[0]) + len(racks_for_trigger[1])
+                    
+                    if bag_len_for_trigger == 0 and no_blanks_on_racks and total_tiles_on_racks <= 6:
+                        print(f"--- Endgame Triggered in Game {current_batch_game_num} (Turn {len(move_history)}) ---")
+                        
+                        # Gather the current state for the puzzle
+                        player_to_move = current_state_dict['turn']
+                        player_idx = player_to_move - 1
+                        opponent_idx = 1 - player_idx
+                        
+                        puzzle_state_to_save = {
+                            'board': current_state_dict['board'],
+                            'tiles': current_state_dict['tiles'],
+                            'blanks': current_state_dict['blanks'],
+                            'rack_player_to_move': racks_for_trigger[player_idx],
+                            'rack_opponent': racks_for_trigger[opponent_idx],
+                            'scores': current_state_dict['scores'],
+                            'player_to_move': player_to_move
+                        }
+                        
+                        # Solve the endgame from this position
+                        score_diff_for_solve = puzzle_state_to_save['scores'][player_idx] - puzzle_state_to_save['scores'][opponent_idx]
+                        
+                        _, solution_sequence = ai_engine.solve_endgame(
+                            puzzle_state_to_save['rack_player_to_move'],
+                            puzzle_state_to_save['rack_opponent'],
+                            puzzle_state_to_save['tiles'],
+                            puzzle_state_to_save['blanks'],
+                            puzzle_state_to_save['board'],
+                            score_diff_for_solve,
+                            is_silent_batch_run_param=True
+                        )
+                        
+                        # Save the puzzle and solution
+                        if solution_sequence:
+                            batch_prefix = initial_game_config.get('batch_filename_prefix', 'UNKNOWN-BATCH')
+                            save_endgame_puzzle(puzzle_state_to_save, solution_sequence, batch_prefix, current_batch_game_num)
+                        else:
+                            print("  -> Solver returned no sequence. Puzzle not saved.")
+                        
+                        # Break the inner loop to move to the next game in the batch
+                        current_state_dict['running_inner'] = False
+                        break # Exit the while loop for this game
+                # --- MODIFICATION END ---
 
 
             # --- MODIFICATION START: Batch SGS writing logic ---
