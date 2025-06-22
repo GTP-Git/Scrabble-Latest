@@ -6,8 +6,9 @@
 #Endgame Batch mode implementation
 #Working in general, but still need program flow improvements
 #Correct/incorrect msg not working properly
-#Solutions button unresponsive
+#SFixed solutions button unresponsive
 #Pass is showing as best move when demonstrably not
+#UNKNOWN MOVE bug still happening
 
 #22JUN25
 
@@ -10692,8 +10693,6 @@ def draw_all_words_dialog(moves, selected_index, current_scroll_offset, dialog_x
 
 
 
-# In Scrabble Game.py
-
 def draw_game_screen(screen, state):
     """
     Draws the entire game screen based on the current state.
@@ -10813,6 +10812,7 @@ def draw_game_screen(screen, state):
 
     suggest_rect_base = None; simulate_button_rect = None; profile_button_rect = None
     preview_checkbox_rect = None; word_lookup_button_in_game_rect = None; solve_endgame_button_rect = None
+    solutions_button_rect = None
 
     if not is_batch_running_local_draw:
         top_button_x = 10 + OPTIONS_WIDTH + BUTTON_GAP; top_button_y = OPTIONS_Y
@@ -10828,14 +10828,12 @@ def draw_game_screen(screen, state):
             simulate_text = button_font.render("Simulate", True, BLACK); simulate_text_rect = simulate_text.get_rect(center=simulate_button_rect.center); screen.blit(simulate_text, simulate_text_rect)
             current_button_y = simulate_button_rect.bottom + BUTTON_GAP
 
-            # --- MODIFICATION START: Add Solve Endgame button in Replay Mode ---
             if replay_mode:
                 solve_endgame_button_rect = pygame.Rect(top_button_x, current_button_y, OPTIONS_WIDTH, BUTTON_HEIGHT)
                 hover_solve = solve_endgame_button_rect.collidepoint(pygame.mouse.get_pos()); color_solve = BUTTON_HOVER if hover_solve else BUTTON_COLOR
                 pygame.draw.rect(screen, color_solve, solve_endgame_button_rect)
                 solve_text = button_font.render("Solve", True, BLACK); solve_text_rect = solve_text.get_rect(center=solve_endgame_button_rect.center); screen.blit(solve_text, solve_text_rect)
                 current_button_y = solve_endgame_button_rect.bottom + BUTTON_GAP
-            # --- MODIFICATION END ---
 
             word_lookup_button_in_game_rect = pygame.Rect(top_button_x, current_button_y, OPTIONS_WIDTH, BUTTON_HEIGHT)
             hover_lookup = word_lookup_button_in_game_rect.collidepoint(pygame.mouse.get_pos()); color_lookup = BUTTON_HOVER if hover_lookup else BUTTON_COLOR
@@ -10843,7 +10841,6 @@ def draw_game_screen(screen, state):
             lookup_text = button_font.render("Lookup", True, BLACK); lookup_text_rect = lookup_text.get_rect(center=word_lookup_button_in_game_rect.center); screen.blit(lookup_text, lookup_text_rect)
             current_button_y = word_lookup_button_in_game_rect.bottom + BUTTON_GAP
 
-            solutions_button_rect = None
             if practice_mode == 'endgame':
                 solutions_button_rect = pygame.Rect(top_button_x, current_button_y, OPTIONS_WIDTH, BUTTON_HEIGHT)
                 hover_solutions = solutions_button_rect.collidepoint(pygame.mouse.get_pos())
@@ -10869,7 +10866,8 @@ def draw_game_screen(screen, state):
 
     drawn_rects['suggest_rect_base'] = suggest_rect_base
     drawn_rects['simulate_button_rect'] = simulate_button_rect
-    drawn_rects['solve_endgame_button_rect'] = solve_endgame_button_rect # Store the new rect
+    drawn_rects['solve_endgame_button_rect'] = solve_endgame_button_rect
+    drawn_rects['solutions_button_rect'] = solutions_button_rect
     drawn_rects['profile_button_rect'] = profile_button_rect
     drawn_rects['preview_checkbox_rect'] = preview_checkbox_rect
     drawn_rects['word_lookup_button_in_game_rect'] = word_lookup_button_in_game_rect
@@ -12543,7 +12541,7 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                         # Solve the endgame from this position
                         score_diff_for_solve = puzzle_state_to_save['scores'][player_idx] - puzzle_state_to_save['scores'][opponent_idx]
                         
-                        _, solution_sequence = ai_engine.solve_endgame(
+                        _, _, solution_sequence = ai_engine.solve_endgame(
                             puzzle_state_to_save['rack_player_to_move'],
                             puzzle_state_to_save['rack_opponent'],
                             puzzle_state_to_save['tiles'],
