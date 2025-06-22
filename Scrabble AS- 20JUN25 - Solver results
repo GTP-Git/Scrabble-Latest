@@ -3,11 +3,10 @@
 
 
 #python
-#Scrabble AS
-#Added window to show Endgame Solver results
-#Fixed float --> int UI bug
+#Scrabble AV
+#Added endgame optimizations
 
-#20JUN25
+#21JUN25
 
 
 
@@ -6065,7 +6064,12 @@ def ai_turn(state):
     elif action_chosen == 'exchange' and details:
         exchanged_tiles = details[:]
         current_rack_list = state['racks'][player_idx]
-        temp_rack = [tile for tile in current_rack_list if tile not in exchanged_tiles]
+        
+        temp_rack = current_rack_list[:] # Make a mutable copy
+        for tile_to_remove in exchanged_tiles:
+            if tile_to_remove in temp_rack:
+                temp_rack.remove(tile_to_remove)
+
         leave = temp_rack[:]
         state['bag'].extend(exchanged_tiles)
         random.shuffle(state['bag'])
@@ -6933,14 +6937,12 @@ def _handle_mouse_down_rack_ui_elements(event, state, drawn_rects):
 
 
 
-# In Scrabble Game.py, can be placed near other dialog functions
-
-def show_endgame_results_dialog(result_lines, state):
+def show_endgame_results_dialog(result_lines, state, duration_str):
     """
     Displays a modal dialog showing the endgame solver results.
     This dialog is movable, scrollable, and dynamically sized for readability.
     """
-    global screen, dialog_font, ui_font, button_font, DIALOG_COLOR, BLACK, WHITE, BUTTON_COLOR, BUTTON_HOVER, SCROLL_SPEED, WINDOW_WIDTH, WINDOW_HEIGHT
+    global screen, dialog_font, ui_font, button_font, DIALOG_COLOR, BLACK, WHITE, BUTTON_COLOR, BUTTON_HOVER, SCROLL_SPEED, WINDOW_WIDTH, WINDOW_HEIGHT, BLUE
 
     # --- Dynamic Width Calculation ---
     padding = 20
@@ -6950,13 +6952,21 @@ def show_endgame_results_dialog(result_lines, state):
     except:
         mono_font = ui_font # Fallback
 
+    # --- MODIFICATION START: Include duration string in width calculation ---
+    if duration_str:
+        duration_width = dialog_font.size(duration_str)[0]
+        if duration_width > max_line_width:
+            max_line_width = duration_width
+    # --- MODIFICATION END ---
+
     for line in result_lines:
         line_width = mono_font.size(line)[0]
         if line_width > max_line_width:
             max_line_width = line_width
     
     # Calculate required width but cap it to avoid being too wide
-    dialog_width = max_line_width + (padding * 2)
+    min_dialog_width = 700
+    dialog_width = max(min_dialog_width, max_line_width + (padding * 2))
     max_dialog_width = int(WINDOW_WIDTH * 0.95)
     dialog_width = min(dialog_width, max_dialog_width)
     
@@ -6970,9 +6980,17 @@ def show_endgame_results_dialog(result_lines, state):
     dragging = False
     drag_offset = (0, 0)
 
-    # --- Pre-render content ---
-    rendered_surfaces = [(mono_font.render(line, True, BLACK), mono_font.get_linesize()) for line in result_lines]
+    # --- MODIFICATION START: Pre-render content including duration ---
+    rendered_surfaces = []
+    if duration_str:
+        duration_font = dialog_font # Use a prominent font
+        rendered_surfaces.append((duration_font.render(duration_str, True, BLUE), duration_font.get_linesize()))
+        # Add a small spacer after the duration
+        rendered_surfaces.append((ui_font.render("", True, BLACK), ui_font.get_linesize() // 2))
+
+    rendered_surfaces.extend([(mono_font.render(line, True, BLACK), mono_font.get_linesize()) for line in result_lines])
     total_content_height = sum(h for _, h in rendered_surfaces)
+    # --- MODIFICATION END ---
 
     # --- Main Dialog Loop ---
     while dialog_running:
@@ -7486,8 +7504,6 @@ def _handle_mouse_down_replay_buttons(event, state, drawn_rects):
 
 
 
-# In Scrabble Game.py
-
 def _handle_general_mouse_down(event, state, drawn_rects):
     """
     Handles general MOUSEBUTTONDOWN events (non-dialog specific).
@@ -7620,15 +7636,23 @@ def _handle_general_mouse_down(event, state, drawn_rects):
                     print(f"  Opponent Rack (Reconstructed): {rack_opponent}")
                     print(f"  Score Diff: {score_diff}")
 
+                # --- MODIFICATION START: Time the solver call ---
+                start_time = time.perf_counter()
                 _, formatted_lines = ai_engine.solve_endgame(
                     rack_player, rack_opponent, board_state_tiles, board_state_blanks, 
                     state['board'], score_diff, is_silent_batch_run_param=True
                 )
+                end_time = time.perf_counter()
+                duration = end_time - start_time
+                duration_str = f"Solved in {duration:.2f} seconds"
+                # --- MODIFICATION END ---
                 
                 state['is_solving_endgame'] = False
                 
                 if formatted_lines:
-                    show_endgame_results_dialog(formatted_lines, state)
+                    # --- MODIFICATION START: Pass duration to dialog ---
+                    show_endgame_results_dialog(formatted_lines, state, duration_str)
+                    # --- MODIFICATION END ---
                 else:
                     show_message_dialog("Endgame solver found no valid lines or moves.", "Solver Results")
 
@@ -12474,7 +12498,7 @@ if __name__ == "__main__":
 
 
     
-    #random.seed(12345)
+    random.seed(12345)
 
     main_called_for_initial_mode_selection = False
     running_program = True
