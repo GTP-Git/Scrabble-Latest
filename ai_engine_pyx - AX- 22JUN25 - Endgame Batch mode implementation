@@ -1,12 +1,11 @@
 # ai_engine.pyx
 
 #ai_engine_pyx - AX - 22JUN25
-##Endgame Batch mode implementation
+#Endgame Batch mode implementation
 #Working in general, but still need program flow improvements
 #Correct/incorrect msg not working properly
 #SFixed solutions button unresponsive
-#Pass is showing as best move when demonstrably not
-#UNKNOWN MOVE bug still happening
+#FIXED: UNKNOWN MOVE
 
 
 
@@ -2264,6 +2263,7 @@ cpdef int evaluate_endgame_heuristic(list rack_player, list rack_opponent, int c
 
 
 
+
 cpdef str format_single_move_for_print(object move_obj, bint is_silent_batch_run_param=False):
     """
     Formats a single move object (or PASS string) for endgame sequence printing. (Cythonized)
@@ -2277,7 +2277,7 @@ cpdef str format_single_move_for_print(object move_obj, bint is_silent_batch_run
         return "[PASS]"
     elif move_obj == "NO_MOVE_POSSIBLE":
         return "[-]"
-    elif isinstance(move_obj, dict):
+    elif hasattr(move_obj, 'get'):
         word = move_obj.get('word_with_blanks', move_obj.get('word', '?'))
         coord = get_coord(move_obj.get('start', (0,0)), move_obj.get('direction', '?'), is_silent_batch_run_param)
         score = move_obj.get('score',0)
@@ -2299,7 +2299,11 @@ cpdef str format_single_move_for_print(object move_obj, bint is_silent_batch_run
 
 
 
-cdef str format_end_state_for_print(list final_rack_p1_sim, list final_rack_p2_sim, bint last_player_to_move_was_p1, int pass_count_at_end):
+# In ai_engine.pyx
+
+# This is the full, complete function with no code omitted.
+
+cpdef str format_end_state_for_print(list final_rack_p1_sim, list final_rack_p2_sim, bint last_player_to_move_was_p1, int pass_count_at_end):
     """
     Formats the [end RACK +/-ADJUSTMENT] part of the endgame sequence string. (Cythonized)
     """
@@ -2636,34 +2640,53 @@ cpdef object solve_endgame(list rack_player, list opponent_rack, list tiles, set
                 temp_sim_rack_o2 = initial_rack_opponent_state[:]
                 current_player_is_p1_in_print_sim = True
                 pass_count_for_print_sim = 0
-
-                for move_idx_in_seq, move_obj_in_seq in enumerate(line_data['sequence']):
-                    turn_indicator_in_seq = f"{move_idx_in_seq // 2 + 1}. "
-                    sequence_str_parts.append(turn_indicator_in_seq)
-
-                    formatted_move_str = format_single_move_for_print(move_obj_in_seq, True)
-                    sequence_str_parts.append(formatted_move_str)
+                
+                # This loop now correctly handles pairing moves for display
+                move_sequence = line_data['sequence']
+                turn_counter = 1
+                move_idx_in_seq = 0
+                while move_idx_in_seq < len(move_sequence):
+                    # Player 1's move
+                    sequence_str_parts.append(f"{turn_counter}. ")
+                    p1_move_obj = move_sequence[move_idx_in_seq]
+                    sequence_str_parts.append(format_single_move_for_print(p1_move_obj, True))
                     sequence_str_parts.append(" ")
 
-                    if move_obj_in_seq == "PASS":
-                        pass_count_for_print_sim +=1
-                    elif isinstance(move_obj_in_seq, dict):
+                    if isinstance(p1_move_obj, dict):
+                        temp_sim_rack_p1 = p1_move_obj.get('leave', [])
                         pass_count_for_print_sim = 0
-                        if current_player_is_p1_in_print_sim:
-                            temp_sim_rack_p1 = move_obj_in_seq.get('leave', [])
-                        else:
-                            temp_sim_rack_o2 = move_obj_in_seq.get('leave', [])
+                    else: # PASS
+                        pass_count_for_print_sim += 1
 
-                    current_player_is_p1_in_print_sim = not current_player_is_p1_in_print_sim
+                    move_idx_in_seq += 1
+                    
+                    # Player 2's move, if it exists
+                    if move_idx_in_seq < len(move_sequence):
+                        p2_move_obj = move_sequence[move_idx_in_seq]
+                        sequence_str_parts.append(format_single_move_for_print(p2_move_obj, True))
+                        sequence_str_parts.append(" ")
+                        
+                        if isinstance(p2_move_obj, dict):
+                            temp_sim_rack_o2 = p2_move_obj.get('leave', [])
+                            pass_count_for_print_sim = 0
+                        else: # PASS
+                            pass_count_for_print_sim += 1
+                        
+                        move_idx_in_seq += 1
+                    
+                    turn_counter += 1
 
-                    if move_idx_in_seq == len(line_data['sequence']) - 1:
-                        end_state_str = format_end_state_for_print(
-                            temp_sim_rack_p1,
-                            temp_sim_rack_o2,
-                            not current_player_is_p1_in_print_sim,
-                            pass_count_for_print_sim
-                        )
-                        sequence_str_parts.append(end_state_str)
+                # Determine the last player to move for format_end_state_for_print
+                # If total moves is odd, P1 was last. If even, P2 was last.
+                last_player_was_p1 = (len(move_sequence) % 2 != 0)
+
+                end_state_str = format_end_state_for_print(
+                    temp_sim_rack_p1,
+                    temp_sim_rack_o2,
+                    last_player_was_p1,
+                    pass_count_for_print_sim
+                )
+                sequence_str_parts.append(end_state_str)
                 
                 sequence_str_parts_str = "".join(sequence_str_parts)
                 print(f"{rank}.\t{current_score:+.0f}\t{sequence_str_parts_str}")
