@@ -1,7 +1,8 @@
 # ai_engine.pyx
 
-#ai_engine_pyx - AV - 21JUN25
-#Added  endgame optimizations
+#ai_engine_pyx - AV - 22JUN25
+#Added endgame optimizations
+#Fixed truncated endgame search depth
 
 
 
@@ -2313,102 +2314,7 @@ cdef str format_end_state_for_print(list final_rack_p1_sim, list final_rack_p2_s
 
 
 
-# In ai_engine.pyx, add this function before negamax_endgame
 
-@cython.cdivision(True)
-@cython.boundscheck(False)
-@cython.wraparound(False)
-cdef tuple quiescence_search(list rack_player, list rack_opponent, list tiles, set blanks, list board,
-                             int current_score_diff, float alpha, float beta, dict transposition_table):
-    """
-    A search that only considers 'non-quiet' moves (e.g., high-scoring plays)
-    to stabilize the evaluation at the main search horizon.
-    """
-    cdef float stand_pat_score, value
-    cdef list possible_moves, capture_moves, newly_placed_details
-    cdef object move
-    cdef int move_score
-    cdef list sim_tiles, sim_rack_player, sim_rack_opponent, temp_rack
-    cdef set sim_blanks, move_blanks_coords
-    cdef bint valid_placement
-    cdef int r_np, c_np
-    cdef str letter_np
-    cdef tuple state_key, board_tuple, player_rack_tuple, opponent_rack_tuple
-    cdef list board_list_of_tuples, subsequent_sequence
-
-    # --- Transposition Table Lookup (same as negamax) ---
-    board_list_of_tuples = []
-    for row in tiles:
-        board_list_of_tuples.append(tuple(row))
-    board_tuple = tuple(board_list_of_tuples)
-    player_rack_tuple = tuple(sorted(rack_player))
-    opponent_rack_tuple = tuple(sorted(rack_opponent))
-    # Use a different prefix for quiescence keys to avoid collision with main search
-    state_key = ("Q", board_tuple, player_rack_tuple, opponent_rack_tuple, current_score_diff)
-    if state_key in transposition_table:
-        return transposition_table[state_key]
-
-    # The "stand-pat" score: what happens if no more moves are made from this position.
-    stand_pat_score = evaluate_endgame_heuristic(rack_player, rack_opponent, current_score_diff)
-    if stand_pat_score >= beta:
-        transposition_table[state_key] = (beta, [])
-        return beta, []
-    alpha = max(alpha, stand_pat_score)
-
-    possible_moves = generate_all_moves_gaddag(rack_player, tiles, board, blanks, None, True)
-    if possible_moves is None:
-        possible_moves = []
-
-    # Filter for "non-quiet" moves (high scores or bingos)
-    capture_moves = []
-    for m in possible_moves:
-        if m.get('score', 0) > 20 or m.get('is_bingo', False):
-            capture_moves.append(m)
-    
-    # No need to sort here for quiescence, as we explore all captures
-
-    for move in capture_moves:
-        sim_tiles = [row[:] for row in tiles]
-        sim_blanks = blanks.copy()
-        sim_rack_player = rack_player[:]
-        sim_rack_opponent = rack_opponent[:]
-        
-        newly_placed_details = move.get('newly_placed', [])
-        move_blanks_coords = move.get('blanks', set())
-        move_score = move.get('score', 0)
-
-        temp_rack = sim_rack_player[:]
-        valid_placement = True
-        for r_np, c_np, letter_np in newly_placed_details:
-            if 0 <= r_np < GRID_SIZE_C and 0 <= c_np < GRID_SIZE_C:
-                sim_tiles[r_np][c_np] = letter_np
-                if (r_np, c_np) in move_blanks_coords:
-                    sim_blanks.add((r_np, c_np))
-                    if ' ' in temp_rack: temp_rack.remove(' ')
-                    else: valid_placement = False; break
-                else:
-                    if letter_np in temp_rack: temp_rack.remove(letter_np)
-                    else: valid_placement = False; break
-            else: valid_placement = False; break
-        
-        if not valid_placement: continue
-
-        sim_rack_player = temp_rack
-        
-        # Recursive call to quiescence_search for the opponent
-        value, subsequent_sequence = quiescence_search(
-            sim_rack_opponent, sim_rack_player, sim_tiles, sim_blanks, board,
-            -(current_score_diff + move_score), -beta, -alpha, transposition_table
-        )
-        value = -value
-
-        if value >= beta:
-            transposition_table[state_key] = (beta, [])
-            return beta, []
-        alpha = max(alpha, value)
-
-    transposition_table[state_key] = (alpha, [])
-    return alpha, []
 
 
 
@@ -2419,11 +2325,11 @@ cdef tuple quiescence_search(list rack_player, list rack_opponent, list tiles, s
 @cython.wraparound(False)
 cpdef tuple negamax_endgame(list rack_player, list rack_opponent, list tiles, set blanks, list board,
                             int current_score_diff, float alpha, float beta, int depth, int pass_count,
-                            int max_depth, int search_depth_limit, dict transposition_table, bint is_silent_batch_run_param=False):
+                            dict transposition_table, bint is_silent_batch_run_param=False):
     """
-    Negamax solver for the endgame (empty bag) with depth limit and transposition table. (Cythonized)
+    Negamax solver for the endgame (empty bag) with transposition table. This version searches to a terminal node.
     """
-    cdef float heuristic_score, value, best_value
+    cdef float value, best_value
     cdef int final_diff, move_index, sim_pass_count, move_score
     cdef list possible_moves, playout_moves, other_moves, ordered_moves, best_sequence, subsequent_sequence
     cdef list sim_tiles, sim_rack_player, sim_rack_opponent, temp_rack, newly_placed_details
@@ -2449,12 +2355,7 @@ cpdef tuple negamax_endgame(list rack_player, list rack_opponent, list tiles, se
     if state_key in transposition_table:
         return transposition_table[state_key]
 
-    # --- MODIFICATION START: Call Quiescence Search at depth limit ---
-    if depth >= search_depth_limit:
-        value, _ = quiescence_search(rack_player, rack_opponent, tiles, blanks, board, current_score_diff, alpha, beta, transposition_table)
-        return value, []
-    # --- MODIFICATION END ---
-
+    # Base case: Game is over
     if not rack_player or not rack_opponent or pass_count >= 6:
         final_diff = calculate_endgame_score_diff(rack_player, rack_opponent, current_score_diff)
         transposition_table[state_key] = (final_diff, [])
@@ -2506,7 +2407,7 @@ cpdef tuple negamax_endgame(list rack_player, list rack_opponent, list tiles, se
             sim_pass_count += 1
             value, subsequent_sequence = negamax_endgame(
                 sim_rack_opponent, sim_rack_player, sim_tiles, sim_blanks, board,
-                -sim_score_diff, -beta, -alpha, depth + 1, sim_pass_count, max_depth, search_depth_limit,
+                -sim_score_diff, -beta, -alpha, depth + 1, sim_pass_count,
                 transposition_table, True)
             value = -value
         else:
@@ -2545,7 +2446,7 @@ cpdef tuple negamax_endgame(list rack_player, list rack_opponent, list tiles, se
 
             value, subsequent_sequence = negamax_endgame(
                 sim_rack_opponent, sim_rack_player, sim_tiles, sim_blanks, board,
-                -sim_score_diff, -beta, -alpha, depth + 1, sim_pass_count, max_depth, search_depth_limit,
+                -sim_score_diff, -beta, -alpha, depth + 1, sim_pass_count,
                 transposition_table, True)
             value = -value
 
@@ -2567,20 +2468,18 @@ cpdef tuple negamax_endgame(list rack_player, list rack_opponent, list tiles, se
 
 
 
-# In ai_engine.pyx
-
 cpdef object solve_endgame(list rack_player, list opponent_rack, list tiles, set blanks, list board, int current_score_diff, bint is_silent_batch_run_param=False):
     """
-    Top-level function to initiate the endgame solver using iterative deepening.
+    Top-level function to initiate the endgame solver.
     Returns a tuple: (best_move_object, list_of_formatted_result_strings)
     """
     cdef list initial_tiles_board_state, initial_rack_player_state, initial_rack_opponent_state
-    cdef list possible_ai_first_moves, candidate_first_moves, evaluated_lines, best_sequence_from_last_depth
+    cdef list possible_ai_first_moves, candidate_first_moves, evaluated_lines
     cdef list sim_tiles_after_ai_1, sim_rack_player_after_ai_1, sim_rack_opponent_after_ai_1, temp_rack_player_sim, newly_placed, opponent_sub_sequence, full_move_sequence_for_this_line
     cdef set initial_blanks_board_state, sim_blanks_after_ai_1, move_blanks
-    cdef int search_depth_limit, max_possible_depth, actual_search_depth, sim_pass_count_for_opp, move_score, sim_score_diff_after_ai_1
-    cdef int i, rank, num_to_print, current_depth
-    cdef float opp_perspective_score_diff, ai_final_score_diff_for_this_line, last_printed_score, current_score
+    cdef int max_possible_depth, sim_pass_count_for_opp, move_score, sim_score_diff_after_ai_1
+    cdef int i, rank, num_to_print
+    cdef float opp_perspective_score_diff, ai_final_score_diff_for_this_line, last_printed_score, current_score, prelim_equity
     cdef bint valid_placement_sim
     cdef object ai_first_move_obj, line_data, m
     cdef str sequence_str_parts_str
@@ -2595,9 +2494,7 @@ cpdef object solve_endgame(list rack_player, list opponent_rack, list tiles, set
     initial_rack_opponent_state = opponent_rack[:]
     initial_score_diff_state = current_score_diff
 
-    search_depth_limit = 6
     max_possible_depth = len(initial_rack_player_state) + len(initial_rack_opponent_state)
-    actual_search_depth = min(search_depth_limit, max_possible_depth)
 
     possible_ai_first_moves = generate_all_moves_gaddag(
         initial_rack_player_state, initial_tiles_board_state, board, initial_blanks_board_state,
@@ -2606,103 +2503,85 @@ cpdef object solve_endgame(list rack_player, list opponent_rack, list tiles, set
     if possible_ai_first_moves is None:
         possible_ai_first_moves = []
 
-    # --- MODIFICATION START: Iterative Deepening Implementation ---
+    # Enhanced Move Ordering for the first level to improve alpha-beta pruning
+    for m in possible_ai_first_moves:
+        prelim_equity = m.get('score', 0) + evaluate_leave(m.get('leave', []), True)
+        m['prelim_equity'] = prelim_equity
+    
+    possible_ai_first_moves.sort(key=_sort_key_endgame_equity, reverse=True)
+
+    candidate_first_moves = possible_ai_first_moves + ["PASS"]
+    if not candidate_first_moves:
+        return "PASS", []
+
     transposition_table = {}
-    best_sequence_from_last_depth = []
     evaluated_lines = []
 
-    for current_depth in range(1, actual_search_depth + 1):
-        # Use the best move from the previous depth to guide the search for this depth
-        if best_sequence_from_last_depth:
-            best_move_from_last_iter = best_sequence_from_last_depth[0]
-            # Prioritize the best move found so far
-            candidate_first_moves = [best_move_from_last_iter] + \
-                                    [m for m in possible_ai_first_moves if m != best_move_from_last_iter] + \
-                                    ["PASS"]
-        else:
-            candidate_first_moves = possible_ai_first_moves + ["PASS"]
+    for ai_first_move_obj in candidate_first_moves:
+        sim_tiles_after_ai_1 = [row[:] for row in initial_tiles_board_state]
+        sim_blanks_after_ai_1 = initial_blanks_board_state.copy()
+        sim_rack_player_after_ai_1 = initial_rack_player_state[:]
+        sim_rack_opponent_after_ai_1 = initial_rack_opponent_state[:]
+        sim_score_diff_after_ai_1 = initial_score_diff_state
+        sim_pass_count_for_opp = 0
 
-        if not candidate_first_moves:
-            return "PASS", []
-
-        evaluated_lines_for_this_depth = []
-
-        for ai_first_move_obj in candidate_first_moves:
-            sim_tiles_after_ai_1 = [row[:] for row in initial_tiles_board_state]
-            sim_blanks_after_ai_1 = initial_blanks_board_state.copy()
-            sim_rack_player_after_ai_1 = initial_rack_player_state[:]
-            sim_rack_opponent_after_ai_1 = initial_rack_opponent_state[:]
-            sim_score_diff_after_ai_1 = initial_score_diff_state
+        if ai_first_move_obj == "PASS":
+            sim_pass_count_for_opp = 1
+        elif isinstance(ai_first_move_obj, dict):
             sim_pass_count_for_opp = 0
+            newly_placed = ai_first_move_obj.get('newly_placed', [])
+            move_blanks = ai_first_move_obj.get('blanks', set())
+            move_score = ai_first_move_obj.get('score', 0)
 
-            if ai_first_move_obj == "PASS":
-                sim_pass_count_for_opp = 1
-            elif isinstance(ai_first_move_obj, dict):
-                sim_pass_count_for_opp = 0
-                newly_placed = ai_first_move_obj.get('newly_placed', [])
-                move_blanks = ai_first_move_obj.get('blanks', set())
-                move_score = ai_first_move_obj.get('score', 0)
+            valid_placement_sim = True
+            temp_rack_player_sim = sim_rack_player_after_ai_1[:]
+            for r, c, letter in newly_placed:
+                if 0 <= r < GRID_SIZE_C and 0 <= c < GRID_SIZE_C:
+                    sim_tiles_after_ai_1[r][c] = letter
+                    if (r, c) in move_blanks:
+                        sim_blanks_after_ai_1.add((r,c))
+                        if ' ' in temp_rack_player_sim: temp_rack_player_sim.remove(' ')
+                        else: valid_placement_sim = False; break
+                    else:
+                        if letter in temp_rack_player_sim: temp_rack_player_sim.remove(letter)
+                        else: valid_placement_sim = False; break
+                else: valid_placement_sim = False; break
 
-                valid_placement_sim = True
-                temp_rack_player_sim = sim_rack_player_after_ai_1[:]
-                for r, c, letter in newly_placed:
-                    if 0 <= r < GRID_SIZE_C and 0 <= c < GRID_SIZE_C:
-                        sim_tiles_after_ai_1[r][c] = letter
-                        if (r, c) in move_blanks:
-                            sim_blanks_after_ai_1.add((r,c))
-                            if ' ' in temp_rack_player_sim: temp_rack_player_sim.remove(' ')
-                            else: valid_placement_sim = False; break
-                        else:
-                            if letter in temp_rack_player_sim: temp_rack_player_sim.remove(letter)
-                            else: valid_placement_sim = False; break
-                    else: valid_placement_sim = False; break
-
-                if not valid_placement_sim:
-                    continue
-
-                sim_rack_player_after_ai_1 = temp_rack_player_sim
-                sim_score_diff_after_ai_1 += move_score
-            else:
+            if not valid_placement_sim:
                 continue
 
-            opp_perspective_score_diff, opponent_sub_sequence = negamax_endgame(
-                sim_rack_opponent_after_ai_1,
-                sim_rack_player_after_ai_1,
-                sim_tiles_after_ai_1,
-                sim_blanks_after_ai_1,
-                board,
-                -sim_score_diff_after_ai_1,
-                -1000000.0, 1000000.0,
-                depth=1,
-                pass_count=sim_pass_count_for_opp,
-                max_depth=max_possible_depth,
-                search_depth_limit=current_depth, # Use the current iteration's depth
-                transposition_table=transposition_table,
-                is_silent_batch_run_param=True
-            )
+            sim_rack_player_after_ai_1 = temp_rack_player_sim
+            sim_score_diff_after_ai_1 += move_score
+        else:
+            continue
 
-            ai_final_score_diff_for_this_line = -opp_perspective_score_diff
-            full_move_sequence_for_this_line = [ai_first_move_obj] + opponent_sub_sequence
+        opp_perspective_score_diff, opponent_sub_sequence = negamax_endgame(
+            sim_rack_opponent_after_ai_1,
+            sim_rack_player_after_ai_1,
+            sim_tiles_after_ai_1,
+            sim_blanks_after_ai_1,
+            board,
+            -sim_score_diff_after_ai_1,
+            -1000000.0, 1000000.0,
+            depth=1,
+            pass_count=sim_pass_count_for_opp,
+            transposition_table=transposition_table,
+            is_silent_batch_run_param=True
+        )
 
-            evaluated_lines_for_this_depth.append({
-                'score_diff': ai_final_score_diff_for_this_line,
-                'sequence': full_move_sequence_for_this_line
-            })
+        ai_final_score_diff_for_this_line = -opp_perspective_score_diff
+        full_move_sequence_for_this_line = [ai_first_move_obj] + opponent_sub_sequence
 
-        # After evaluating all first moves for this depth, sort the results
-        evaluated_lines_for_this_depth.sort(key=_sort_key_solve_endgame, reverse=True)
-        
-        # Store the best sequence found at this depth to guide the next iteration
-        if evaluated_lines_for_this_depth:
-            best_sequence_from_last_depth = evaluated_lines_for_this_depth[0]['sequence']
-        
-        # The final result is the one from the deepest search completed
-        evaluated_lines = evaluated_lines_for_this_depth
-    # --- MODIFICATION END ---
+        evaluated_lines.append({
+            'score_diff': ai_final_score_diff_for_this_line,
+            'sequence': full_move_sequence_for_this_line
+        })
+
+    evaluated_lines.sort(key=_sort_key_solve_endgame, reverse=True)
 
     formatted_lines_for_gui = []
     if evaluated_lines:
-        print(f"Top Endgame Sequences Found (Score Diff for P1, Depth Limit: {actual_search_depth}):")
+        print(f"Top Endgame Sequences Found (Score Diff for P1, Full Depth Search):")
         
         num_to_print = 0
         last_printed_score = -999999.0
