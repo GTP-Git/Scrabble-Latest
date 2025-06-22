@@ -1,8 +1,11 @@
 # ai_engine.pyx
 
-#ai_engine_pyx - AW - 22JUN25
+#ai_engine_pyx - AX - 22JUN25
 #Endgame Batch mode implementation
-
+#Working in general, but still need program flow improvements
+#Correct/incorrect msg not working properly
+#Solutions button unresponsive
+#Pass is showing as best move when demonstrably not
 
 
 
