@@ -2,8 +2,12 @@
 
 
 #python
-#Scrabble AW
+#Scrabble AX
 #Endgame Batch mode implementation
+#Working in general, but still need program flow improvements
+#Correct/incorrect msg not working properly
+#Solutions button unresponsive
+#Pass is showing as best move when demonstrably not
 
 #22JUN25
 
@@ -7380,6 +7384,32 @@ def process_game_events(state, drawn_rects):
             break
 
         if event.type == pygame.MOUSEBUTTONDOWN:
+            x, y = event.pos
+
+            # --- MODIFICATION START: Handle Solutions button click with high priority ---
+            solutions_button_rect = drawn_rects.get('solutions_button_rect')
+            if solutions_button_rect and solutions_button_rect.collidepoint(x, y):
+                if state.get('practice_mode') == 'endgame':
+                    # Close other dialogs for a clean state
+                    state['hinting'] = False
+                    state['showing_all_words'] = False
+                    state = clear_current_preview(state)
+
+                    solution_sequence = state.get('initial_game_config', {}).get('endgame_practice_solution', [])
+                    if solution_sequence:
+                        formatted_lines = []
+                        for i, move_obj in enumerate(solution_sequence):
+                            turn_indicator = f"{i // 2 + 1}. " if i % 2 == 0 else ""
+                            move_str = ai_engine.format_single_move_for_print(move_obj, True)
+                            formatted_lines.append(f"{turn_indicator}{move_str}")
+                        
+                        show_endgame_results_dialog(formatted_lines, state, "Puzzle Solution")
+                    else:
+                        show_message_dialog("No solution sequence found for this puzzle.", "Error")
+                
+                continue # Event handled, restart loop
+            # --- MODIFICATION END ---
+
             word_lookup_button_in_game_rect = drawn_rects.get('word_lookup_button_in_game_rect')
             
             if state['showing_practice_end_dialog']: 
@@ -8924,6 +8954,7 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
         hint_dialog_main_rect = pygame.Rect(hint_dialog_x, hint_dialog_y, hint_dialog_width, hint_dialog_height)
 
         if play_button_rect_hint and play_button_rect_hint.collidepoint(x, y) and not is_play_button_disabled and not state.get('replay_mode') and not state.get('is_loaded_game') and \
+           state.get('practice_mode') != 'endgame' and \
            selected_hint_index is not None and selected_hint_index < len(hint_moves):
             clicked_in_active_dialog = True
             state = clear_current_preview(state)
@@ -9067,6 +9098,7 @@ def _handle_mouse_down_hint_or_all_words_dialog(event, state, drawn_rects):
         is_loaded_or_replay = state.get('replay_mode', False)
 
         if all_words_play_rect and all_words_play_rect.collidepoint(x, y) and not is_play_disabled_in_all_words and not state.get('replay_mode') and not state.get('is_loaded_game') and \
+           state.get('practice_mode') != 'endgame' and \
            selected_hint_index is not None and selected_hint_index < len(current_moves_for_all_words):
             clicked_in_active_dialog = True
             state = clear_current_preview(state)
@@ -9441,6 +9473,83 @@ def _handle_keydown_typing_on_board(event, state):
 
     elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER) and state['typing']:
         if state['word_positions']:
+            if state.get('practice_mode') == 'endgame':
+                newly_placed_details = [(r_wp_val, c_wp_val, l_wp_val) for r_wp_val, c_wp_val, l_wp_val in state['word_positions']]
+                
+                solution_sequence = state.get('initial_game_config', {}).get('endgame_practice_solution', [])
+                turn_index_in_solution = len(state.get('move_history', []))
+
+                is_move_correct = False # Assume incorrect
+
+                if turn_index_in_solution < len(solution_sequence):
+                    correct_move_obj = solution_sequence[turn_index_in_solution]
+                    
+                    # --- MODIFICATION START: Check if the solution is a dictionary before comparing ---
+                    if isinstance(correct_move_obj, dict):
+                        human_placed_sig = tuple(sorted(tuple(pos) for pos in newly_placed_details))
+                        correct_placed_sig = tuple(sorted(tuple(pos) for pos in correct_move_obj.get('newly_placed', [])))
+                        if human_placed_sig == correct_placed_sig:
+                            is_move_correct = True
+                    # If correct_move_obj is "PASS", is_move_correct remains False, which is correct for a typed play.
+                    # --- MODIFICATION END ---
+
+                if is_move_correct:
+                    # Correct move! Finalize it.
+                    score_val_play = correct_move_obj.get('score', 0)
+                    state['scores'][state['turn']-1] += score_val_play
+                    state['last_played_highlight_coords'] = set((r_lp, c_lp) for r_lp, c_lp, _ in newly_placed_details)
+                    
+                    # Finalize rack and bag changes (bag should be empty)
+                    num_to_draw = len(newly_placed_details)
+                    drawn_tiles = [state['bag'].pop() for _ in range(num_to_draw) if state['bag']]
+                    state['racks'][state['turn']-1].extend(drawn_tiles)
+                    
+                    # Add to move history
+                    move_data = {
+                        'player': state['turn'], 'move_type': 'place', 'rack': state['original_rack'], 
+                        'score': score_val_play, 'word': correct_move_obj.get('word', 'N/A'), 
+                        'positions': correct_move_obj.get('positions', []), 
+                        'blanks': set(state['blanks']), 'drawn': drawn_tiles, 
+                        'coord': correct_move_obj.get('coord', '?'), 
+                        'word_with_blanks': correct_move_obj.get('word_with_blanks', ''), 
+                        'is_bingo': correct_move_obj.get('is_bingo', False),
+                        'newly_placed': newly_placed_details,
+                        'start': correct_move_obj.get('start', (0,0)), 
+                        'direction': correct_move_obj.get('direction', 'H'),
+                        'tiles_played_from_rack': correct_move_obj.get('tiles_played_from_rack', []),
+                        'leave': correct_move_obj.get('leave', [])
+                    }
+                    state['move_history'].append(move_data)
+                    state['human_played'] = True
+                    
+                    # Set flag to pause for feedback
+                    state['paused_for_endgame_feedback'] = True
+                    state['last_move_score_for_feedback'] = score_val_play
+
+                else:
+                    # Incorrect move. Revert and show message.
+                    show_message_dialog("Incorrect move. Try again.", "Incorrect")
+                    if state['original_tiles'] and state['original_rack']:
+                        for r_wp_revert, c_wp_revert, _ in state['word_positions']:
+                            state['tiles'][r_wp_revert][c_wp_revert] = state['original_tiles'][r_wp_revert][c_wp_revert]
+                        state['racks'][state['turn']-1] = state['original_rack'][:]
+                        state['blanks'] = state.get('original_blanks_before_typing', set()).copy()
+                
+                # Reset typing state regardless of correct/incorrect
+                state['typing'] = False
+                state['word_positions'] = []
+                state['original_tiles'] = None
+                state['original_rack'] = None
+                state['selected_square'] = None
+                state['current_r'] = None
+                state['current_c'] = None
+                state['typing_direction'] = None
+                state['typing_start'] = None
+                state['original_blanks_before_typing'] = None
+                
+                return state # IMPORTANT: Return here to bypass standard play logic.
+
+            # Standard game logic continues here if not in endgame practice mode
             newly_placed_details = [(r_wp_val, c_wp_val, l_wp_val) for r_wp_val, c_wp_val, l_wp_val in state['word_positions']]
             initial_rack_size_for_play = len(state['original_rack']) if state['original_rack'] else 0
             temp_tiles_for_validation = [row[:] for row in state['tiles']]
@@ -9703,11 +9812,21 @@ def _handle_keydown_typing_on_board(event, state):
                     state['paused_for_power_tile'] = False
                     state['paused_for_bingo_practice'] = False
                     
+                    is_current_player_human = not state['is_ai'][state['turn'] - 1]
+                    next_player_idx = (3 - state['turn']) - 1
+                    is_next_player_ai = state['is_ai'][next_player_idx] if 0 <= next_player_idx < len(state['is_ai']) else False
+                    
+                    show_congrats_dialog = False
+                    if is_current_player_human and is_next_player_ai:
+                        if state['practice_mode'] is None or state['practice_mode'] in ["only_fives"]:
+                            show_congrats_dialog = True
+                    
+                    if show_congrats_dialog:
+                        show_message_dialog(f"Nice play! You scored {score_val_play} points.", "Good Move!")
+                    
                     if not (state['practice_mode'] == "eight_letter" and state['practice_solved']): 
                         state['turn'] = 3 - state['turn']
                 
-                # --- MODIFICATION START: This block now runs unconditionally after a valid play ---
-                # This is the fix. It resets the typing state so it doesn't linger into the next puzzle.
                 state['typing'] = False
                 state['word_positions'] = []
                 state['original_tiles'] = None
@@ -9718,7 +9837,6 @@ def _handle_keydown_typing_on_board(event, state):
                 state['typing_direction'] = None
                 state['typing_start'] = None
                 state['original_blanks_before_typing'] = None
-                # --- MODIFICATION END ---
         else:
             state['typing'] = False
             state['selected_square'] = None
@@ -10554,7 +10672,9 @@ def draw_all_words_dialog(moves, selected_index, current_scroll_offset, dialog_x
     play_button_rect = pygame.Rect(buttons_x_abs, button_y_abs, BUTTON_WIDTH, BUTTON_HEIGHT)
     ok_button_rect = pygame.Rect(buttons_x_abs + BUTTON_WIDTH + BUTTON_GAP, button_y_abs, BUTTON_WIDTH, BUTTON_HEIGHT)
 
-    play_button_color = GRAYED_OUT_COLOR if is_play_disabled or is_loaded_or_replay_mode else BUTTON_COLOR
+    # Disable Play button in endgame practice, forcing user to type the move
+    is_endgame_practice = state.get('practice_mode') == 'endgame'
+    play_button_color = GRAYED_OUT_COLOR if is_play_disabled or is_loaded_or_replay_mode or is_endgame_practice else BUTTON_COLOR
     pygame.draw.rect(screen, play_button_color, play_button_rect)
     pygame.draw.rect(screen, BUTTON_COLOR, ok_button_rect)
 
@@ -10723,6 +10843,17 @@ def draw_game_screen(screen, state):
             lookup_text = button_font.render("Lookup", True, BLACK); lookup_text_rect = lookup_text.get_rect(center=word_lookup_button_in_game_rect.center); screen.blit(lookup_text, lookup_text_rect)
             current_button_y = word_lookup_button_in_game_rect.bottom + BUTTON_GAP
 
+            solutions_button_rect = None
+            if practice_mode == 'endgame':
+                solutions_button_rect = pygame.Rect(top_button_x, current_button_y, OPTIONS_WIDTH, BUTTON_HEIGHT)
+                hover_solutions = solutions_button_rect.collidepoint(pygame.mouse.get_pos())
+                color_solutions = BUTTON_HOVER if hover_solutions else BUTTON_COLOR
+                pygame.draw.rect(screen, color_solutions, solutions_button_rect)
+                solutions_text = button_font.render("Solutions", True, BLACK)
+                solutions_text_rect = solutions_text.get_rect(center=solutions_button_rect.center)
+                screen.blit(solutions_text, solutions_text_rect)
+                current_button_y = solutions_button_rect.bottom + BUTTON_GAP
+
         if is_human_turn_or_paused_practice:
             relevant_rand_rect = p1_rand_rect if turn == 1 else p2_rand_rect
             if relevant_rand_rect:
@@ -10870,6 +11001,11 @@ def check_and_handle_game_over(state):
     MODIFIED: Ensures ai_simulation_parameters and bbb settings are saved in SGS for batch games.
     """
     global DEV_VISUALIZE_BATCH_ENABLED_SESSION 
+
+    # --- MODIFICATION START: Add a guard clause to skip this check in endgame practice mode ---
+    if state.get('practice_mode') == "endgame":
+        return state # In this mode, the game ends only when the puzzle is solved.
+    # --- MODIFICATION END ---
 
     is_silent_run = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
 
@@ -12065,6 +12201,55 @@ def save_sgs_batch(sgs_data_buffer, is_silent_run):
 
 
 
+# Add this new function anywhere before execute_game_session in Scrabble Game.py
+
+def handle_endgame_practice_flow(state):
+    """
+    Handles the specific turn flow for Endgame Practice mode, including showing
+    feedback dialogs and triggering the AI's response from the solution.
+    """
+    if state.get('practice_mode') == 'endgame' and state.get('paused_for_endgame_feedback'):
+        # Show the feedback dialog first
+        score = state.get('last_move_score_for_feedback', 0)
+        show_message_dialog(f"Correct! You scored {score} points.", "Good Move!")
+
+        # Now that the dialog is closed, proceed with the AI's move
+        solution_sequence = state.get('initial_game_config', {}).get('endgame_practice_solution', [])
+        turn_index_in_solution = len(state.get('move_history', [])) - 1
+        
+        # The AI's move is the next one in the sequence
+        opponent_turn_index = turn_index_in_solution + 1
+        if opponent_turn_index < len(solution_sequence):
+            opponent_move = solution_sequence[opponent_turn_index]
+            
+            # Use play_hint_move to execute the opponent's move
+            next_turn, drawn, newly_placed, consumed = play_hint_move(
+                opponent_move, state['tiles'], state['racks'],
+                state['blanks'], state['scores'],
+                state['turn'], state['bag'],
+                state['board'], state['is_ai'],
+                state['practice_mode'], is_silent_batch_run_param=True
+            )
+            
+            # Update history for the opponent's move
+            opponent_move.update({
+                'player': state['turn'], 'move_type': 'place',
+                'rack': state['racks'][state['turn']-1][:],
+                'drawn': drawn, 'newly_placed': newly_placed,
+                'tiles_played_from_rack': consumed
+            })
+            state['move_history'].append(opponent_move)
+            state['turn'] = next_turn
+        
+        # Reset flags
+        state['paused_for_endgame_feedback'] = False
+        state['human_played'] = False
+
+    return state
+
+
+
+
 
 
 def execute_game_session(is_initialized_from_outer_loop_param):
@@ -12230,19 +12415,18 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                     if current_state_dict.get('return_to_mode_selection', False): _return_to_mode_selection_internal = True
                     break
                 
-                current_state_dict['current_preview_score'] = update_preview_score(current_state_dict)
                 current_state_dict = handle_turn_start_updates(current_state_dict)
                 current_state_dict = handle_practice_messages(current_state_dict)
                 current_state_dict = handle_practice_restart(current_state_dict)
+                
+                # --- NEW: Handle the endgame practice flow after other updates ---
+                current_state_dict = handle_endgame_practice_flow(current_state_dict)
+                # --- END NEW ---
+
                 if not current_state_dict['running_inner']:
                     if current_state_dict.get('batch_stop_requested', False): _module_level_batch_stop_requested_internal = True
                     if current_state_dict.get('return_to_mode_selection', False): _return_to_mode_selection_internal = True
                     break
-
-                # --- MODIFICATION START: Add Endgame Practice Logic ---
-                if current_state_dict.get('practice_mode') == 'endgame' and current_state_dict.get('human_played'):
-                    solution_sequence = current_state_dict.get('initial_game_config', {}).get('endgame_practice_solution', [])
-                    turn_index_in_solution = len(current_state_dict.get('move_history', [])) -1
 
                     if 0 <= turn_index_in_solution < len(solution_sequence):
                         correct_move_obj = solution_sequence[turn_index_in_solution]
@@ -12253,30 +12437,10 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                         correct_placed_sig = tuple(sorted(tuple(pos) for pos in correct_move_obj.get('newly_placed', [])))
 
                         if human_placed_sig == correct_placed_sig:
-                            show_message_dialog("Correct!", "Good Move")
-                            current_state_dict['human_played'] = False # Reset for next human turn
-
-                            # Check if there's an opponent move to auto-play
-                            opponent_turn_index = turn_index_in_solution + 1
-                            if opponent_turn_index < len(solution_sequence):
-                                opponent_move = solution_sequence[opponent_turn_index]
-                                # Use play_hint_move to execute the opponent's move
-                                next_turn, drawn, newly_placed, consumed = play_hint_move(
-                                    opponent_move, current_state_dict['tiles'], current_state_dict['racks'],
-                                    current_state_dict['blanks'], current_state_dict['scores'],
-                                    current_state_dict['turn'], current_state_dict['bag'],
-                                    current_state_dict['board'], current_state_dict['is_ai'],
-                                    current_state_dict['practice_mode'], is_silent_batch_run_param=True
-                                )
-                                # Update history for the opponent's move
-                                opponent_move.update({
-                                    'player': current_state_dict['turn'], 'move_type': 'place',
-                                    'rack': current_state_dict['racks'][current_state_dict['turn']-1][:],
-                                    'drawn': drawn, 'newly_placed': newly_placed,
-                                    'tiles_played_from_rack': consumed
-                                })
-                                current_state_dict['move_history'].append(opponent_move)
-                                current_state_dict['turn'] = next_turn
+                            # Set a flag to pause the game and show feedback.
+                            # The main loop will handle the dialog and the AI's subsequent move.
+                            current_state_dict['paused_for_endgame_feedback'] = True
+                            current_state_dict['last_move_score_for_feedback'] = last_human_move.get('score', 0)
                         else:
                             show_message_dialog("Incorrect move. Try again.", "Incorrect")
                             # Revert the human's move
@@ -12296,13 +12460,31 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                             # Restore rack
                             current_state_dict['racks'][last_move['player']-1] = last_move['rack'][:]
                             current_state_dict['human_played'] = False # Reset flag
-                    
-                    # Check if the puzzle is complete
-                    if len(current_state_dict.get('move_history', [])) >= len(solution_sequence):
-                        show_message_dialog("Puzzle Solved!", "Congratulations")
-                        current_state_dict['showing_practice_end_dialog'] = True
-                        current_state_dict['practice_end_message'] = "Endgame Puzzle Solved!"
-                # --- MODIFICATION END ---
+
+                            # Revert the human's move
+                            last_move = current_state_dict['move_history'].pop()
+                            current_state_dict['scores'][last_move['player']-1] -= last_move['score']
+                            
+                            # Restore tiles on board
+                            for r, c, _ in last_move.get('newly_placed', []):
+                                current_state_dict['tiles'][r][c] = ''
+                            
+                            # Restore blanks
+                            blanks_in_move = last_move.get('blanks', set())
+                            newly_placed_coords = set((r,c) for r,c,_ in last_move.get('newly_placed',[]))
+                            blanks_to_remove = blanks_in_move.intersection(newly_placed_coords)
+                            current_state_dict['blanks'].difference_update(blanks_to_remove)
+
+                            # Restore rack
+                            current_state_dict['racks'][last_move['player']-1] = last_move['rack'][:]
+                            current_state_dict['human_played'] = False # Reset flag
+                            
+                            # Check if the puzzle is complete
+                            if len(current_state_dict.get('move_history', [])) >= len(solution_sequence):
+                                show_message_dialog("Puzzle Solved!", "Congratulations")
+                                current_state_dict['showing_practice_end_dialog'] = True
+                                current_state_dict['practice_end_message'] = "Endgame Puzzle Solved!"
+                        # --- MODIFICATION END ---
 
                 # 3. Check for game over condition
                 if not current_state_dict.get('typing', False):
