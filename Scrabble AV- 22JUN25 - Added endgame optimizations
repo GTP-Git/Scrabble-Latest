@@ -1,12 +1,12 @@
 
 
 
-
 #python
 #Scrabble AV
 #Added endgame optimizations
+#Fixed truncated endgame search depth
 
-#21JUN25
+#22JUN25
 
 
 
@@ -12498,7 +12498,7 @@ if __name__ == "__main__":
 
 
     
-    random.seed(12345)
+    #random.seed(12345)
 
     main_called_for_initial_mode_selection = False
     running_program = True
