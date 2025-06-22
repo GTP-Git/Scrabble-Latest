@@ -12340,7 +12340,7 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                             no_blanks_on_racks = False
                         total_tiles_on_racks = len(racks_for_trigger[0]) + len(racks_for_trigger[1])
                     
-                    if bag_len_for_trigger == 0 and no_blanks_on_racks and total_tiles_on_racks <= 6:
+                    if bag_len_for_trigger == 0 and no_blanks_on_racks and total_tiles_on_racks <= 8:
                         print(f"--- Endgame Triggered in Game {current_batch_game_num} (Turn {len(move_history)}) ---")
                         
                         # Gather the current state for the puzzle
