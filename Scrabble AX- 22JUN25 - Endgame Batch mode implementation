@@ -7,8 +7,8 @@
 #Working in general, but still need program flow improvements
 #Correct/incorrect msg not working properly
 #SFixed solutions button unresponsive
-#Pass is showing as best move when demonstrably not
-#UNKNOWN MOVE bug still happening
+#FIXED: UNKNOWN MOVE
+
 
 #22JUN25
 
@@ -1267,13 +1267,17 @@ def load_game_sgs(filename, is_silent_batch_run_param=False): # Added is_silent_
 
 
 
-def save_endgame_puzzle(puzzle_state, solution_sequence, batch_prefix, game_num):
+# In Scrabble Game.py
+
+# This is the full, complete function with no code omitted.
+
+def save_endgame_puzzle(puzzle_state, formatted_solution_lines, batch_prefix, game_num):
     """
     Saves a generated endgame puzzle to a .sge file in the user's Documents folder.
 
     Args:
         puzzle_state (dict): The dictionary containing the board state at the trigger.
-        solution_sequence (list): The list of move dictionaries for the optimal solution.
+        formatted_solution_lines (list): The list of pre-formatted solution strings.
         batch_prefix (str): The prefix for the batch run, for organized naming.
         game_num (int): The number of the game in the batch.
     """
@@ -1288,7 +1292,7 @@ def save_endgame_puzzle(puzzle_state, solution_sequence, batch_prefix, game_num)
         
         puzzle_data = {
             'puzzle_state': puzzle_state,
-            'solution': solution_sequence
+            'formatted_solution': formatted_solution_lines
         }
 
         # Generate a unique filename
@@ -6217,6 +6221,10 @@ def ai_turn(state):
 
 
 
+# In Scrabble Game.py
+
+# This is the full, complete function with no code omitted.
+
 def initialize_game(selected_mode_result, return_data, main_called_flag):
     """
     Initializes the game state based on the selected mode and data.
@@ -6623,7 +6631,6 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
             if practice_mode == "bingo_bango_bongo":
                 print(f"--- initialize_game(): BBB Params for this game: 7L Max Prob={bbb_7l_max_prob_init}, 8L Max Prob={bbb_8l_max_prob_init} ---")
         if active_practice_state_data:
-            # --- MODIFICATION START: Handle endgame practice setup ---
             if practice_mode == "endgame":
                 if not is_silent_run_for_init: print(f"Loading state from endgame puzzle data...")
                 puzzle_data = active_practice_state_data.get("puzzle_data", {})
@@ -6635,21 +6642,73 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                 scores_init = puzzle_state.get("scores", [0, 0])
                 turn = puzzle_state.get("player_to_move", 1)
                 
-                # Set up racks based on who is to move
                 player_to_move_idx = turn - 1
                 opponent_idx = 1 - player_to_move_idx
                 racks_init = [[], []]
                 racks_init[player_to_move_idx] = puzzle_state.get("rack_player_to_move", [])
                 racks_init[opponent_idx] = puzzle_state.get("rack_opponent", [])
                 
-                bag_init = [] # Bag is always empty for endgame puzzles
-                first_play = False # Never the first play in an endgame
+                bag_init = [] 
+                first_play = False 
                 sgs_initial_bag = []
                 
-                # Store the solution sequence in the main state
-                initial_game_config['endgame_practice_solution'] = puzzle_data.get("solution", [])
+                # --- MODIFICATION START: Add fallback for old puzzle files ---
+                formatted_solution = puzzle_data.get("formatted_solution", [])
+                if not formatted_solution:
+                    # Fallback for old puzzle files with raw 'solution' key
+                    raw_solution_sequence = puzzle_data.get("solution", [])
+                    if raw_solution_sequence:
+                        if not is_silent_run_for_init:
+                            print("  (Found old puzzle format, formatting solution on the fly...)")
+                        
+                        # Reconstruct the state to correctly format the end-of-game adjustment string
+                        temp_rack_p1 = puzzle_state.get("rack_player_to_move", [])
+                        temp_rack_o2 = puzzle_state.get("rack_opponent", [])
+                        
+                        sequence_str_parts = []
+                        turn_counter = 1
+                        move_idx_in_seq = 0
+                        pass_count_for_print_sim = 0
+                        
+                        while move_idx_in_seq < len(raw_solution_sequence):
+                            sequence_str_parts.append(f"{turn_counter}. ")
+                            p1_move_obj = raw_solution_sequence[move_idx_in_seq]
+                            sequence_str_parts.append(ai_engine.format_single_move_for_print(p1_move_obj, True))
+                            sequence_str_parts.append(" ")
+
+                            if hasattr(p1_move_obj, 'get'):
+                                temp_rack_p1 = p1_move_obj.get('leave', [])
+                                pass_count_for_print_sim = 0
+                            else: # PASS
+                                pass_count_for_print_sim += 1
+                            move_idx_in_seq += 1
+                            
+                            if move_idx_in_seq < len(raw_solution_sequence):
+                                p2_move_obj = raw_solution_sequence[move_idx_in_seq]
+                                sequence_str_parts.append(ai_engine.format_single_move_for_print(p2_move_obj, True))
+                                sequence_str_parts.append(" ")
+                                
+                                if hasattr(p2_move_obj, 'get'):
+                                    temp_rack_o2 = p2_move_obj.get('leave', [])
+                                    pass_count_for_print_sim = 0
+                                else: # PASS
+                                    pass_count_for_print_sim += 1
+                                move_idx_in_seq += 1
+                            
+                            turn_counter += 1
+
+                        last_player_was_p1 = (len(raw_solution_sequence) % 2 != 0)
+                        end_state_str = ai_engine.format_end_state_for_print(
+                            temp_rack_p1, temp_rack_o2, last_player_was_p1, pass_count_for_print_sim
+                        )
+                        sequence_str_parts.append(end_state_str)
+                        
+                        # The dialog expects a list of strings. For a single solution path, this is a list with one item.
+                        formatted_solution = ["".join(sequence_str_parts)]
+
+                initial_game_config['endgame_practice_solution'] = formatted_solution
+                # --- MODIFICATION END ---
                 is_ai = active_practice_state_data.get("is_ai", [False, True])
-            # --- MODIFICATION END ---
             elif practice_mode: # Existing practice modes
                 if not is_silent_run_for_init: print(f"Loading state from practice_state for mode: {practice_mode}...")
                 board_init = active_practice_state_data["board"]
@@ -7359,6 +7418,10 @@ def _handle_mouse_down_practice_end_dialog(event, state, drawn_rects):
 
 
 
+# In Scrabble Game.py
+
+# This is the full, complete function with no code omitted.
+
 def process_game_events(state, drawn_rects):
     """
     Handles the main event loop, processing user input and system events.
@@ -7396,15 +7459,13 @@ def process_game_events(state, drawn_rects):
                     state['showing_all_words'] = False
                     state = clear_current_preview(state)
 
-                    solution_sequence = state.get('initial_game_config', {}).get('endgame_practice_solution', [])
-                    if solution_sequence:
-                        formatted_lines = []
-                        for i, move_obj in enumerate(solution_sequence):
-                            turn_indicator = f"{i // 2 + 1}. " if i % 2 == 0 else ""
-                            move_str = ai_engine.format_single_move_for_print(move_obj, True)
-                            formatted_lines.append(f"{turn_indicator}{move_str}")
-                        
-                        show_endgame_results_dialog(formatted_lines, state, "Puzzle Solution")
+                    # The solution is now pre-formatted strings
+                    formatted_solution_lines = state.get('initial_game_config', {}).get('endgame_practice_solution', [])
+                    
+                    if formatted_solution_lines:
+                        # The lines are already formatted, just show them.
+                        # The duration string is not available here, so we pass None.
+                        show_endgame_results_dialog(formatted_solution_lines, state, "Puzzle Solution")
                     else:
                         show_message_dialog("No solution sequence found for this puzzle.", "Error")
                 
@@ -7806,7 +7867,7 @@ def _handle_general_mouse_down(event, state, drawn_rects):
 
                 # --- MODIFICATION START: Time the solver call ---
                 start_time = time.perf_counter()
-                _, formatted_lines = ai_engine.solve_endgame(
+                _, formatted_lines, _ = ai_engine.solve_endgame(
                     rack_player, rack_opponent, board_state_tiles, board_state_blanks, 
                     state['board'], score_diff, is_silent_batch_run_param=True
                 )
@@ -12541,7 +12602,7 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                         # Solve the endgame from this position
                         score_diff_for_solve = puzzle_state_to_save['scores'][player_idx] - puzzle_state_to_save['scores'][opponent_idx]
                         
-                        _, _, solution_sequence = ai_engine.solve_endgame(
+                        _, formatted_lines, _ = ai_engine.solve_endgame(
                             puzzle_state_to_save['rack_player_to_move'],
                             puzzle_state_to_save['rack_opponent'],
                             puzzle_state_to_save['tiles'],
@@ -12551,10 +12612,11 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                             is_silent_batch_run_param=True
                         )
                         
-                        # Save the puzzle and solution
-                        if solution_sequence:
+                        # Save the puzzle and the pre-formatted solution lines
+                        if formatted_lines:
                             batch_prefix = initial_game_config.get('batch_filename_prefix', 'UNKNOWN-BATCH')
-                            save_endgame_puzzle(puzzle_state_to_save, solution_sequence, batch_prefix, current_batch_game_num)
+                            save_endgame_puzzle(puzzle_state_to_save, formatted_lines, batch_prefix, current_batch_game_num)
+
                         else:
                             print("  -> Solver returned no sequence. Puzzle not saved.")
                         
