@@ -1,8 +1,7 @@
 # ai_engine.pyx
 
-#ai_engine_pyx - AV - 22JUN25
-#Added endgame optimizations
-#Fixed truncated endgame search depth
+#ai_engine_pyx - AW - 22JUN25
+#Endgame Batch mode implementation
 
 
 
