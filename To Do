@@ -1,15 +1,25 @@
 To-Do List
 
 
--- In Club_DB, add Player contact info (phone number, email)
+-- Racks should be auto-alphabetized in Batch Endgame mode
+
+-- Play Again from the Game Over menu in Batch Endgame practice mode doesn't make sense, and doesn't work, either way.
+
+-- Batch Endgame needs more of a game feel so that the user feels like they are solving the puzzle.
+"Congrats! You picked the right move!" etc.
+
+-- When a Batch Endgame is loaded, game should be playable from that point forward.
+
+-- Add "Hint" feature to Batch Endgames. Different from Solution feature.
+
+-- Could Set Up Plays be a Practice Mode? Can the algo find them? Set them up?
+
+-- Should def populate_dummy_analyzer_data be moved to Cython? It would speed up program startup
 
 -- In 8LB mode, if user guesses incorrect word, correct word should be shown. Maybe also show other
 possbile bingos.
 
--- Batch Endgames...set up batch games that solve for the endgame. Save those results and then when
-Endgame Practice mode is chosen, load one of the already solved endgames for the player to solve.
 
--- Bug where AI exchanged six and only six tiles were on rack, early in game
 
 -- Blank usage is not optimal, Batch game blanks often left on rack at end of game
 
@@ -265,5 +275,14 @@ word among the 5's.
 instead of just printing to the console.
 
 -- AI score in Game Over dialog is float, needs to be int
+
+-- Batch Endgames...set up batch games that solve for the endgame. Save those results and then when
+Endgame Practice mode is chosen, load one of the already solved endgames for the player to solve.
+
+-- Remove Great move! You scored x points! from Only Fives practice mode
+
+-- Bug where AI exchanged six and only six tiles were on rack, early in game
+
+
 
                                                                                                                                                       
