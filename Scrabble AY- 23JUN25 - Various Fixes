@@ -2,17 +2,12 @@
 
 
 #python
-#Scrabble AX
-#Endgame Batch mode implementation
-#Working in general, but still need program flow improvements
-#Correct/incorrect msg not working properly
-#FIXED solutions button unresponsive
-#FIXED: UNKNOWN MOVE
-#FIXED: All Words bug
+#Scrabble AY
+#Fixed incorrect word-finding algo
+#Fixed score preview
 
 
-
-#22JUN25
+#23JUN25
 
 
 
@@ -6516,7 +6511,7 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                     loading_text_surf = ui_font.render("Generating Insights for Loaded Game...", True, BLUE)
                     screen.blit(loading_text_surf, ( (WINDOW_WIDTH - loading_text_surf.get_width()) // 2, (WINDOW_HEIGHT - loading_text_surf.get_height()) // 2))
                     pygame.display.flip()
-                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_batch_run_param=is_silent_run_for_init)
+                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_run_param=is_silent_run_for_init)
             else:
                 insights_data_for_replay = [] 
                 if not is_silent_run_for_init and gaddag_loading_status == 'loading':
@@ -6540,7 +6535,7 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                     loading_text_surf = ui_font.render("Generating Insights...", True, BLUE)
                     screen.blit(loading_text_surf, ( (WINDOW_WIDTH - loading_text_surf.get_width()) // 2, (WINDOW_HEIGHT - loading_text_surf.get_height()) // 2))
                     pygame.display.flip()
-                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_batch_run_param=is_silent_run_for_init)
+                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_run_param=is_silent_run_for_init)
             else:
                 insights_data_for_replay = []
                 if not is_silent_run_for_init and gaddag_loading_status == 'loading':
@@ -9888,11 +9883,11 @@ def _handle_keydown_typing_on_board(event, state):
 
                     show_congrats_dialog = False
                     if is_current_player_human and is_next_player_ai:
-                        if state['practice_mode'] is None or state['practice_mode'] in ["only_fives"]:
+                        if state['practice_mode'] is None:
                             show_congrats_dialog = True
                     
-                    if show_congrats_dialog:
-                        show_message_dialog(f"Nice play! You scored {score_val_play} points.", "Good Move!")
+                    #if show_congrats_dialog:
+                        #show_message_dialog(f"Nice play! You scored {score_val_play} points.", "Good Move!")
                         
                     
                     if not (state['practice_mode'] == "eight_letter" and state['practice_solved']): 
@@ -12706,6 +12701,13 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                 if current_state_dict['game_over_state'] and _local_start_new_game_same_mode_internal:
                      current_state_dict['running_inner'] = False 
                      break
+
+                # --- NEW: Update preview score before drawing ---
+                if current_state_dict.get('preview_score_enabled'):
+                    current_state_dict['current_preview_score'] = update_preview_score(current_state_dict)
+                else:
+                    current_state_dict['current_preview_score'] = 0
+                # --- END NEW ---
 
                 # 4. Draw the screen with the current state
                 if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
