@@ -3,8 +3,8 @@
 
 #python
 #Scrabble AY
-#Fixed incorrect word-finding algo
-#Fixed score preview
+#Fixed incorrect board state and player turn in Endgame practice mode
+#
 
 
 #23JUN25
@@ -2511,6 +2511,9 @@ def is_word_length_allowed(word_len, number_checks):
 
 
 
+# In Scrabble Game.py
+
+# This is the full, complete function with no code omitted.
 def mode_selection_screen():
     """Display and handle the game mode selection screen, including Load Game via a dedicated dialog."""
     print("--- mode_selection_screen() entered ---")
@@ -2956,17 +2959,28 @@ def mode_selection_screen():
                                                 with open(filepath, 'rb') as f_load:
                                                     loaded_puzzle_data = pickle.load(f_load)
                                                 
+                                                # Determine which player is to move from the puzzle data
+                                                puzzle_state_for_ai_check = loaded_puzzle_data.get("puzzle_state", {})
+                                                player_to_move_for_ai_check = puzzle_state_for_ai_check.get("player_to_move", 1)
+                                                
+                                                # Set is_ai so that the player_to_move is the human
+                                                is_ai_for_practice = [True, True]
+                                                if player_to_move_for_ai_check == 1:
+                                                    is_ai_for_practice = [False, True] # P1 is human
+                                                else: # player_to_move is 2
+                                                    is_ai_for_practice = [True, False] # P2 is human
+
                                                 # Set up the practice state from the loaded puzzle
                                                 practice_mode = "endgame"
-                                                selected_mode = MODE_HVH # Or could be HvA if we want AI to play its moves
-                                                player_names = ["Player 1", "Player 2"] # Can be customized later
-                                                human_player = 1 # Assume human plays first
+                                                selected_mode = MODE_HVH
+                                                player_names = ["Player 1", "Player 2"]
+                                                human_player = player_to_move_for_ai_check
                                                 
                                                 practice_state = {
                                                     "puzzle_data": loaded_puzzle_data,
-                                                    "is_ai": [False, True] # P1 is human, P2 is AI to auto-play solution
+                                                    "is_ai": is_ai_for_practice
                                                 }
-                                                print(f"--- mode_selection_screen(): Loaded endgame puzzle '{chosen_puzzle_file}' ---")
+                                                print(f"--- mode_selection_screen(): Loaded endgame puzzle '{chosen_puzzle_file}' for Player {player_to_move_for_ai_check} to solve. ---")
                                                 break # Exit the main selection loop
 
                                             except Exception as e:
@@ -9363,6 +9377,9 @@ def _get_all_word_structures_for_phony_scoring(new_tiles, tiles):
 
 
 
+# In Scrabble Game.py
+
+# This is the full, complete function with no code omitted.
 def _handle_keydown_typing_on_board(event, state):
     """
     Handles KEYDOWN events when a player is actively typing a word on the board.
@@ -9540,22 +9557,20 @@ def _handle_keydown_typing_on_board(event, state):
                     correct_move_obj = solution_sequence[turn_index_in_solution]
                     
                     if isinstance(correct_move_obj, dict):
-                        # --- MODIFICATION START: Use set comparison and add debug prints ---
                         human_placed_set = set(tuple(pos) for pos in newly_placed_details)
                         correct_placed_set = set(tuple(pos) for pos in correct_move_obj.get('newly_placed', []))
 
-                        # This debug block will print to your console when you press Enter
-                        print("\n--- ENDGAME PRACTICE VALIDATION ---")
-                        print(f"  Turn Index in Solution: {turn_index_in_solution}")
-                        print(f"  Human Rack Before Play: {''.join(sorted(state['original_rack']))}")
-                        print(f"  Human's Typed Move (Set): {human_placed_set}")
-                        print(f"  Correct Solution Move (Set): {correct_placed_set}")
-                        print(f"  Sets Match? {human_placed_set == correct_placed_set}")
-                        print("---------------------------------")
+                        if not is_silent_run:
+                            print("\n--- ENDGAME PRACTICE VALIDATION ---")
+                            print(f"  Turn Index in Solution: {turn_index_in_solution}")
+                            print(f"  Human Rack Before Play: {''.join(sorted(state['original_rack']))}")
+                            print(f"  Human's Typed Move (Set): {human_placed_set}")
+                            print(f"  Correct Solution Move (Set): {correct_placed_set}")
+                            print(f"  Sets Match? {human_placed_set == correct_placed_set}")
+                            print("---------------------------------")
 
                         if human_placed_set == correct_placed_set:
                             is_move_correct = True
-                        # --- MODIFICATION END ---
                     
                 if is_move_correct:
                     # Correct move! Finalize it.
@@ -9563,26 +9578,56 @@ def _handle_keydown_typing_on_board(event, state):
                     state['scores'][state['turn']-1] += score_val_play
                     state['last_played_highlight_coords'] = set((r_lp, c_lp) for r_lp, c_lp, _ in newly_placed_details)
                     
+                    # --- MODIFICATION START: Explicitly calculate all history fields ---
+                    # Determine what was consumed and what the leave is
+                    current_leave = state['racks'][state['turn']-1][:]
+                    original_rack_counter = Counter(state['original_rack'])
+                    leave_counter = Counter(current_leave)
+                    consumed_counter = original_rack_counter - leave_counter
+                    tiles_consumed_for_history = list(consumed_counter.elements())
+
                     # Finalize rack and bag changes (bag should be empty)
                     num_to_draw = len(newly_placed_details)
                     drawn_tiles = [state['bag'].pop() for _ in range(num_to_draw) if state['bag']]
                     state['racks'][state['turn']-1].extend(drawn_tiles)
                     
+                    # Calculate coord and word_with_blanks explicitly
+                    start_pos_from_solution = correct_move_obj.get('start', (0,0))
+                    direction_from_solution = correct_move_obj.get('direction', 'H')
+                    coord_for_history = ai_engine.get_coord(start_pos_from_solution, direction_from_solution, is_silent_batch_run_param=True)
+
+                    word_with_blanks_for_history = ""
+                    primary_word_tiles_from_solution = correct_move_obj.get('positions', [])
+                    if primary_word_tiles_from_solution:
+                        word_with_blanks_list = []
+                        newly_placed_coords = set((r, c) for r, c, _ in newly_placed_details)
+                        for wr, wc, w_letter in primary_word_tiles_from_solution:
+                            is_blank_in_word = (wr, wc) in newly_placed_coords and (wr, wc) in state['blanks']
+                            word_with_blanks_list.append(w_letter.lower() if is_blank_in_word else w_letter.upper())
+                        word_with_blanks_for_history = "".join(word_with_blanks_list)
+                    else:
+                        word_with_blanks_for_history = correct_move_obj.get('word_with_blanks', '')
+
                     # Add to move history
                     move_data = {
                         'player': state['turn'], 'move_type': 'place', 'rack': state['original_rack'], 
                         'score': score_val_play, 'word': correct_move_obj.get('word', 'N/A'), 
-                        'positions': correct_move_obj.get('positions', []), 
+                        'positions': primary_word_tiles_from_solution, 
                         'blanks': set(state['blanks']), 'drawn': drawn_tiles, 
-                        'coord': correct_move_obj.get('coord', '?'), 
-                        'word_with_blanks': correct_move_obj.get('word_with_blanks', ''), 
+                        'coord': coord_for_history,
+                        'word_with_blanks': word_with_blanks_for_history,
                         'is_bingo': correct_move_obj.get('is_bingo', False),
                         'newly_placed': newly_placed_details,
-                        'start': correct_move_obj.get('start', (0,0)), 
-                        'direction': correct_move_obj.get('direction', 'H'),
-                        'tiles_played_from_rack': correct_move_obj.get('tiles_played_from_rack', []),
-                        'leave': correct_move_obj.get('leave', [])
+                        'start': start_pos_from_solution, 
+                        'direction': direction_from_solution,
+                        'tiles_played_from_rack': tiles_consumed_for_history,
+                        'leave': current_leave,
+                        'turn_duration': 0.0, # Placeholder
+                        'pool_quality_before_draw': state.get('current_turn_pool_quality_score', 0.0),
+                        'luck_factor': 0.0 # No draw from bag in endgame
                     }
+                    # --- MODIFICATION END ---
+                    
                     state['move_history'].append(move_data)
                     state['human_played'] = True
                     
@@ -12405,6 +12450,9 @@ def save_sgs_batch(sgs_data_buffer, is_silent_run):
 
 
 
+# In Scrabble Game.py
+
+# This is the full, complete function with no code omitted.
 def handle_endgame_practice_flow(state):
     """
     Handles the specific turn flow for Endgame Practice mode, including showing
@@ -12424,7 +12472,7 @@ def handle_endgame_practice_flow(state):
         if opponent_turn_index < len(solution_sequence):
             opponent_move = solution_sequence[opponent_turn_index]
             
-            # --- MODIFICATION START: Add safety check ---
+            # --- MODIFICATION START: Add safety check and create full move_data dict ---
             if isinstance(opponent_move, dict):
                 # Use play_hint_move to execute the opponent's move
                 next_turn, drawn, newly_placed, consumed = play_hint_move(
@@ -12435,18 +12483,45 @@ def handle_endgame_practice_flow(state):
                     state['practice_mode'], is_silent_batch_run_param=True
                 )
                 
-                # Update history for the opponent's move
-                opponent_move.update({
+                # Create a new, complete dictionary for the move history
+                start_pos_opp = opponent_move.get('start', (0,0))
+                direction_opp = opponent_move.get('direction', 'H')
+                coord_opp = ai_engine.get_coord(start_pos_opp, direction_opp, is_silent_batch_run_param=True)
+                word_with_blanks_opp = opponent_move.get('word_with_blanks', '')
+
+                move_data_opp = {
                     'player': state['turn'], 'move_type': 'place',
-                    'rack': state['racks'][state['turn']-1][:],
+                    'rack': state['racks'][state['turn']-1][:], # Rack before the move
                     'drawn': drawn, 'newly_placed': newly_placed,
-                    'tiles_played_from_rack': consumed
-                })
-                state['move_history'].append(opponent_move)
+                    'tiles_played_from_rack': consumed,
+                    'score': opponent_move.get('score', 0),
+                    'word': opponent_move.get('word', 'N/A'),
+                    'positions': opponent_move.get('positions', []),
+                    'blanks': opponent_move.get('blanks', set()),
+                    'coord': coord_opp,
+                    'word_with_blanks': word_with_blanks_opp,
+                    'is_bingo': opponent_move.get('is_bingo', False),
+                    'start': start_pos_opp,
+                    'direction': direction_opp,
+                    'leave': opponent_move.get('leave', []),
+                    'turn_duration': 0.0, # Placeholder
+                    'pool_quality_before_draw': 0.0, # Not relevant in endgame
+                    'luck_factor': 0.0 # No draw
+                }
+                state['move_history'].append(move_data_opp)
                 state['turn'] = next_turn
             else:
                 # This case handles if the AI's move is "PASS" or data is malformed
                 print(f"AI's next action in solution is '{opponent_move}'. Assuming PASS.")
+                # Create a pass move entry for history
+                pass_move_data = {
+                    'player': state['turn'], 'move_type': 'pass', 'rack': state['racks'][state['turn']-1][:],
+                    'score': 0, 'word': '', 'coord': '', 'blanks': set(), 'positions': [],
+                    'drawn': [], 'is_bingo': False, 'word_with_blanks': '', 'turn_duration': 0.0,
+                    'pool_quality_before_draw': 0.0, 'luck_factor': 0.0,
+                    'tiles_played_from_rack': [], 'leave': state['racks'][state['turn']-1][:]
+                }
+                state['move_history'].append(pass_move_data)
                 state['turn'] = 3 - state['turn'] # Advance turn
             # --- MODIFICATION END ---
         
@@ -12461,6 +12536,9 @@ def handle_endgame_practice_flow(state):
 
 
 
+# In Scrabble Game.py
+
+# This is the full, complete function with no code omitted.
 def execute_game_session(is_initialized_from_outer_loop_param):
     # MODULE-LEVEL GLOBALS that this function and its helpers will use/modify
     global USE_AI_SIMULATION, USE_ENDGAME_SOLVER
@@ -12738,7 +12816,8 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                             no_blanks_on_racks = False
                         total_tiles_on_racks = len(racks_for_trigger[0]) + len(racks_for_trigger[1])
                     
-                    if bag_len_for_trigger == 0 and no_blanks_on_racks and total_tiles_on_racks <= 11:
+                    # --- THIS IS THE FIX ---
+                    if bag_len_for_trigger == 0 and no_blanks_on_racks and total_tiles_on_racks <= 11 and len(racks_for_trigger[0]) > 0 and len(racks_for_trigger[1]) > 0:
                         print(f"--- Endgame Triggered in Game {current_batch_game_num} (Turn {len(move_history)}) ---")
                         
                         # Gather the current state for the puzzle
