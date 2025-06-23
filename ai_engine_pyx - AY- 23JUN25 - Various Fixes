@@ -1,12 +1,8 @@
 # ai_engine.pyx
 
-#ai_engine_pyx - AX - 22JUN25
-#Endgame Batch mode implementation
-#Working in general, but still need program flow improvements
-#Correct/incorrect msg not working properly
-#Fixed solutions button unresponsive
-#FIXED: UNKNOWN MOVE
-#FIXED: All Words bug
+#ai_engine_pyx - AY - 23JUN25
+#Fixed incorrect word-finding algo
+#Fixed score preview
 
 
 
@@ -177,6 +173,9 @@ cpdef set get_anchor_points(list tiles, bint is_first_play):
         anchors.add(CENTER_SQUARE_C)
         
     return anchors
+
+
+
 
 cdef _gaddag_traverse(
     object anchor_pos, int[27] rack_counts_c, list tiles, list board, set blanks, dict cross_check_sets, object gaddag_node,
@@ -379,19 +378,23 @@ cdef _gaddag_traverse(
             else:                   next_r, next_c = r_last - 1, c_last
         else:
             anchor_r, anchor_c = anchor_pos
+            
+            # --- MODIFICATION START: Corrected reference point logic ---
             tile_on_anchor = None
-            for t_r, t_c, t_l, t_b, t_n in current_word_tiles:
+            for t_r, t_c, _, _, _ in current_word_tiles:
                  if t_r == anchor_r and t_c == anchor_c:
                       tile_on_anchor = (t_r, t_c)
                       break
+            
             just_crossed_separator = False
-            if len(current_word_tiles) > 0:
+            if tile_on_anchor is not None:
                 if current_axis == 'H':
-                    if c_last <= anchor_c: just_crossed_separator = True
+                    if c_last < anchor_c: just_crossed_separator = True
                 else:
-                    if r_last <= anchor_r: just_crossed_separator = True
+                    if r_last < anchor_r: just_crossed_separator = True
             
             ref_r, ref_c = (anchor_r, anchor_c) if just_crossed_separator else (r_last, c_last)
+            # --- MODIFICATION END ---
 
             if current_axis == 'H': next_r, next_c = ref_r, ref_c + 1
             else:                   next_r, next_c = ref_r + 1, ref_c
@@ -468,8 +471,7 @@ cdef _gaddag_traverse_for_max_score(
     cdef bint just_crossed_separator
     cdef list newly_placed_list_details, all_words_details
     cdef set temp_blanks_for_validation, move_blanks_coords_for_this_play
-    cdef tuple new_tiles_sig, next_pos, last_tile_tuple
-    cdef int score
+    cdef tuple new_tiles_sig, next_pos, last_tile_tuple, tile_on_anchor
 
     if depth > 20:
         return
@@ -535,13 +537,24 @@ cdef _gaddag_traverse_for_max_score(
             else:                   next_r, next_c = r_last - 1, c_last
         else:
             anchor_r, anchor_c = anchor_pos
+            
+            # --- MODIFICATION START: Corrected reference point logic ---
+            tile_on_anchor = None
+            for t_r, t_c, _, _, _ in current_word_tiles:
+                 if t_r == anchor_r and t_c == anchor_c:
+                      tile_on_anchor = (t_r, t_c)
+                      break
+            
             just_crossed_separator = False
-            if len(current_word_tiles) > 0:
+            if tile_on_anchor is not None:
                 if current_axis == 'H':
-                    if c_last <= anchor_c: just_crossed_separator = True
+                    if c_last < anchor_c: just_crossed_separator = True
                 else:
-                    if r_last <= anchor_r: just_crossed_separator = True
+                    if r_last < anchor_r: just_crossed_separator = True
+            
             ref_r, ref_c = (anchor_r, anchor_c) if just_crossed_separator else (r_last, c_last)
+            # --- MODIFICATION END ---
+
             if current_axis == 'H': next_r, next_c = ref_r, ref_c + 1
             else:                   next_r, next_c = ref_r + 1, ref_c
             
@@ -589,6 +602,8 @@ cdef _gaddag_traverse_for_max_score(
                 full_rack_size, max_len, max_score_ref, depth + 1
             )
             current_word_tiles.pop()
+
+
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
@@ -733,7 +748,7 @@ cdef _gaddag_traverse_for_best_move(
     cdef bint just_crossed_separator, is_bingo_from_validation, found_primary, is_along_axis, found_in_newly_placed, is_blank_in_word
     cdef list newly_placed_list_details, all_words_formed_details, primary_word_tiles, leave, word_with_blanks_list, positions_list
     cdef set temp_blanks_for_validation, move_blanks_coords_for_this_play, newly_placed_coords_for_this_play
-    cdef tuple new_tiles_sig, next_pos, last_tile_tuple, start_pos
+    cdef tuple new_tiles_sig, next_pos, last_tile_tuple, start_pos, tile_on_anchor
 
     if depth > 20:
         return
@@ -865,13 +880,24 @@ cdef _gaddag_traverse_for_best_move(
             else: next_r, next_c = r_last - 1, c_last
         else:
             anchor_r, anchor_c = anchor_pos
+            
+            # --- MODIFICATION START: Corrected reference point logic ---
+            tile_on_anchor = None
+            for t_r, t_c, _, _, _ in current_word_tiles:
+                 if t_r == anchor_r and t_c == anchor_c:
+                      tile_on_anchor = (t_r, t_c)
+                      break
+            
             just_crossed_separator = False
-            if len(current_word_tiles) > 0:
+            if tile_on_anchor is not None:
                 if current_axis == 'H':
-                    if c_last <= anchor_c: just_crossed_separator = True
+                    if c_last < anchor_c: just_crossed_separator = True
                 else:
-                    if r_last <= anchor_r: just_crossed_separator = True
+                    if r_last < anchor_r: just_crossed_separator = True
+            
             ref_r, ref_c = (anchor_r, anchor_c) if just_crossed_separator else (r_last, c_last)
+            # --- MODIFICATION END ---
+
             if current_axis == 'H': next_r, next_c = ref_r, ref_c + 1
             else: next_r, next_c = ref_r + 1, ref_c
             
