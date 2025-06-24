@@ -1,8 +1,9 @@
+
 # ai_engine.pyx
 
-#ai_engine_pyx - AY - 23JUN25
-#Fixed incorrect word-finding algo
-#Fixed score preview
+#ai_engine_pyx - AZ - 24JUN25
+#Fixed incorrect board state and player turn in Endgame practice mode
+#Fixed Correct! msg for Endgame Practice Mode
 
 
 
@@ -194,6 +195,8 @@ cdef _gaddag_traverse(
     cdef tuple next_pos, start_pos, new_tiles_sig, tile_on_anchor, last_tile_tuple
     cdef float score
     cdef int letter_idx
+    cdef int hook_r, hook_c
+    cdef bint just_crossed
 
     if depth > 20:
         return
@@ -376,28 +379,29 @@ cdef _gaddag_traverse(
         if is_reversed:
             if current_axis == 'H': next_r, next_c = r_last, c_last - 1
             else:                   next_r, next_c = r_last - 1, c_last
-        else:
-            anchor_r, anchor_c = anchor_pos
+        else: # not is_reversed
+            # The hook letter is the first one placed in this traversal path.
+            # Its position is the correct reference point after crossing the separator.
+            hook_r, hook_c = current_word_tiles[0][0], current_word_tiles[0][1]
             
-            # --- MODIFICATION START: Corrected reference point logic ---
-            tile_on_anchor = None
-            for t_r, t_c, _, _, _ in current_word_tiles:
-                 if t_r == anchor_r and t_c == anchor_c:
-                      tile_on_anchor = (t_r, t_c)
-                      break
-            
-            just_crossed_separator = False
-            if tile_on_anchor is not None:
-                if current_axis == 'H':
-                    if c_last < anchor_c: just_crossed_separator = True
-                else:
-                    if r_last < anchor_r: just_crossed_separator = True
-            
-            ref_r, ref_c = (anchor_r, anchor_c) if just_crossed_separator else (r_last, c_last)
-            # --- MODIFICATION END ---
+            # Determine if we just crossed the separator. This is true if the last tile
+            # placed is part of the "prefix" (i.e., its coordinate is before the hook's).
+            just_crossed = False
+            if current_axis == 'H':
+                if c_last < hook_c:
+                    just_crossed = True
+            else: # Vertical axis
+                if r_last < hook_r:
+                    just_crossed = True
 
-            if current_axis == 'H': next_r, next_c = ref_r, ref_c + 1
-            else:                   next_r, next_c = ref_r + 1, ref_c
+            # The reference point for the next placement is the hook if we just crossed,
+            # otherwise it's the last tile placed.
+            ref_r, ref_c = (hook_r, hook_c) if just_crossed else (r_last, c_last)
+
+            if current_axis == 'H':
+                next_r, next_c = ref_r, ref_c + 1
+            else: # Vertical axis
+                next_r, next_c = ref_r + 1, ref_c
             
         if not (0 <= next_r < GRID_SIZE_C and 0 <= next_c < GRID_SIZE_C):
             continue
@@ -472,6 +476,9 @@ cdef _gaddag_traverse_for_max_score(
     cdef list newly_placed_list_details, all_words_details
     cdef set temp_blanks_for_validation, move_blanks_coords_for_this_play
     cdef tuple new_tiles_sig, next_pos, last_tile_tuple, tile_on_anchor
+    cdef int score
+    cdef int hook_r, hook_c
+    cdef bint just_crossed
 
     if depth > 20:
         return
@@ -535,28 +542,29 @@ cdef _gaddag_traverse_for_max_score(
         if is_reversed:
             if current_axis == 'H': next_r, next_c = r_last, c_last - 1
             else:                   next_r, next_c = r_last - 1, c_last
-        else:
-            anchor_r, anchor_c = anchor_pos
+        else: # not is_reversed
+            # The hook letter is the first one placed in this traversal path.
+            # Its position is the correct reference point after crossing the separator.
+            hook_r, hook_c = current_word_tiles[0][0], current_word_tiles[0][1]
             
-            # --- MODIFICATION START: Corrected reference point logic ---
-            tile_on_anchor = None
-            for t_r, t_c, _, _, _ in current_word_tiles:
-                 if t_r == anchor_r and t_c == anchor_c:
-                      tile_on_anchor = (t_r, t_c)
-                      break
-            
-            just_crossed_separator = False
-            if tile_on_anchor is not None:
-                if current_axis == 'H':
-                    if c_last < anchor_c: just_crossed_separator = True
-                else:
-                    if r_last < anchor_r: just_crossed_separator = True
-            
-            ref_r, ref_c = (anchor_r, anchor_c) if just_crossed_separator else (r_last, c_last)
-            # --- MODIFICATION END ---
+            # Determine if we just crossed the separator. This is true if the last tile
+            # placed is part of the "prefix" (i.e., its coordinate is before the hook's).
+            just_crossed = False
+            if current_axis == 'H':
+                if c_last < hook_c:
+                    just_crossed = True
+            else: # Vertical axis
+                if r_last < hook_r:
+                    just_crossed = True
 
-            if current_axis == 'H': next_r, next_c = ref_r, ref_c + 1
-            else:                   next_r, next_c = ref_r + 1, ref_c
+            # The reference point for the next placement is the hook if we just crossed,
+            # otherwise it's the last tile placed.
+            ref_r, ref_c = (hook_r, hook_c) if just_crossed else (r_last, c_last)
+
+            if current_axis == 'H':
+                next_r, next_c = ref_r, ref_c + 1
+            else: # Vertical axis
+                next_r, next_c = ref_r + 1, ref_c
             
         if not (0 <= next_r < GRID_SIZE_C and 0 <= next_c < GRID_SIZE_C):
             continue
@@ -725,10 +733,14 @@ cpdef int find_best_score_gaddag(
                             next_node = GADDAG_ROOT_C.children[existing_tile_letter]
                             initial_tiles = [(nr, nc, existing_tile_letter, False, False)]
                             start_axis = 'V' if dr != 0 else 'H'
-                            _gaddag_traverse_for_max_score(anchor_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], False, start_axis, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, 0)
-                            _gaddag_traverse_for_max_score(anchor_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, start_axis, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, 0)
+                            # --- BUG FIX: Pass adj_pos as the anchor, not anchor_pos ---
+                            _gaddag_traverse_for_max_score(adj_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], False, start_axis, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, 0)
+                            _gaddag_traverse_for_max_score(adj_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, start_axis, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, 0)
 
     return max_score
+
+
+
 
 cdef _gaddag_traverse_for_best_move(
     object anchor_pos, int[27] rack_counts_c, list tiles, list board, set blanks, dict cross_check_sets, object gaddag_node,
@@ -749,6 +761,8 @@ cdef _gaddag_traverse_for_best_move(
     cdef list newly_placed_list_details, all_words_formed_details, primary_word_tiles, leave, word_with_blanks_list, positions_list
     cdef set temp_blanks_for_validation, move_blanks_coords_for_this_play, newly_placed_coords_for_this_play
     cdef tuple new_tiles_sig, next_pos, last_tile_tuple, start_pos, tile_on_anchor
+    cdef int hook_r, hook_c
+    cdef bint just_crossed
 
     if depth > 20:
         return
@@ -878,28 +892,29 @@ cdef _gaddag_traverse_for_best_move(
         if is_reversed:
             if current_axis == 'H': next_r, next_c = r_last, c_last - 1
             else: next_r, next_c = r_last - 1, c_last
-        else:
-            anchor_r, anchor_c = anchor_pos
+        else: # not is_reversed
+            # The hook letter is the first one placed in this traversal path.
+            # Its position is the correct reference point after crossing the separator.
+            hook_r, hook_c = current_word_tiles[0][0], current_word_tiles[0][1]
             
-            # --- MODIFICATION START: Corrected reference point logic ---
-            tile_on_anchor = None
-            for t_r, t_c, _, _, _ in current_word_tiles:
-                 if t_r == anchor_r and t_c == anchor_c:
-                      tile_on_anchor = (t_r, t_c)
-                      break
-            
-            just_crossed_separator = False
-            if tile_on_anchor is not None:
-                if current_axis == 'H':
-                    if c_last < anchor_c: just_crossed_separator = True
-                else:
-                    if r_last < anchor_r: just_crossed_separator = True
-            
-            ref_r, ref_c = (anchor_r, anchor_c) if just_crossed_separator else (r_last, c_last)
-            # --- MODIFICATION END ---
+            # Determine if we just crossed the separator. This is true if the last tile
+            # placed is part of the "prefix" (i.e., its coordinate is before the hook's).
+            just_crossed = False
+            if current_axis == 'H':
+                if c_last < hook_c:
+                    just_crossed = True
+            else: # Vertical axis
+                if r_last < hook_r:
+                    just_crossed = True
 
-            if current_axis == 'H': next_r, next_c = ref_r, ref_c + 1
-            else: next_r, next_c = ref_r + 1, ref_c
+            # The reference point for the next placement is the hook if we just crossed,
+            # otherwise it's the last tile placed.
+            ref_r, ref_c = (hook_r, hook_c) if just_crossed else (r_last, c_last)
+
+            if current_axis == 'H':
+                next_r, next_c = ref_r, ref_c + 1
+            else: # Vertical axis
+                next_r, next_c = ref_r + 1, ref_c
             
         if not (0 <= next_r < GRID_SIZE_C and 0 <= next_c < GRID_SIZE_C):
             continue
@@ -1050,8 +1065,9 @@ cpdef object find_best_move_gaddag(
                             next_node = GADDAG_ROOT_C.children[existing_tile_letter]
                             initial_tiles = [(nr, nc, existing_tile_letter, False, False)]
                             start_axis = 'V' if dr != 0 else 'H'
-                            _gaddag_traverse_for_best_move(anchor_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], False, start_axis, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, best_move_dict, 0)
-                            _gaddag_traverse_for_best_move(anchor_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, start_axis, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, best_move_dict, 0)
+                            # --- BUG FIX: Pass adj_pos as the anchor, not anchor_pos ---
+                            _gaddag_traverse_for_best_move(adj_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], False, start_axis, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, best_move_dict, 0)
+                            _gaddag_traverse_for_best_move(adj_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, start_axis, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, &max_score, best_move_dict, 0)
 
     return best_move_dict if best_move_dict else None
 
@@ -1186,8 +1202,9 @@ cpdef list generate_all_moves_gaddag(
                             initial_tiles = [(nr, nc, existing_tile_letter, False, False)]
                             start_axis = 'V' if dr != 0 else 'H'
                             
-                            _gaddag_traverse(anchor_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], False, start_axis, all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, 0, is_silent_batch_run_param=is_silent_batch_run_param)
-                            _gaddag_traverse(anchor_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, start_axis, all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, 0, is_silent_batch_run_param=is_silent_batch_run_param)
+                            # --- BUG FIX: Pass adj_pos as the anchor, not anchor_pos ---
+                            _gaddag_traverse(adj_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], False, start_axis, all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, 0, is_silent_batch_run_param=is_silent_batch_run_param)
+                            _gaddag_traverse(adj_pos, rack_counts_c, tiles, board, blanks, cross_check_sets, next_node, initial_tiles[:], True, start_axis, all_found_moves, unique_move_signatures, original_tiles_state, is_first_play, full_rack_size, GRID_SIZE_C, 0, is_silent_batch_run_param=is_silent_batch_run_param)
 
     all_found_moves.sort(key=_sort_key_raw_score, reverse=True)
     final_unique_moves = []
