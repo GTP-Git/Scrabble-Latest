@@ -5991,6 +5991,9 @@ def draw_simulation_config_dialog(input_texts, active_input_index, state):
 
 
 
+# In Scrabble Game.py
+
+# This is the full, complete function with no code omitted.
 def ai_turn(state):
     """
     Handles the AI's turn by calling the unified Cython decision-making function
@@ -6111,6 +6114,7 @@ def ai_turn(state):
     drawn_tiles = []
     
     if action_chosen == 'play' and details:
+        # --- BUG FIX START ---
         if state['first_play'] and random.choice([True, False]):
             details['direction'] = 'V'
             word_len = len(details.get('word', ''))
@@ -6118,7 +6122,12 @@ def ai_turn(state):
                 new_start_row = CENTER_SQUARE[0] - (word_len // 2)
                 new_start_col = CENTER_SQUARE[1]
                 details['start'] = (new_start_row, new_start_col)
-                new_positions = [(new_start_row + i, new_start_col, item[2]) for i, item in enumerate(details.get('newly_placed', []))]
+                
+                # Sort the original horizontal tiles by column to maintain word order
+                original_horizontal_placement = sorted(details.get('newly_placed', []), key=lambda t: t[1])
+                
+                # Create new vertical positions based on the sorted horizontal tiles
+                new_positions = [(new_start_row + i, new_start_col, item[2]) for i, item in enumerate(original_horizontal_placement)]
                 details['newly_placed'] = new_positions
                 details['positions'] = new_positions
 
@@ -6128,8 +6137,10 @@ def ai_turn(state):
         details.update({
             'player': turn, 'move_type': 'place', 'rack': move_rack_before, 'drawn': drawn_tiles,
             'newly_placed': newly_placed, 'tiles_played_from_rack': tiles_consumed,
-            'coord': ai_engine.get_coord(details.get('start', (0,0)), details.get('direction', 'right'), is_silent_batch_run_param)
+            # Use the (potentially updated) direction and start from the details dictionary
+            'coord': ai_engine.get_coord(details.get('start'), details.get('direction'), is_silent_batch_run_param)
         })
+        # --- BUG FIX END ---
         state['first_play'] = False
         state['consecutive_zero_point_turns'] = 0
         state['pass_count'] = 0
@@ -12775,7 +12786,9 @@ def execute_game_session(is_initialized_from_outer_loop_param):
             current_state_dict['ai_sim_num_post_sim_candidates_cfg'] = ai_sim_num_post_sim_candidates_global
             
             # --- MODIFICATION START: Store init_args in the state dictionary ---
-            current_state_dict['init_args'] = initial_game_config.get('init_args')
+            # This ensures the state dictionary, which is passed to all event handlers,
+            # contains the necessary arguments for initializing worker processes.
+            current_state_dict['init_args'] = INIT_ARGS
             # --- MODIFICATION END ---
 
             
@@ -13129,6 +13142,9 @@ def populate_dummy_analyzer_data(move_history_list):
 
 
 
+# In Scrabble Game.py
+
+# This is the full, complete function with no code omitted.
 def main(is_initialized_from_outer_loop_param): # Renamed for clarity
     global GADDAG_STRUCTURE, gaddag_loading_status, gaddag_load_thread
     global DEV_CPROFILE_ENABLED_SESSION, DEV_VISUALIZE_BATCH_ENABLED_SESSION
@@ -13145,17 +13161,11 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
     global bbb_7l_max_prob_global, bbb_8l_max_prob_global
     global analyzer_data_for_replay
     global insights_data_for_replay, rack_visibility
-    # --- MODIFICATION START: Removed INIT_ARGS global ---
-    # global INIT_ARGS
-    # --- MODIFICATION END ---
+    global INIT_ARGS
 
     # This flag will be set to True only if a batch run was just completed.
     # This is the key to controlling when to print stats and exit.
     just_finished_a_batch = False
-
-    # --- MODIFICATION START: Removed AI engine init from here ---
-    # The initialization will now happen inside initialize_game
-    # --- MODIFICATION END ---
 
     if not is_initialized_from_outer_loop_param:
         # This block now only handles one-time data loading and JIT warm-up
@@ -13217,7 +13227,7 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
          bbb_7l_max_prob_global,
          bbb_8l_max_prob_global,
          rack_visibility,
-         _ # Discard the init_args from this tuple
+         INIT_ARGS 
          ) = init_result
 
         if replay_mode:
@@ -13287,7 +13297,6 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
 
 
 if __name__ == "__main__":
-    # --- MODIFICATION START: Set multiprocessing start method ---
     # This must be done within the __name__ == '__main__' block for compatibility,
     # especially on macOS and Windows. 'spawn' is safer for GUI apps.
     try:
@@ -13296,11 +13305,9 @@ if __name__ == "__main__":
     except RuntimeError:
         # This will happen if the start method has already been set, which is fine.
         print("--- Multiprocessing start method was already set. ---")
-    # --- MODIFICATION END ---
 
     print("--- Script execution started (__name__ == '__main__') ---")
 
-    # --- ALL INITIALIZATION CODE MOVED HERE ---
     pygame.init()
     main_called = False
     screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
@@ -13378,14 +13385,10 @@ if __name__ == "__main__":
     except FileNotFoundError:
         print("Warning: 8-letter-list.txt not found. BBB practice mode may not function correctly.")
     
-    # --- MODIFICATION START: Added missing loader calls ---
-    # These calls were missing, causing GADDAG_STRUCTURE to be None.
-    # We call them directly (not in a thread) to ensure data is ready before starting.
+  
     _load_gaddag_background()
     _load_word_definitions_background()
-    # --- MODIFICATION END ---
 
-    # --- END OF MOVED INITIALIZATION ---
 
     ai_sim_num_candidates_global = DEFAULT_AI_CANDIDATES
     ai_sim_num_opponent_sims_global = DEFAULT_OPPONENT_SIMULATIONS
