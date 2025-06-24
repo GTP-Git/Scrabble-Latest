@@ -1,9 +1,9 @@
 
 # ai_engine.pyx
 
-#ai_engine_pyx - AZ - 24JUN25
-#Fixed incorrect board state and player turn in Endgame practice mode
-#Fixed Correct! msg for Endgame Practice Mode
+#ai_engine_pyx - BA - 24JUN25
+#Implementing multiprocessing for endgame solver
+
 
 
 
@@ -1342,8 +1342,7 @@ cpdef find_cross_word(tuple tile, list tiles, str main_orientation):
 
 
 
-# In ai_engine.pyx
-# This function should be a cdef function.
+
 
 cdef _validate_and_get_words_formed(list new_tiles, list tiles):
     """
@@ -1762,6 +1761,8 @@ cpdef dict get_remaining_tiles(list rack, list tiles, set blanks):
         
     return remaining
 
+
+
 cpdef float get_expected_single_draw_value(list current_player_rack, list game_tiles, set game_blanks):
     """
     Calculates the expected statistical value of drawing a single tile from the
@@ -1790,6 +1791,8 @@ cpdef float get_expected_single_draw_value(list current_player_rack, list game_t
 
     expected_value = total_weighted_value / total_tiles_in_pool
     return expected_value
+
+
 
 cpdef tuple find_best_exchange_option(list rack, list game_tiles, set game_blanks, int bag_count, bint is_silent_batch_run_param=False):
     """
@@ -1843,6 +1846,8 @@ cpdef tuple find_best_exchange_option(list rack, list game_tiles, set game_blank
             best_overall_exchange_tiles = tiles_to_exchange_for_this_k
             
     return best_overall_exchange_tiles, best_overall_estimated_value
+
+
 
 
 
@@ -2101,7 +2106,8 @@ cpdef tuple determine_best_action(
     int opponent_rack_len, int num_ai_candidates, int num_opponent_sims, int num_post_sim_candidates,
     int current_score_diff_for_endgame,
     str practice_mode, list letter_checks, object bbb_thresholds, # New practice mode params
-    bint is_silent_batch_run_param=False
+    bint is_silent_batch_run_param=False,
+    object pool=None # New argument for multiprocessing pool
 ):
     """
     The consolidated AI brain, fully in Cython. It handles all modes and determines
@@ -2130,7 +2136,7 @@ cpdef tuple determine_best_action(
     if use_endgame_solver and bag_count == 0:
         # Unpack the tuple, ignoring the formatted lines and full sequence for this function's purpose
         best_first_move_endgame, _, _ = solve_endgame(
-            rack, [], tiles, blanks, board, current_score_diff_for_endgame, True
+            pool, rack, [], tiles, blanks, board, current_score_diff_for_endgame, True
         )
         if best_first_move_endgame == "PASS": return 'pass', None
         elif isinstance(best_first_move_endgame, dict): return 'play', best_first_move_endgame
@@ -2343,9 +2349,90 @@ cpdef str format_single_move_for_print(object move_obj, bint is_silent_batch_run
 
 
 
-# In ai_engine.pyx
 
-# This is the full, complete function with no code omitted.
+
+
+cpdef tuple _solve_one_line(
+    object ai_first_move_obj, 
+    list initial_tiles_board_state, 
+    set initial_blanks_board_state, 
+    list initial_rack_player_state, 
+    list initial_rack_opponent_state, 
+    int initial_score_diff_state, 
+    list board
+):
+    """
+    Worker function for multiprocessing. Solves a single endgame line starting with one move.
+    """
+    # Each worker needs its own transposition table.
+    cdef dict transposition_table = {}
+    cdef list sim_tiles_after_ai_1, sim_rack_player_after_ai_1, sim_rack_opponent_after_ai_1, temp_rack_player_sim, newly_placed, opponent_sub_sequence, full_move_sequence_for_this_line
+    cdef set sim_blanks_after_ai_1, move_blanks
+    cdef int sim_pass_count_for_opp, move_score, sim_score_diff_after_ai_1
+    cdef float opp_perspective_score_diff, ai_final_score_diff_for_this_line
+    cdef bint valid_placement_sim
+    cdef int r, c
+    cdef str letter
+
+    # This code is the body of the original for loop in solve_endgame
+    sim_tiles_after_ai_1 = [row[:] for row in initial_tiles_board_state]
+    sim_blanks_after_ai_1 = initial_blanks_board_state.copy()
+    sim_rack_player_after_ai_1 = initial_rack_player_state[:]
+    sim_rack_opponent_after_ai_1 = initial_rack_opponent_state[:]
+    sim_score_diff_after_ai_1 = initial_score_diff_state
+    sim_pass_count_for_opp = 0
+
+    if ai_first_move_obj == "PASS":
+        sim_pass_count_for_opp = 1
+    elif isinstance(ai_first_move_obj, dict):
+        sim_pass_count_for_opp = 0
+        newly_placed = ai_first_move_obj.get('newly_placed', [])
+        move_blanks = ai_first_move_obj.get('blanks', set())
+        move_score = ai_first_move_obj.get('score', 0)
+
+        valid_placement_sim = True
+        temp_rack_player_sim = sim_rack_player_after_ai_1[:]
+        for r, c, letter in newly_placed:
+            if 0 <= r < GRID_SIZE_C and 0 <= c < GRID_SIZE_C:
+                sim_tiles_after_ai_1[r][c] = letter
+                if (r, c) in move_blanks:
+                    sim_blanks_after_ai_1.add((r,c))
+                    if ' ' in temp_rack_player_sim: temp_rack_player_sim.remove(' ')
+                    else: valid_placement_sim = False; break
+                else:
+                    if letter in temp_rack_player_sim: temp_rack_player_sim.remove(letter)
+                    else: valid_placement_sim = False; break
+            else: valid_placement_sim = False; break
+
+        if not valid_placement_sim:
+            return None # Return None for invalid moves
+
+        sim_rack_player_after_ai_1 = temp_rack_player_sim
+        sim_score_diff_after_ai_1 += move_score
+    else:
+        return None # Should not happen
+
+    opp_perspective_score_diff, opponent_sub_sequence = negamax_endgame(
+        sim_rack_opponent_after_ai_1,
+        sim_rack_player_after_ai_1,
+        sim_tiles_after_ai_1,
+        sim_blanks_after_ai_1,
+        board,
+        -sim_score_diff_after_ai_1,
+        -1000000.0, 1000000.0,
+        depth=1,
+        pass_count=sim_pass_count_for_opp,
+        transposition_table=transposition_table,
+        is_silent_batch_run_param=True
+    )
+
+    ai_final_score_diff_for_this_line = -opp_perspective_score_diff
+    full_move_sequence_for_this_line = [ai_first_move_obj] + opponent_sub_sequence
+
+    return (ai_final_score_diff_for_this_line, full_move_sequence_for_this_line)
+
+
+
 
 cpdef str format_end_state_for_print(list final_rack_p1_sim, list final_rack_p2_sim, bint last_player_to_move_was_p1, int pass_count_at_end):
     """
@@ -2553,10 +2640,11 @@ cpdef tuple negamax_endgame(list rack_player, list rack_opponent, list tiles, se
 @cython.cdivision(True)
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cpdef object solve_endgame(list rack_player, list opponent_rack, list tiles, set blanks, list board, int current_score_diff, bint is_silent_batch_run_param=False):
+cpdef object solve_endgame(object pool, list rack_player, list opponent_rack, list tiles, set blanks, list board, int current_score_diff, bint is_silent_batch_run_param=False):
     """
     Top-level function to initiate the endgame solver.
     Returns a tuple: (best_move_object, list_of_formatted_result_strings, best_full_sequence_of_move_objects)
+    MODIFIED: Now accepts a multiprocessing pool object to parallelize the search.
     """
     cdef list initial_tiles_board_state, initial_rack_player_state, initial_rack_opponent_state
     cdef list possible_ai_first_moves, candidate_first_moves, evaluated_lines
@@ -2599,68 +2687,95 @@ cpdef object solve_endgame(list rack_player, list opponent_rack, list tiles, set
     if not candidate_first_moves:
         return "PASS", [], ["PASS"]
 
-    transposition_table = {}
     evaluated_lines = []
 
-    for ai_first_move_obj in candidate_first_moves:
-        sim_tiles_after_ai_1 = [row[:] for row in initial_tiles_board_state]
-        sim_blanks_after_ai_1 = initial_blanks_board_state.copy()
-        sim_rack_player_after_ai_1 = initial_rack_player_state[:]
-        sim_rack_opponent_after_ai_1 = initial_rack_opponent_state[:]
-        sim_score_diff_after_ai_1 = initial_score_diff_state
-        sim_pass_count_for_opp = 0
+    # --- MODIFICATION START: Use multiprocessing pool if available ---
+    if pool is not None:
+        # Parallel execution
+        args_for_pool = []
+        for move in candidate_first_moves:
+            args_for_pool.append((
+                move, 
+                initial_tiles_board_state, 
+                initial_blanks_board_state, 
+                initial_rack_player_state, 
+                initial_rack_opponent_state, 
+                initial_score_diff_state, 
+                board
+            ))
+        
+        list_of_results = pool.starmap(_solve_one_line, args_for_pool)
 
-        if ai_first_move_obj == "PASS":
-            sim_pass_count_for_opp = 1
-        elif isinstance(ai_first_move_obj, dict):
+        for res_tuple in list_of_results:
+            if res_tuple: # Check if worker returned a valid result
+                evaluated_lines.append({
+                    'score_diff': res_tuple[0],
+                    'sequence': res_tuple[1]
+                })
+
+    else:
+        # Sequential execution (fallback or for debugging)
+        transposition_table = {}
+        for ai_first_move_obj in candidate_first_moves:
+            sim_tiles_after_ai_1 = [row[:] for row in initial_tiles_board_state]
+            sim_blanks_after_ai_1 = initial_blanks_board_state.copy()
+            sim_rack_player_after_ai_1 = initial_rack_player_state[:]
+            sim_rack_opponent_after_ai_1 = initial_rack_opponent_state[:]
+            sim_score_diff_after_ai_1 = initial_score_diff_state
             sim_pass_count_for_opp = 0
-            newly_placed = ai_first_move_obj.get('newly_placed', [])
-            move_blanks = ai_first_move_obj.get('blanks', set())
-            move_score = ai_first_move_obj.get('score', 0)
 
-            valid_placement_sim = True
-            temp_rack_player_sim = sim_rack_player_after_ai_1[:]
-            for r, c, letter in newly_placed:
-                if 0 <= r < GRID_SIZE_C and 0 <= c < GRID_SIZE_C:
-                    sim_tiles_after_ai_1[r][c] = letter
-                    if (r, c) in move_blanks:
-                        sim_blanks_after_ai_1.add((r,c))
-                        if ' ' in temp_rack_player_sim: temp_rack_player_sim.remove(' ')
-                        else: valid_placement_sim = False; break
-                    else:
-                        if letter in temp_rack_player_sim: temp_rack_player_sim.remove(letter)
-                        else: valid_placement_sim = False; break
-                else: valid_placement_sim = False; break
+            if ai_first_move_obj == "PASS":
+                sim_pass_count_for_opp = 1
+            elif isinstance(ai_first_move_obj, dict):
+                sim_pass_count_for_opp = 0
+                newly_placed = ai_first_move_obj.get('newly_placed', [])
+                move_blanks = ai_first_move_obj.get('blanks', set())
+                move_score = ai_first_move_obj.get('score', 0)
 
-            if not valid_placement_sim:
+                valid_placement_sim = True
+                temp_rack_player_sim = sim_rack_player_after_ai_1[:]
+                for r, c, letter in newly_placed:
+                    if 0 <= r < GRID_SIZE_C and 0 <= c < GRID_SIZE_C:
+                        sim_tiles_after_ai_1[r][c] = letter
+                        if (r, c) in move_blanks:
+                            sim_blanks_after_ai_1.add((r,c))
+                            if ' ' in temp_rack_player_sim: temp_rack_player_sim.remove(' ')
+                            else: valid_placement_sim = False; break
+                        else:
+                            if letter in temp_rack_player_sim: temp_rack_player_sim.remove(letter)
+                            else: valid_placement_sim = False; break
+                    else: valid_placement_sim = False; break
+
+                if not valid_placement_sim:
+                    continue
+
+                sim_rack_player_after_ai_1 = temp_rack_player_sim
+                sim_score_diff_after_ai_1 += move_score
+            else:
                 continue
 
-            sim_rack_player_after_ai_1 = temp_rack_player_sim
-            sim_score_diff_after_ai_1 += move_score
-        else:
-            continue
+            opp_perspective_score_diff, opponent_sub_sequence = negamax_endgame(
+                sim_rack_opponent_after_ai_1,
+                sim_rack_player_after_ai_1,
+                sim_tiles_after_ai_1,
+                sim_blanks_after_ai_1,
+                board,
+                -sim_score_diff_after_ai_1,
+                -1000000.0, 1000000.0,
+                depth=1,
+                pass_count=sim_pass_count_for_opp,
+                transposition_table=transposition_table,
+                is_silent_batch_run_param=True
+            )
 
-        opp_perspective_score_diff, opponent_sub_sequence = negamax_endgame(
-            sim_rack_opponent_after_ai_1,
-            sim_rack_player_after_ai_1,
-            sim_tiles_after_ai_1,
-            sim_blanks_after_ai_1,
-            board,
-            -sim_score_diff_after_ai_1,
-            -1000000.0, 1000000.0,
-            depth=1,
-            pass_count=sim_pass_count_for_opp,
-            transposition_table=transposition_table,
-            is_silent_batch_run_param=True
-        )
+            ai_final_score_diff_for_this_line = -opp_perspective_score_diff
+            full_move_sequence_for_this_line = [ai_first_move_obj] + opponent_sub_sequence
 
-        ai_final_score_diff_for_this_line = -opp_perspective_score_diff
-        full_move_sequence_for_this_line = [ai_first_move_obj] + opponent_sub_sequence
-
-        evaluated_lines.append({
-            'score_diff': ai_final_score_diff_for_this_line,
-            'sequence': full_move_sequence_for_this_line
-        })
+            evaluated_lines.append({
+                'score_diff': ai_final_score_diff_for_this_line,
+                'sequence': full_move_sequence_for_this_line
+            })
+    # --- MODIFICATION END ---
 
     evaluated_lines.sort(key=_sort_key_solve_endgame, reverse=True)
 
