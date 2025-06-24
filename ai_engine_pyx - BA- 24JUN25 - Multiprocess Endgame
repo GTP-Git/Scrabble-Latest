@@ -75,11 +75,33 @@ cdef class TrieNode:
         self.children = {}
         self.is_end = False
 
+    # --- MODIFICATION START: Use standard __dict__ for pickling ---
+    def __getstate__(self):
+        """Return state to be pickled."""
+        return self.__dict__
+
+    def __setstate__(self, state):
+        """Restore state from the unpickled state."""
+        self.__dict__.update(state)
+
+
+        
+
 cdef class Dawg:
     cdef TrieNode root
 
     def __init__(self):
         self.root = TrieNode()
+
+    # --- MODIFICATION START: Use standard __dict__ for pickling ---
+    def __getstate__(self):
+        """Return state to be pickled."""
+        return self.__dict__
+
+    def __setstate__(self, state):
+        """Restore state from the unpickled state."""
+        self.__dict__.update(state)
+    # --- MODIFICATION END ---
 
     cpdef insert(self, str word):
         cdef TrieNode node = self.root
@@ -98,6 +120,9 @@ cdef class Dawg:
                 return False
             node = node.children[char]
         return node.is_end
+
+
+    
 
 # --- New Initializer Function ---
 cpdef init_ai_engine(
