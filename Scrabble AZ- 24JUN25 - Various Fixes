@@ -1,13 +1,15 @@
 
 
 
+
 #python
-#Scrabble AY
+#Scrabble AZ
 #Fixed incorrect board state and player turn in Endgame practice mode
-#
+#Fixed Correct! msg for Endgame Practice Mode
 
 
-#23JUN25
+
+#24JUN25
 
 
 
@@ -2940,6 +2942,13 @@ def mode_selection_screen():
                                         # --- MODIFICATION START: Handle "End Game" practice selection ---
                                         elif selected_practice_option == "End Game":
                                             print("--- mode_selection_screen(): End Game practice selected. ---")
+                                            
+                                            # Call the new dialog to get user's choice
+                                            puzzle_choice = show_endgame_puzzle_selection_dialog()
+
+                                            if puzzle_choice is None: # User cancelled
+                                                continue
+
                                             home_dir = os.path.expanduser('~')
                                             puzzle_dir = os.path.join(home_dir, 'Documents', 'Endgame Practice')
                                             
@@ -2953,9 +2962,20 @@ def mode_selection_screen():
                                                     show_message_dialog("No .sge puzzle files found in the directory.", "No Puzzles")
                                                     continue
                                                 
-                                                chosen_puzzle_file = random.choice(puzzle_files)
+                                                chosen_puzzle_file = ""
+                                                if puzzle_choice == "": # Empty string means random
+                                                    chosen_puzzle_file = random.choice(puzzle_files)
+                                                    print(f"--- Randomly selected puzzle: {chosen_puzzle_file} ---")
+                                                else:
+                                                    # Ensure user input has the right extension
+                                                    if not puzzle_choice.lower().endswith('.sge'):
+                                                        chosen_puzzle_file = puzzle_choice + '.sge'
+                                                    else:
+                                                        chosen_puzzle_file = puzzle_choice
+                                                
                                                 filepath = os.path.join(puzzle_dir, chosen_puzzle_file)
                                                 
+                                                # This will raise FileNotFoundError if the user-specified file doesn't exist
                                                 with open(filepath, 'rb') as f_load:
                                                     loaded_puzzle_data = pickle.load(f_load)
                                                 
@@ -2983,6 +3003,8 @@ def mode_selection_screen():
                                                 print(f"--- mode_selection_screen(): Loaded endgame puzzle '{chosen_puzzle_file}' for Player {player_to_move_for_ai_check} to solve. ---")
                                                 break # Exit the main selection loop
 
+                                            except FileNotFoundError:
+                                                show_message_dialog(f"Error: Puzzle file not found:\n{chosen_puzzle_file}", "File Not Found")
                                             except Exception as e:
                                                 print(f"Error loading endgame puzzle: {e}")
                                                 show_message_dialog(f"Error loading puzzle file:\n{e}", "Load Error")
@@ -9573,13 +9595,16 @@ def _handle_keydown_typing_on_board(event, state):
                             is_move_correct = True
                     
                 if is_move_correct:
-                    # Correct move! Finalize it.
+                    
+                    for r_wp_commit, c_wp_commit, l_wp_commit in newly_placed_details:
+                        state['tiles'][r_wp_commit][c_wp_commit] = l_wp_commit
+                    
+
                     score_val_play = correct_move_obj.get('score', 0)
                     state['scores'][state['turn']-1] += score_val_play
                     state['last_played_highlight_coords'] = set((r_lp, c_lp) for r_lp, c_lp, _ in newly_placed_details)
                     
-                    # --- MODIFICATION START: Explicitly calculate all history fields ---
-                    # Determine what was consumed and what the leave is
+                    
                     current_leave = state['racks'][state['turn']-1][:]
                     original_rack_counter = Counter(state['original_rack'])
                     leave_counter = Counter(current_leave)
@@ -11920,7 +11945,109 @@ def show_gamify_goal_exceeded_dialog(current_goal, new_difficulty):
 
 
 
-# In Scrabble Game.py
+
+def show_endgame_puzzle_selection_dialog():
+    """
+    Displays a modal dialog for selecting an endgame puzzle.
+    The user can either leave the input blank to get a random puzzle,
+    or enter a specific .sge filename to load.
+
+    Returns:
+        str or None: The filename entered by the user (which can be an empty string
+                     to signify random selection), or None if the dialog is cancelled.
+    """
+    global screen, dialog_font, ui_font, button_font, pyperclip_available, pyperclip
+    global DIALOG_COLOR, BLACK, WHITE, BUTTON_COLOR, BUTTON_HOVER, RED
+
+    dialog_width, dialog_height = 450, 220
+    dialog_x = (WINDOW_WIDTH - dialog_width) // 2
+    dialog_y = (WINDOW_HEIGHT - dialog_height) // 2
+
+    filename_input = ""
+    input_active = True
+    dialog_running = True
+
+    input_rect = pygame.Rect(dialog_x + 20, dialog_y + 80, dialog_width - 40, 35)
+    load_button_rect = pygame.Rect(dialog_x + (dialog_width // 2) - BUTTON_WIDTH - (BUTTON_GAP // 2),
+                                   dialog_y + dialog_height - BUTTON_HEIGHT - 20,
+                                   BUTTON_WIDTH, BUTTON_HEIGHT)
+    cancel_button_rect = pygame.Rect(dialog_x + (dialog_width // 2) + (BUTTON_GAP // 2),
+                                     dialog_y + dialog_height - BUTTON_HEIGHT - 20,
+                                     BUTTON_WIDTH, BUTTON_HEIGHT)
+
+    while dialog_running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                x_mouse, y_mouse = event.pos
+                input_active = input_rect.collidepoint(x_mouse, y_mouse)
+
+                if load_button_rect.collidepoint(x_mouse, y_mouse):
+                    return filename_input.strip() # Return content, even if empty
+                elif cancel_button_rect.collidepoint(x_mouse, y_mouse):
+                    return None # User cancelled
+
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    return None # User cancelled with Escape
+
+                if input_active:
+                    if event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
+                        return filename_input.strip()
+                    elif event.key == pygame.K_BACKSPACE:
+                        filename_input = filename_input[:-1]
+                    elif event.key == pygame.K_v and (pygame.key.get_mods() & pygame.KMOD_CTRL or pygame.key.get_mods() & pygame.KMOD_META) and pyperclip_available and pyperclip:
+                        try:
+                            pasted_text = pyperclip.paste()
+                            if pasted_text:
+                                filename_input += pasted_text.replace('\n', '').replace('\r', '')
+                        except Exception as e:
+                            print(f"Error pasting from clipboard: {e}")
+                    elif event.unicode.isprintable():
+                        filename_input += event.unicode
+
+        # --- Drawing ---
+        pygame.draw.rect(screen, DIALOG_COLOR, (dialog_x, dialog_y, dialog_width, dialog_height))
+        pygame.draw.rect(screen, BLACK, (dialog_x, dialog_y, dialog_width, dialog_height), 2)
+
+        title_surf = dialog_font.render("Select Endgame Puzzle", True, BLACK)
+        screen.blit(title_surf, (dialog_x + (dialog_width - title_surf.get_width()) // 2, dialog_y + 15))
+
+        prompt_surf = ui_font.render("Enter filename (or leave blank for random):", True, BLACK)
+        screen.blit(prompt_surf, (dialog_x + 20, dialog_y + 55))
+
+        pygame.draw.rect(screen, WHITE, input_rect)
+        pygame.draw.rect(screen, BLACK, input_rect, 1 if not input_active else 2)
+        input_text_surf = ui_font.render(filename_input, True, BLACK)
+        screen.blit(input_text_surf, (input_rect.x + 5, input_rect.y + (input_rect.height - input_text_surf.get_height()) // 2))
+
+        if input_active and int(time.time() * 2) % 2 == 0:
+            cursor_x = input_rect.x + 5 + input_text_surf.get_width()
+            pygame.draw.line(screen, BLACK, (cursor_x, input_rect.y + 5), (cursor_x, input_rect.bottom - 5), 1)
+
+        hover_load = load_button_rect.collidepoint(pygame.mouse.get_pos())
+        color_load = BUTTON_HOVER if hover_load else BUTTON_COLOR
+        pygame.draw.rect(screen, color_load, load_button_rect)
+        load_text_surf = button_font.render("Load Puzzle", True, BLACK)
+        screen.blit(load_text_surf, load_text_surf.get_rect(center=load_button_rect.center))
+
+        hover_cancel = cancel_button_rect.collidepoint(pygame.mouse.get_pos())
+        color_cancel = BUTTON_HOVER if hover_cancel else BUTTON_COLOR
+        pygame.draw.rect(screen, color_cancel, cancel_button_rect)
+        cancel_text_surf = button_font.render("Cancel", True, BLACK)
+        screen.blit(cancel_text_surf, cancel_text_surf.get_rect(center=cancel_button_rect.center))
+
+        pygame.display.flip()
+        pygame.time.Clock().tick(30)
+
+    return None
+
+
+
+
 
 def show_insights_dialog(analysis_data, simulation_results, state):
     """
@@ -12450,9 +12577,8 @@ def save_sgs_batch(sgs_data_buffer, is_silent_run):
 
 
 
-# In Scrabble Game.py
 
-# This is the full, complete function with no code omitted.
+
 def handle_endgame_practice_flow(state):
     """
     Handles the specific turn flow for Endgame Practice mode, including showing
@@ -12461,7 +12587,7 @@ def handle_endgame_practice_flow(state):
     if state.get('practice_mode') == 'endgame' and state.get('paused_for_endgame_feedback'):
         # Show the feedback dialog first
         score = state.get('last_move_score_for_feedback', 0)
-        show_message_dialog(f"Correct! You scored {score} points.", "Good Move!")
+        show_message_dialog(f"Correct!")
 
         # Now that the dialog is closed, proceed with the AI's move
         solution_sequence = state.get('initial_game_config', {}).get('endgame_solution_sequence', [])
@@ -12472,13 +12598,15 @@ def handle_endgame_practice_flow(state):
         if opponent_turn_index < len(solution_sequence):
             opponent_move = solution_sequence[opponent_turn_index]
             
-            # --- MODIFICATION START: Add safety check and create full move_data dict ---
             if isinstance(opponent_move, dict):
+                ai_player_turn = 3 - state['turn']
+
                 # Use play_hint_move to execute the opponent's move
                 next_turn, drawn, newly_placed, consumed = play_hint_move(
                     opponent_move, state['tiles'], state['racks'],
                     state['blanks'], state['scores'],
-                    state['turn'], state['bag'],
+                    ai_player_turn, # Pass the correct AI turn number
+                    state['bag'],
                     state['board'], state['is_ai'],
                     state['practice_mode'], is_silent_batch_run_param=True
                 )
@@ -12490,8 +12618,8 @@ def handle_endgame_practice_flow(state):
                 word_with_blanks_opp = opponent_move.get('word_with_blanks', '')
 
                 move_data_opp = {
-                    'player': state['turn'], 'move_type': 'place',
-                    'rack': state['racks'][state['turn']-1][:], # Rack before the move
+                    'player': ai_player_turn, 'move_type': 'place',
+                    'rack': state['racks'][ai_player_turn-1][:], # Rack before the move
                     'drawn': drawn, 'newly_placed': newly_placed,
                     'tiles_played_from_rack': consumed,
                     'score': opponent_move.get('score', 0),
@@ -12512,18 +12640,18 @@ def handle_endgame_practice_flow(state):
                 state['turn'] = next_turn
             else:
                 # This case handles if the AI's move is "PASS" or data is malformed
+                ai_player_turn_pass = 3 - state['turn']
                 print(f"AI's next action in solution is '{opponent_move}'. Assuming PASS.")
                 # Create a pass move entry for history
                 pass_move_data = {
-                    'player': state['turn'], 'move_type': 'pass', 'rack': state['racks'][state['turn']-1][:],
+                    'player': ai_player_turn_pass, 'move_type': 'pass', 'rack': state['racks'][ai_player_turn_pass-1][:],
                     'score': 0, 'word': '', 'coord': '', 'blanks': set(), 'positions': [],
                     'drawn': [], 'is_bingo': False, 'word_with_blanks': '', 'turn_duration': 0.0,
                     'pool_quality_before_draw': 0.0, 'luck_factor': 0.0,
-                    'tiles_played_from_rack': [], 'leave': state['racks'][state['turn']-1][:]
+                    'tiles_played_from_rack': [], 'leave': state['racks'][ai_player_turn_pass-1][:]
                 }
                 state['move_history'].append(pass_move_data)
-                state['turn'] = 3 - state['turn'] # Advance turn
-            # --- MODIFICATION END ---
+                state['turn'] = 3 - ai_player_turn_pass # Advance turn
         
         # Reset flags
         state['paused_for_endgame_feedback'] = False
@@ -12536,14 +12664,10 @@ def handle_endgame_practice_flow(state):
 
 
 
-# In Scrabble Game.py
 
-# This is the full, complete function with no code omitted.
 def execute_game_session(is_initialized_from_outer_loop_param):
-    # MODULE-LEVEL GLOBALS that this function and its helpers will use/modify
     global USE_AI_SIMULATION, USE_ENDGAME_SOLVER
     global turn, previous_turn, game_over_state, final_scores
-    # MODULE-LEVEL GLOBALS that this function and its helpers will use/modify
     global turn, previous_turn, game_over_state, final_scores
     global human_played, pass_count, exchange_count, consecutive_zero_point_turns
     global dropdown_open, exchanging, hinting, showing_all_words, selected_tiles, typing, selected_square
@@ -12587,13 +12711,11 @@ def execute_game_session(is_initialized_from_outer_loop_param):
     global insights_data_for_replay, rack_visibility
 
 
-    # These were nonlocal, now local to this function and their final state returned
     _module_level_batch_stop_requested_internal = False
     _local_start_new_game_same_mode_internal = False
     _return_to_mode_selection_internal = False
-    _visual_batch_esc_stop_pending_internal = False # Specific to visualized batch ESC
+    _visual_batch_esc_stop_pending_internal = False
 
-    # Use global 'is_batch_running' and 'total_batch_games' which are set by initialize_game
     num_loops_exec = total_batch_games if is_batch_running else 1
     batch_start_time = time.perf_counter()
 
@@ -12602,14 +12724,10 @@ def execute_game_session(is_initialized_from_outer_loop_param):
 
     previous_game_over_state_in_loop = False
     
-    # --- MODIFICATION START: Add Pygame Clock ---
     clock = pygame.time.Clock()
-    # --- MODIFICATION END ---
 
-    # --- NEW: Initialize SGS data buffer for batch runs ---
     sgs_data_buffer = []
     SGS_WRITE_BATCH_SIZE = 1000
-    # --- END NEW ---
 
     try:
         for game_num_loop_internal in range(1, num_loops_exec + 1):
@@ -12680,7 +12798,6 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                     break
                 
                 
-                # --- THIS IS THE CORRECTED LOGIC FLOW ---
                 current_state_dict['gaddag_loading_status'] = gaddag_loading_status 
                 current_state_dict['GADDAG_STRUCTURE'] = GADDAG_STRUCTURE
                 current_state_dict['bag_count'] = len(current_state_dict.get('bag', []))
@@ -12706,9 +12823,7 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                 current_state_dict = handle_practice_messages(current_state_dict)
                 current_state_dict = handle_practice_restart(current_state_dict)
                 
-                # --- NEW: Handle the endgame practice flow after other updates ---
                 current_state_dict = handle_endgame_practice_flow(current_state_dict)
-                # --- END NEW ---
 
                 if not current_state_dict['running_inner']:
                     if current_state_dict.get('batch_stop_requested', False): _module_level_batch_stop_requested_internal = True
@@ -12771,7 +12886,6 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                                 show_message_dialog("Puzzle Solved!", "Congratulations")
                                 current_state_dict['showing_practice_end_dialog'] = True
                                 current_state_dict['practice_end_message'] = "Endgame Puzzle Solved!"
-                        # --- MODIFICATION END ---
 
                 # 3. Check for game over condition
                 if not current_state_dict.get('typing', False):
@@ -12780,18 +12894,15 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                      current_state_dict['running_inner'] = False 
                      break
 
-                # --- NEW: Update preview score before drawing ---
                 if current_state_dict.get('preview_score_enabled'):
                     current_state_dict['current_preview_score'] = update_preview_score(current_state_dict)
                 else:
                     current_state_dict['current_preview_score'] = 0
-                # --- END NEW ---
 
                 # 4. Draw the screen with the current state
                 if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
                     current_state_dict['drawn_rects'] = draw_game_screen(screen, current_state_dict)
                     pygame.display.flip()
-                    # --- MODIFICATION: Use the new flag to skip ticking during UI simulation ---
                     if not current_state_dict.get('is_simulating_for_ui', False):
                         clock.tick(60)
                 elif is_batch_running and not current_state_dict.get('is_simulating_for_ui', False): 
@@ -12801,9 +12912,7 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                 #    AND ONLY IF THE GAME IS NOT PAUSED FOR PRACTICE.
                 if not current_state_dict.get('paused_for_power_tile') and not current_state_dict.get('paused_for_bingo_practice'):
                     current_state_dict = handle_ai_turn_trigger(current_state_dict)
-                # --- END CORRECTED LOGIC FLOW ---
 
-                # --- MODIFICATION START: Add Endgame Generation Logic ---
                 if is_batch_running and initial_game_config.get('generate_endgames_mode', False):
                     # Check trigger condition after the AI turn has completed
                     bag_len_for_trigger = len(current_state_dict.get('bag', []))
@@ -12816,7 +12925,6 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                             no_blanks_on_racks = False
                         total_tiles_on_racks = len(racks_for_trigger[0]) + len(racks_for_trigger[1])
                     
-                    # --- THIS IS THE FIX ---
                     if bag_len_for_trigger == 0 and no_blanks_on_racks and total_tiles_on_racks <= 11 and len(racks_for_trigger[0]) > 0 and len(racks_for_trigger[1]) > 0:
                         print(f"--- Endgame Triggered in Game {current_batch_game_num} (Turn {len(move_history)}) ---")
                         
@@ -12858,10 +12966,8 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                         # Break the inner loop to move to the next game in the batch
                         current_state_dict['running_inner'] = False
                         break # Exit the while loop for this game
-                # --- MODIFICATION END ---
 
 
-            # --- MODIFICATION START: Batch SGS writing logic ---
             if is_batch_running and current_state_dict.get('game_over_state'):
                 # This block runs after a single batch game's inner loop has finished.
                 batch_prefix = initial_game_config.get('batch_filename_prefix', 'UNKNOWN-BATCH')
@@ -12903,7 +13009,6 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                 if (game_num_loop_internal % SGS_WRITE_BATCH_SIZE == 0) or (game_num_loop_internal == total_batch_games):
                     save_sgs_batch(sgs_data_buffer, is_silent_run=(not DEV_VISUALIZE_BATCH_ENABLED_SESSION))
                     sgs_data_buffer.clear() # Clear the buffer after writing
-            # --- MODIFICATION END ---
 
 
             game_mode = current_state_dict['game_mode']
@@ -12949,12 +13054,10 @@ def execute_game_session(is_initialized_from_outer_loop_param):
             _return_to_mode_selection_internal = True 
 
     finally:
-        # --- NEW: This block ensures any remaining buffered SGS files are saved ---
         if is_batch_running and sgs_data_buffer:
             print(f"--- Interruption/End of Batch: Saving remaining {len(sgs_data_buffer)} buffered SGS files... ---")
             save_sgs_batch(sgs_data_buffer, is_silent_run=(not DEV_VISUALIZE_BATCH_ENABLED_SESSION))
             sgs_data_buffer.clear()
-        # --- END NEW ---
 
     if is_batch_running and batch_results: 
         total_batch_duration_seconds = time.perf_counter() - batch_start_time
@@ -13038,11 +13141,9 @@ def populate_dummy_analyzer_data(move_history_list):
 
 
 def main(is_initialized_from_outer_loop_param): # Renamed for clarity
-    # MODULE-LEVEL GLOBALS that this function and its helpers will use/modify
     global GADDAG_STRUCTURE, gaddag_loading_status, gaddag_load_thread
     global DEV_CPROFILE_ENABLED_SESSION, DEV_VISUALIZE_BATCH_ENABLED_SESSION
     global ai_sim_num_candidates_global, ai_sim_num_opponent_sims_global, ai_sim_num_post_sim_candidates_global
-    # These are set by initialize_game and used by execute_game_session
     global game_mode, is_ai, player_names, human_player, practice_mode, letter_checks, number_checks
     global USE_ENDGAME_SOLVER, USE_AI_SIMULATION, active_practice_state_data
     global board, tiles, racks, blanks, scores, bag, move_history, first_play, initial_racks, turn
@@ -13061,14 +13162,12 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
     just_finished_a_batch = False
 
     if not is_initialized_from_outer_loop_param:
-        # --- NEW SYNCHRONOUS LOADING LOGIC ---
         if gaddag_loading_status == 'idle':
             print("--- Main: Loading AI data synchronously... ---")
             _load_gaddag_background() # Call directly, not in a thread
             _load_word_definitions_background() # Call directly
             print("--- Main: All data loaded. ---")
         
-        # --- NEW: Initialize the Cython AI Engine with constants ---
         # This is done once to pass all necessary data to the Cython module,
         # avoiding slow Python-to-C calls during move generation.
         if gaddag_loading_status == 'loaded' and GADDAG_STRUCTURE is not None:
@@ -13096,7 +13195,6 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
             )
             print("--- Cython AI Engine Initialized. ---")
 
-            # --- NEW: AI Engine Warm-up Call ---
         # This forces the JIT compilation of the Cython functions to happen now,
         # preventing a long lag on the first AI turn.
         try:
@@ -13119,15 +13217,13 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
             
         else:
             print("--- WARNING: GADDAG not loaded. AI Engine initialization skipped. AI will not function. ---")
-        # --- END NEW ---
         
         selected_mode_result, return_data_mode_sel = mode_selection_screen()
         init_result = initialize_game(selected_mode_result, return_data_mode_sel, False) # False for main_called_flag
         if init_result is None:
             print("--- main(): Initialization failed. Exiting. ---")
-            return False, False # Signal to quit program
+            return False, False
 
-        # --- MODIFICATION: Remove flags from tuple unpacking ---
         (game_mode, is_loaded_game, player_names, move_history, final_scores,
          replay_initial_shuffled_bag, board, tiles, scores, blanks, racks, bag,
          replay_mode, current_replay_turn, practice_mode, is_ai, human_player,
@@ -13148,7 +13244,6 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
          bbb_8l_max_prob_global,
          rack_visibility
          ) = init_result
-        # --- END MODIFICATION ---
 
         if replay_mode:
             analyzer_data_for_replay = populate_dummy_analyzer_data(move_history)
@@ -13165,7 +13260,6 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
         else:
             analyzer_data_for_replay = []
 
-    # --- MODIFICATION START: Corrected Profiling Logic ---
     session_flags = {}
     if DEV_CPROFILE_ENABLED_SESSION:
         if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
@@ -13174,32 +13268,26 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
         profiler = cProfile.Profile()
         
         temp_namespace = {}
-        # --- MODIFICATION: Remove parameters from execute_game_session call ---
         profiler.runctx('temp_namespace["result"] = execute_game_session(is_initialized_from_outer_loop_param)',
                         globals(),
                         {'execute_game_session': execute_game_session,
                          'is_initialized_from_outer_loop_param': is_initialized_from_outer_loop_param,
                          'temp_namespace': temp_namespace})
-        # --- END MODIFICATION ---
         session_flags = temp_namespace.get("result", {})
 
-        # This block now runs UNCONDITIONALLY if profiling was enabled
         print("\n--- cProfile Stats ---")
         stats_obj = pstats.Stats(profiler, stream=sys.stdout).sort_stats('cumulative')
-        stats_obj.print_stats(30) # Print the top 30 cumulative time functions
+        stats_obj.print_stats(30)
         
         if is_batch_running:
             just_finished_a_batch = True
     else:
-        # If not profiling, just run the session normally.
-        # --- MODIFICATION: Remove parameters from execute_game_session call ---
+        
         session_flags = execute_game_session(is_initialized_from_outer_loop_param)
-        # --- END MODIFICATION ---
-    # --- MODIFICATION END ---
+        
 
-    # If we just finished a batch run, we need to exit the program.
     if just_finished_a_batch:
-        return False, False # This tells the main while loop to terminate.
+        return False, False 
 
     _module_level_batch_stop_requested_main = session_flags.get('batch_stop_requested', False)
     _local_start_new_game_same_mode_main = session_flags.get('start_new_game_same_mode', False)
