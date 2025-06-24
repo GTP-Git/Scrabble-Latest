@@ -3,9 +3,8 @@
 
 
 #python
-#Scrabble AZ
-#Fixed incorrect board state and player turn in Endgame practice mode
-#Fixed Correct! msg for Endgame Practice Mode
+#Scrabble BA
+#Implementing multiprocessing for endgame solver
 
 
 
@@ -28,6 +27,21 @@ from collections import Counter
 import copy
 import threading
 import ai_engine
+import multiprocessing
+
+
+INIT_ARGS = None
+
+def init_worker(*args):
+    """Initializer for multiprocessing pool to set up globals in worker processes."""
+    # --- MODIFICATION START: Accept args directly ---
+    print(f"[Worker PID: {os.getpid()}] Initializing worker process...")
+    if args:
+        ai_engine.init_ai_engine(*args)
+        print(f"[Worker PID: {os.getpid()}] Cython engine initialized successfully.")
+    else:
+        print(f"[Worker PID: {os.getpid()}] WARNING: No init args received. Worker will not have AI engine data.")
+    # --- MODIFICATION END ---
 
 
 
@@ -69,9 +83,13 @@ class Gaddag:
 
     # No insert method needed here, as we load a pre-built structure.
 
-# Initialize Pygame
-pygame.init()
-main_called = False # Flag to track if main() has been entered
+
+
+
+# Global bag - initialized properly in main() or practice setup
+bag = []
+
+# This block of constants should be in the global scope, NOT inside a function or if-block.
 
 # Constants
 GADDAG_STRUCTURE = None
@@ -89,28 +107,24 @@ CENTER_SQUARE = (7, 7)
 OPTIONS_WIDTH = 100
 OPTIONS_HEIGHT = 30
 DROPDOWN_HEIGHT = 90
-OPTIONS_Y = BOARD_SIZE + 60  # Adjusted from +40 to align with shifted UI
+OPTIONS_Y = BOARD_SIZE + 60
 DOUBLE_CLICK_TIME = 300
-SECOND_CLICK_TIME = 500  # Time window for second click
+SECOND_CLICK_TIME = 500
 ALL_WORDS_DIALOG_WIDTH = 750
 ALL_WORDS_DIALOG_HEIGHT = 600
 SCROLL_SPEED = 20
 
 STATS_LABEL_X_OFFSET = 10
-STATS_P1_VAL_X_OFFSET = 160 # Increased from 120
-STATS_P2_VAL_X_OFFSET = 270 # Increased from 230
-
+STATS_P1_VAL_X_OFFSET = 160
+STATS_P2_VAL_X_OFFSET = 270
 
 LEAVE_LOOKUP_TABLE = {}
-
 
 EXCHANGE_PREFERENCE_THRESHOLD = 10
 LOW_SCORE_THRESHOLD = 15
 
-
 DEV_CPROFILE_ENABLED_SESSION = False
 DEV_VISUALIZE_BATCH_ENABLED_SESSION = False
-
 
 VC_VALID = "VALID"
 VC_INVALID_WORDS = "INVALID_WORDS"
@@ -120,9 +134,8 @@ VC_INVALID_STRUCTURE_NOT_CENTER = "INVALID_STRUCTURE_NOT_CENTER"
 VC_INVALID_STRUCTURE_NOT_CONNECTED = "INVALID_STRUCTURE_NOT_CONNECTED"
 VC_INVALID_STRUCTURE_EMPTY_PLAY = "INVALID_STRUCTURE_EMPTY_PLAY"
 
-
 # --- Simulation Defaults ---
-DEFAULT_PLY_DEPTH = 2 # Not currently used by run_ai_simulation, but good practice
+DEFAULT_PLY_DEPTH = 2
 DEFAULT_AI_CANDIDATES = 10
 DEFAULT_OPPONENT_SIMULATIONS = 50
 DEFAULT_POST_SIM_CANDIDATES = 10
@@ -130,7 +143,7 @@ DEFAULT_POST_SIM_CANDIDATES = 10
 # Dialog dimensions for game over dialog
 DIALOG_WIDTH = 480
 DIALOG_HEIGHT = 250
-LETTERS = "ABCDEFGHIJKLMNO"  # For column labels
+LETTERS = "ABCDEFGHIJKLMNO"
 
 # Set fixed window size for consistency across environments
 WINDOW_WIDTH = 1400
@@ -141,7 +154,7 @@ WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 RED = (255, 100, 100)
 PINK = (255, 182, 193)
-BLUE = (0, 102, 204)  # Darkened from (173, 216, 230) for TL
+BLUE = (0, 102, 204)
 LIGHT_BLUE = (135, 206, 250)
 HIGHLIGHT_BLUE = (191, 238, 255)
 YELLOW = (255, 255, 153)
@@ -160,57 +173,8 @@ ARROW_COLOR = (0, 0, 255)
 HINT_NORMAL_COLOR = (220, 220, 220)
 HINT_SELECTED_COLOR = (180, 180, 255)
 
-# Setup display and font
-screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
-pygame.display.set_caption("Scrabble Game")
-font = pygame.font.SysFont("Arial", FONT_SIZE, bold=True)
-ui_font = pygame.font.SysFont("Arial", 20)
-button_font = pygame.font.SysFont("Arial", 16)
-tile_count_font = pygame.font.SysFont("Arial", 14)
-dialog_font = pygame.font.SysFont("Arial", 24)
 
-# Tile bag and values (moved up to be defined before trie)
-TILE_DISTRIBUTION = {
-    'A': (9, 1), 'B': (2, 3), 'C': (2, 3), 'D': (4, 2), 'E': (12, 1), 'F': (2, 4),
-    'G': (3, 2), 'H': (2, 4), 'I': (9, 1), 'J': (1, 8), 'K': (1, 5), 'L': (4, 1),
-    'M': (2, 3), 'N': (6, 1), 'O': (8, 1), 'P': (2, 3), 'Q': (1, 10), 'R': (6, 1),
-    'S': (4, 1), 'T': (6, 1), 'U': (4, 1), 'V': (2, 4), 'W': (2, 4), 'X': (1, 8),
-    'Y': (2, 4), 'Z': (1, 10), ' ': (2, 0)
-}
-# Global bag - initialized properly in main() or practice setup
-bag = []
 
-POWER_TILES = {'J', 'Q', 'X', 'Z'}
-
-# Global game state variables (will be initialized/reset in main)
-board = None
-tiles = None
-racks = None
-blanks = None
-scores = None
-turn = 1
-first_play = True
-game_mode = None
-is_ai = None
-practice_mode = None # Added to track practice modes like "eight_letter", "power_tiles"
-move_history = []
-replay_mode = False
-current_replay_turn = 0
-last_word = ""
-last_score = 0
-last_start = None
-last_direction = None
-gaddag_loading_status = 'idle' # Tracks status: 'idle', 'loading', 'loaded', 'error'
-gaddag_load_thread = None # Holds the thread object
-insights_data_for_replay = []
-
-is_solving_endgame = False # Flag to indicate AI is in endgame calculation
-endgame_start_time = 0 # To track duration if needed
-scroll_offset = 0
-
-WORD_DEFINITIONS = {}
-word_definitions_loading_status = 'idle' # 'idle', 'loading', 'loaded', 'error'
-word_definitions_load_thread = None
 
 
 
@@ -253,46 +217,12 @@ def _load_word_definitions_background():
 
 
 
-# Load the DAWG with words from "All Words 2023.txt"
-DAWG = ai_engine.Dawg() # Use the Cythonized Dawg class
-try:
-    # Ensure the path is correct or adjust as needed
-    with open("All Words 2023.txt", "r") as f:
-        for word in (w.strip().upper() for w in f):
-            if len(word) > 1: # Optionally filter out single-letter words if not needed
-                DAWG.insert(word)
-    if 'DEV_VISUALIZE_BATCH_ENABLED_SESSION' in globals() and DEV_VISUALIZE_BATCH_ENABLED_SESSION:
-        print("DAWG loaded successfully.")
-    elif 'DEV_VISUALIZE_BATCH_ENABLED_SESSION' not in globals(): # If global not yet defined, print
-        print("DAWG loaded successfully.")
-
-except FileNotFoundError:
-    # Critical error, always print
-    print("Error: 'All Words 2023.txt' not found. Word validation will not work.")
 
 
 
 
-# --- Load Word Lists by Length for Probability ---
-WORD_LISTS_BY_LENGTH = {}
-try:
-    print("Loading word lists by length for probability lookup...")
-    load_start_time = time.time()
-    with open("All Words 2023.txt", "r") as f:
-        for word in f:
-            word = word.strip().upper()
-            word_len = len(word)
-            if word_len > 0:
-                if word_len not in WORD_LISTS_BY_LENGTH:
-                    WORD_LISTS_BY_LENGTH[word_len] = []
-                WORD_LISTS_BY_LENGTH[word_len].append(word)
-    load_duration = time.time() - load_start_time
-    print(f"Word lists by length loaded successfully in {load_duration:.2f} seconds.")
-except FileNotFoundError:
-    print("Warning: All Words 2023.txt not found. Word probability lookup will be disabled.")
-except Exception as e:
-    print(f"Error loading word lists by length: {e}")
-# --- End Load ---
+
+
 
 
 
@@ -323,47 +253,13 @@ def _load_gaddag_background():
 
 
 
-# --- Load Leave Lookup Table ---
-LEAVE_LOOKUP_TABLE = {} # Global dictionary
-try:
-    print("Loading leave evaluation table...")
-    load_start = time.time()
-    with open("NWL23-leaves.pkl", 'rb') as f_load:
-        LEAVE_LOOKUP_TABLE = pickle.load(f_load)
-    print(f"Leave table loaded with {len(LEAVE_LOOKUP_TABLE)} entries in {time.time() - load_start:.2f} seconds.")
-except FileNotFoundError:
-    print("Warning: leave_table.pkl not found. Leave evaluation might be slower or inaccurate.")
-    # Optionally, add fallback to load from CSV here if desired
-except Exception as e:
-    print(f"Error loading leave_table.pkl: {e}")
-# --- End Load ---
 
 
 
 
 
-# --- Load Word Lists for Practice Modes ---
-seven_letter_words = []
-eight_letter_words = []
-try:
-    with open("7-letter-list.txt", "r") as f_7l:
-        seven_letter_words = [line.strip().upper() for line in f_7l]
-    if 'DEV_VISUALIZE_BATCH_ENABLED_SESSION' in globals() and DEV_VISUALIZE_BATCH_ENABLED_SESSION:
-        print("7-letter word list loaded successfully.")
-    elif 'DEV_VISUALIZE_BATCH_ENABLED_SESSION' not in globals():
-        print("7-letter word list loaded successfully.")
-except FileNotFoundError:
-    print("Warning: 7-letter-list.txt not found. BBB practice mode may not function correctly.")
 
-try:
-    with open("8-letter-list.txt", "r") as f_8l:
-        eight_letter_words = [line.strip().upper() for line in f_8l]
-    if 'DEV_VISUALIZE_BATCH_ENABLED_SESSION' in globals() and DEV_VISUALIZE_BATCH_ENABLED_SESSION:
-        print("8-letter word list loaded successfully.")
-    elif 'DEV_VISUALIZE_BATCH_ENABLED_SESSION' not in globals():
-        print("8-letter word list loaded successfully.")
-except FileNotFoundError:
-    print("Warning: 8-letter-list.txt not found. BBB practice mode may not function correctly.")
+
 
 
 # --- Mode Selection Constants ---
@@ -6129,16 +6025,61 @@ def ai_turn(state):
         '8L_max': bbb_8l_max_prob_global
     }
 
-    # Call the unified Cython AI brain
-    action_chosen, details = ai_engine.determine_best_action(
-        current_rack, state['tiles'], state['board'], state['blanks'], state['bag'], state['first_play'],
-        USE_AI_SIMULATION, USE_ENDGAME_SOLVER, is_plaid_mode,
-        opponent_rack_len, state.get('ai_sim_num_candidates_cfg', DEFAULT_AI_CANDIDATES),
-        state.get('ai_sim_num_opponent_sims_cfg', DEFAULT_OPPONENT_SIMULATIONS),
-        state.get('ai_sim_num_post_sim_candidates_cfg', DEFAULT_POST_SIM_CANDIDATES),
-        current_score_diff, state['practice_mode'], state['letter_checks'], bbb_thresholds,
-        is_silent_batch_run_param=is_silent_batch_run_param
-    )
+    # --- MODIFICATION START: Create and manage multiprocessing pool ---
+    action_chosen = None
+    details = None
+    
+    # Determine if we need the pool
+    use_pool = USE_ENDGAME_SOLVER and len(state['bag']) == 0
+
+    if use_pool:
+        try:
+            # --- ADDED DEBUG PRINT ---
+            print("--- ai_turn: Creating MULTIPROCESSING pool for endgame solve... ---")
+            # --- MODIFICATION: Get init_args from state ---
+            init_args_for_pool = state.get('init_args')
+            if not init_args_for_pool:
+                raise ValueError("init_args not found in game state for multiprocessing.")
+            
+            # Use a 'with' statement to ensure the pool is properly closed
+            with multiprocessing.Pool(processes=os.cpu_count(), initializer=init_worker, initargs=init_args_for_pool) as p:
+                action_chosen, details = ai_engine.determine_best_action(
+                    current_rack, state['tiles'], state['board'], state['blanks'], state['bag'], state['first_play'],
+                    USE_AI_SIMULATION, USE_ENDGAME_SOLVER, is_plaid_mode,
+                    opponent_rack_len, state.get('ai_sim_num_candidates_cfg', DEFAULT_AI_CANDIDATES),
+                    state.get('ai_sim_num_opponent_sims_cfg', DEFAULT_OPPONENT_SIMULATIONS),
+                    state.get('ai_sim_num_post_sim_candidates_cfg', DEFAULT_POST_SIM_CANDIDATES),
+                    current_score_diff, state['practice_mode'], state['letter_checks'], bbb_thresholds,
+                    is_silent_batch_run_param=is_silent_batch_run_param,
+                    pool=p  # Pass the pool object
+                )
+        except Exception as e:
+            print(f"CRITICAL ERROR creating multiprocessing pool in ai_turn: {e}")
+            print("Falling back to single-threaded endgame solver.")
+            # Fallback call without a pool
+            action_chosen, details = ai_engine.determine_best_action(
+                current_rack, state['tiles'], state['board'], state['blanks'], state['bag'], state['first_play'],
+                USE_AI_SIMULATION, USE_ENDGAME_SOLVER, is_plaid_mode,
+                opponent_rack_len, state.get('ai_sim_num_candidates_cfg', DEFAULT_AI_CANDIDATES),
+                state.get('ai_sim_num_opponent_sims_cfg', DEFAULT_OPPONENT_SIMULATIONS),
+                state.get('ai_sim_num_post_sim_candidates_cfg', DEFAULT_POST_SIM_CANDIDATES),
+                current_score_diff, state['practice_mode'], state['letter_checks'], bbb_thresholds,
+                is_silent_batch_run_param=is_silent_batch_run_param,
+                pool=None # Pass None
+            )
+    else:
+        # Standard call for non-endgame turns or when solver is disabled
+        action_chosen, details = ai_engine.determine_best_action(
+            current_rack, state['tiles'], state['board'], state['blanks'], state['bag'], state['first_play'],
+            USE_AI_SIMULATION, USE_ENDGAME_SOLVER, is_plaid_mode,
+            opponent_rack_len, state.get('ai_sim_num_candidates_cfg', DEFAULT_AI_CANDIDATES),
+            state.get('ai_sim_num_opponent_sims_cfg', DEFAULT_OPPONENT_SIMULATIONS),
+            state.get('ai_sim_num_post_sim_candidates_cfg', DEFAULT_POST_SIM_CANDIDATES),
+            current_score_diff, state['practice_mode'], state['letter_checks'], bbb_thresholds,
+            is_silent_batch_run_param=is_silent_batch_run_param,
+            pool=None # Pass None
+        )
+    # --- MODIFICATION END ---
 
     # --- Process the result from the Cython function ---
     if action_chosen == 'PAUSE':
@@ -6251,10 +6192,6 @@ def ai_turn(state):
 
 
 
-# In Scrabble Game.py
-
-# This is the full, complete function with no code omitted.
-
 def initialize_game(selected_mode_result, return_data, main_called_flag):
     """
     Initializes the game state based on the selected mode and data.
@@ -6262,8 +6199,8 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
     Sets global DEV_CPROFILE_ENABLED_SESSION and DEV_VISUALIZE_BATCH_ENABLED_SESSION.
     Returns game state variables excluding the dev flags (as they are now global for the session).
     Print statements are now conditional.
-    MODIFIED: Now directly sets global USE_AI_SIMULATION and USE_ENDGAME_SOLVER.
-    NO CODE OMITTED.
+    MODIFIED: Now also saves the raw solution sequence for validation.
+    MODIFIED: Now initializes the Cython engine and returns the init_args tuple.
     """
     global GADDAG_STRUCTURE
     global gaddag_loading_status
@@ -6274,6 +6211,31 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
     global insights_data_for_replay
     global screen, ui_font, RED, WHITE, BLACK, BLUE
     global TILE_DISTRIBUTION, LETTERS, GRID_SIZE 
+
+    # --- MODIFICATION START: Initialize Cython engine and create init_args ---
+    init_args = None
+    if gaddag_loading_status == 'loaded' and GADDAG_STRUCTURE is not None:
+        ai_engine.init_ai_engine(
+            grid_size=GRID_SIZE, center_square=CENTER_SQUARE, dawg=DAWG,
+            gaddag_root=GADDAG_STRUCTURE.root, tile_distribution=TILE_DISTRIBUTION,
+            gaddag_separator=Gaddag.SEPARATOR, leave_lookup_table=LEAVE_LOOKUP_TABLE,
+            vc_valid=VC_VALID, vc_invalid_words=VC_INVALID_WORDS,
+            vc_invalid_structure_placement=VC_INVALID_STRUCTURE_PLACEMENT,
+            vc_invalid_structure_no_words=VC_INVALID_STRUCTURE_NO_WORDS,
+            vc_invalid_structure_not_center=VC_INVALID_STRUCTURE_NOT_CENTER,
+            vc_invalid_structure_not_connected=VC_INVALID_STRUCTURE_NOT_CONNECTED,
+            vc_invalid_structure_empty_play=VC_INVALID_STRUCTURE_EMPTY_PLAY,
+            light_blue=LIGHT_BLUE, blue=BLUE, pink=PINK, red=RED, letters=LETTERS
+        )
+        init_args = (
+            GRID_SIZE, CENTER_SQUARE, DAWG, GADDAG_STRUCTURE.root,
+            TILE_DISTRIBUTION, Gaddag.SEPARATOR, LEAVE_LOOKUP_TABLE,
+            VC_VALID, VC_INVALID_WORDS, VC_INVALID_STRUCTURE_PLACEMENT,
+            VC_INVALID_STRUCTURE_NO_WORDS, VC_INVALID_STRUCTURE_NOT_CENTER,
+            VC_INVALID_STRUCTURE_NOT_CONNECTED, VC_INVALID_STRUCTURE_EMPTY_PLAY,
+            LIGHT_BLUE, BLUE, PINK, RED, LETTERS
+        )
+    # --- MODIFICATION END ---
 
     dev_cprofile_checked_init = False
     dev_visualize_batch_checked_init = False
@@ -6605,7 +6567,7 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
             batch_seq_num = max_existing_batch_num + 1
         except OSError as e_os_err: print(f"Warning: Error listing directory for batch sequence number: {e_os_err}. Using sequence 1.")
         batch_base_filename_prefix = f"{batch_date_str}-{batch_time_str}-BATCH-{batch_seq_num}"
-        # --- MODIFICATION START: Add generate_endgames_mode to config ---
+        # --- MODIFICATION START: Add init_args to config ---
         initial_game_config = {
             'game_mode': game_mode, 'player_names': player_names_sel, 'human_player': human_player_sel,
             'use_endgame_solver': USE_ENDGAME_SOLVER, 'use_ai_simulation': USE_AI_SIMULATION,
@@ -6616,7 +6578,8 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
             'bbb_7l_max_prob': bbb_7l_max_prob_init, 
             'bbb_8l_max_prob': bbb_8l_max_prob_init,
             'plaid_mode': plaid_mode_checked,
-            'generate_endgames_mode': generate_endgames_checked
+            'generate_endgames_mode': generate_endgames_checked,
+            'init_args': init_args
         }
         # --- MODIFICATION END ---
         player_names = player_names_sel
@@ -6820,7 +6783,8 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
             last_scoreboard_click_idx_init, \
             bbb_7l_max_prob_init, \
             bbb_8l_max_prob_init, \
-            rack_visibility \
+            rack_visibility, \
+            init_args \
             )
 
 
@@ -7894,12 +7858,32 @@ def _handle_general_mouse_down(event, state, drawn_rects):
                     print(f"  Opponent Rack (Reconstructed): {rack_opponent}")
                     print(f"  Score Diff: {score_diff}")
 
-                # --- MODIFICATION START: Time the solver call ---
+                # --- MODIFICATION START: Use multiprocessing pool ---
                 start_time = time.perf_counter()
-                _, formatted_lines, _ = ai_engine.solve_endgame(
-                    rack_player, rack_opponent, board_state_tiles, board_state_blanks, 
-                    state['board'], score_diff, is_silent_batch_run_param=True
-                )
+                formatted_lines = []
+                try:
+                    # --- ADDED DEBUG PRINT ---
+                    print("--- _handle_general_mouse_down: Creating MULTIPROCESSING pool for replay solve... ---")
+                    # --- MODIFICATION: Get init_args from state ---
+                    init_args_for_pool = state.get('init_args')
+                    if not init_args_for_pool:
+                        raise ValueError("init_args not found in game state for multiprocessing.")
+
+                    with multiprocessing.Pool(processes=os.cpu_count(), initializer=init_worker, initargs=init_args_for_pool) as pool:
+                        _, formatted_lines, _ = ai_engine.solve_endgame(
+                            pool, # Pass the pool object
+                            rack_player, rack_opponent, board_state_tiles, board_state_blanks, 
+                            state['board'], score_diff, is_silent_batch_run_param=True
+                        )
+                except Exception as e:
+                    print(f"CRITICAL ERROR creating multiprocessing pool in replay solve: {e}")
+                    print("Falling back to single-threaded endgame solver.")
+                    # Fallback to single-threaded
+                    _, formatted_lines, _ = ai_engine.solve_endgame(
+                        None, # Pass None for the pool
+                        rack_player, rack_opponent, board_state_tiles, board_state_blanks, 
+                        state['board'], score_diff, is_silent_batch_run_param=True
+                    )
                 end_time = time.perf_counter()
                 duration = end_time - start_time
                 duration_str = f"Solved in {duration:.2f} seconds"
@@ -12789,6 +12773,10 @@ def execute_game_session(is_initialized_from_outer_loop_param):
             current_state_dict['ai_sim_num_candidates_cfg'] = ai_sim_num_candidates_global
             current_state_dict['ai_sim_num_opponent_sims_cfg'] = ai_sim_num_opponent_sims_global
             current_state_dict['ai_sim_num_post_sim_candidates_cfg'] = ai_sim_num_post_sim_candidates_global
+            
+            # --- MODIFICATION START: Store init_args in the state dictionary ---
+            current_state_dict['init_args'] = initial_game_config.get('init_args')
+            # --- MODIFICATION END ---
 
             
 
@@ -12947,6 +12935,7 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                         score_diff_for_solve = puzzle_state_to_save['scores'][player_idx] - puzzle_state_to_save['scores'][opponent_idx]
                         
                         _, formatted_lines, raw_sequence = ai_engine.solve_endgame(
+                            None, # Pass None for pool, as this is in the main process
                             puzzle_state_to_save['rack_player_to_move'],
                             puzzle_state_to_save['rack_opponent'],
                             puzzle_state_to_save['tiles'],
@@ -13156,67 +13145,52 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
     global bbb_7l_max_prob_global, bbb_8l_max_prob_global
     global analyzer_data_for_replay
     global insights_data_for_replay, rack_visibility
+    # --- MODIFICATION START: Removed INIT_ARGS global ---
+    # global INIT_ARGS
+    # --- MODIFICATION END ---
 
     # This flag will be set to True only if a batch run was just completed.
     # This is the key to controlling when to print stats and exit.
     just_finished_a_batch = False
 
+    # --- MODIFICATION START: Removed AI engine init from here ---
+    # The initialization will now happen inside initialize_game
+    # --- MODIFICATION END ---
+
     if not is_initialized_from_outer_loop_param:
+        # This block now only handles one-time data loading and JIT warm-up
         if gaddag_loading_status == 'idle':
             print("--- Main: Loading AI data synchronously... ---")
             _load_gaddag_background() # Call directly, not in a thread
             _load_word_definitions_background() # Call directly
             print("--- Main: All data loaded. ---")
         
-        # This is done once to pass all necessary data to the Cython module,
-        # avoiding slow Python-to-C calls during move generation.
-        if gaddag_loading_status == 'loaded' and GADDAG_STRUCTURE is not None:
-            print("--- Initializing Cython AI Engine with game constants... ---")
-            ai_engine.init_ai_engine(
-                grid_size=GRID_SIZE,
-                center_square=CENTER_SQUARE,
-                dawg=DAWG,
-                gaddag_root=GADDAG_STRUCTURE.root,
-                tile_distribution=TILE_DISTRIBUTION,
-                gaddag_separator=Gaddag.SEPARATOR,
-                leave_lookup_table=LEAVE_LOOKUP_TABLE,
-                vc_valid=VC_VALID,
-                vc_invalid_words=VC_INVALID_WORDS,
-                vc_invalid_structure_placement=VC_INVALID_STRUCTURE_PLACEMENT,
-                vc_invalid_structure_no_words=VC_INVALID_STRUCTURE_NO_WORDS,
-                vc_invalid_structure_not_center=VC_INVALID_STRUCTURE_NOT_CENTER,
-                vc_invalid_structure_not_connected=VC_INVALID_STRUCTURE_NOT_CONNECTED,
-                vc_invalid_structure_empty_play=VC_INVALID_STRUCTURE_EMPTY_PLAY,
-                light_blue=LIGHT_BLUE,
-                blue=BLUE,
-                pink=PINK,
-                red=RED,
-                letters=LETTERS
-            )
-            print("--- Cython AI Engine Initialized. ---")
-
         # This forces the JIT compilation of the Cython functions to happen now,
         # preventing a long lag on the first AI turn.
         try:
-            print("--- Warming up AI Engine (one-time JIT compilation)... ---")
-            # Use a dummy board state and rack for the warm-up.
-            # The results are discarded; the goal is just to trigger compilation.
-            _ = ai_engine.generate_all_moves_gaddag(
-                ['A', 'B', 'C', 'D', 'E', 'F', 'G'],
-                [['' for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)],
-                create_board()[0],
-                set(),
-                is_silent_batch_run_param=True
-            )
-            print("--- AI Engine is ready. ---")
+            # We need to initialize the engine once here just for the warm-up call
+            if gaddag_loading_status == 'loaded' and GADDAG_STRUCTURE is not None:
+                print("--- Warming up AI Engine (one-time JIT compilation)... ---")
+                ai_engine.init_ai_engine(
+                    grid_size=GRID_SIZE, center_square=CENTER_SQUARE, dawg=DAWG,
+                    gaddag_root=GADDAG_STRUCTURE.root, tile_distribution=TILE_DISTRIBUTION,
+                    gaddag_separator=Gaddag.SEPARATOR, leave_lookup_table=LEAVE_LOOKUP_TABLE,
+                    vc_valid=VC_VALID, vc_invalid_words=VC_INVALID_WORDS,
+                    vc_invalid_structure_placement=VC_INVALID_STRUCTURE_PLACEMENT,
+                    vc_invalid_structure_no_words=VC_INVALID_STRUCTURE_NO_WORDS,
+                    vc_invalid_structure_not_center=VC_INVALID_STRUCTURE_NOT_CENTER,
+                    vc_invalid_structure_not_connected=VC_INVALID_STRUCTURE_NOT_CONNECTED,
+                    vc_invalid_structure_empty_play=VC_INVALID_STRUCTURE_EMPTY_PLAY,
+                    light_blue=LIGHT_BLUE, blue=BLUE, pink=PINK, red=RED, letters=LETTERS
+                )
+                _ = ai_engine.generate_all_moves_gaddag(
+                    ['A', 'B', 'C', 'D', 'E', 'F', 'G'],
+                    [['' for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)],
+                    create_board()[0], set(), is_silent_batch_run_param=True
+                )
+                print("--- AI Engine is ready. ---")
         except Exception as e_warmup:
             print(f"WARNING: AI Engine warm-up call failed: {e_warmup}")
-
-
-
-            
-        else:
-            print("--- WARNING: GADDAG not loaded. AI Engine initialization skipped. AI will not function. ---")
         
         selected_mode_result, return_data_mode_sel = mode_selection_screen()
         init_result = initialize_game(selected_mode_result, return_data_mode_sel, False) # False for main_called_flag
@@ -13242,7 +13216,8 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
          last_scoreboard_click_idx,
          bbb_7l_max_prob_global,
          bbb_8l_max_prob_global,
-         rack_visibility
+         rack_visibility,
+         _ # Discard the init_args from this tuple
          ) = init_result
 
         if replay_mode:
@@ -13312,16 +13287,111 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
 
 
 if __name__ == "__main__":
+    # --- MODIFICATION START: Set multiprocessing start method ---
+    # This must be done within the __name__ == '__main__' block for compatibility,
+    # especially on macOS and Windows. 'spawn' is safer for GUI apps.
+    try:
+        multiprocessing.set_start_method('spawn')
+        print("--- Multiprocessing start method set to 'spawn'. ---")
+    except RuntimeError:
+        # This will happen if the start method has already been set, which is fine.
+        print("--- Multiprocessing start method was already set. ---")
+    # --- MODIFICATION END ---
+
     print("--- Script execution started (__name__ == '__main__') ---")
+
+    # --- ALL INITIALIZATION CODE MOVED HERE ---
+    pygame.init()
+    main_called = False
+    screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+    pygame.display.set_caption("Scrabble Game")
+    font = pygame.font.SysFont("Arial", FONT_SIZE, bold=True)
+    ui_font = pygame.font.SysFont("Arial", 20)
+    button_font = pygame.font.SysFont("Arial", 16)
+    tile_count_font = pygame.font.SysFont("Arial", 14)
+    dialog_font = pygame.font.SysFont("Arial", 24)
+
+    TILE_DISTRIBUTION = {
+        'A': (9, 1), 'B': (2, 3), 'C': (2, 3), 'D': (4, 2), 'E': (12, 1), 'F': (2, 4),
+        'G': (3, 2), 'H': (2, 4), 'I': (9, 1), 'J': (1, 8), 'K': (1, 5), 'L': (4, 1),
+        'M': (2, 3), 'N': (6, 1), 'O': (8, 1), 'P': (2, 3), 'Q': (1, 10), 'R': (6, 1),
+        'S': (4, 1), 'T': (6, 1), 'U': (4, 1), 'V': (2, 4), 'W': (2, 4), 'X': (1, 8),
+        'Y': (2, 4), 'Z': (1, 10), ' ': (2, 0)
+    }
+    bag = []
+    POWER_TILES = {'J', 'Q', 'X', 'Z'}
+    board = None; tiles = None; racks = None; blanks = None; scores = None; turn = 1
+    first_play = True; game_mode = None; is_ai = None; practice_mode = None
+    move_history = []; replay_mode = False; current_replay_turn = 0; last_word = ""
+    last_score = 0; last_start = None; last_direction = None
+    gaddag_loading_status = 'idle'; gaddag_load_thread = None
+    insights_data_for_replay = []; is_solving_endgame = False; endgame_start_time = 0
+    scroll_offset = 0; WORD_DEFINITIONS = {}; word_definitions_loading_status = 'idle'
+    word_definitions_load_thread = None
+
+    DAWG = ai_engine.Dawg()
+    try:
+        with open("All Words 2023.txt", "r") as f:
+            for word in (w.strip().upper() for w in f):
+                if len(word) > 1:
+                    DAWG.insert(word)
+        print("DAWG loaded successfully.")
+    except FileNotFoundError:
+        print("Error: 'All Words 2023.txt' not found. Word validation will not work.")
+
+    WORD_LISTS_BY_LENGTH = {}
+    try:
+        with open("All Words 2023.txt", "r") as f:
+            for word in f:
+                word = word.strip().upper()
+                word_len = len(word)
+                if word_len > 0:
+                    if word_len not in WORD_LISTS_BY_LENGTH:
+                        WORD_LISTS_BY_LENGTH[word_len] = []
+                    WORD_LISTS_BY_LENGTH[word_len].append(word)
+        print("Word lists by length loaded successfully.")
+    except FileNotFoundError:
+        print("Warning: All Words 2023.txt not found. Word probability lookup will be disabled.")
+
+    LEAVE_LOOKUP_TABLE = {}
+    try:
+        with open("NWL23-leaves.pkl", 'rb') as f_load:
+            LEAVE_LOOKUP_TABLE = pickle.load(f_load)
+        print(f"Leave table loaded with {len(LEAVE_LOOKUP_TABLE)} entries.")
+    except FileNotFoundError:
+        print("Warning: NWL23-leaves.pkl not found. Leave evaluation might be slower or inaccurate.")
+    except Exception as e:
+        print(f"Error loading NWL23-leaves.pkl: {e}")
+
+    seven_letter_words = []
+    eight_letter_words = []
+    try:
+        with open("7-letter-list.txt", "r") as f_7l:
+            seven_letter_words = [line.strip().upper() for line in f_7l]
+        print("7-letter word list loaded successfully.")
+    except FileNotFoundError:
+        print("Warning: 7-letter-list.txt not found. BBB practice mode may not function correctly.")
+    try:
+        with open("8-letter-list.txt", "r") as f_8l:
+            eight_letter_words = [line.strip().upper() for line in f_8l]
+        print("8-letter word list loaded successfully.")
+    except FileNotFoundError:
+        print("Warning: 8-letter-list.txt not found. BBB practice mode may not function correctly.")
+    
+    # --- MODIFICATION START: Added missing loader calls ---
+    # These calls were missing, causing GADDAG_STRUCTURE to be None.
+    # We call them directly (not in a thread) to ensure data is ready before starting.
+    _load_gaddag_background()
+    _load_word_definitions_background()
+    # --- MODIFICATION END ---
+
+    # --- END OF MOVED INITIALIZATION ---
+
     ai_sim_num_candidates_global = DEFAULT_AI_CANDIDATES
     ai_sim_num_opponent_sims_global = DEFAULT_OPPONENT_SIMULATIONS
     ai_sim_num_post_sim_candidates_global = DEFAULT_POST_SIM_CANDIDATES
     bbb_7l_max_prob_global = 1000 # Default integer value
     bbb_8l_max_prob_global = 1000 # Default integer value
-
-
-    
-    #random.seed(12345)
 
     main_called_for_initial_mode_selection = False
     running_program = True
