@@ -1,9 +1,9 @@
 
 # ai_engine.pyx
 
-#ai_engine_pyx - BA - 25JUN25
-#Fixed incorrect board state and player turn in Endgame practice mode
-#Fixed Correct! msg for Endgame Practice Mode
+#ai_engine_pyx - BB - 25JUN25
+#Added feature to set up a board and then play from point on
+#Alphabetize racks in Endgame Practice mode
 
 
 
