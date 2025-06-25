@@ -1,8 +1,8 @@
 
 # ai_engine.pyx
 
-#ai_engine_pyx - BC - 25JUN25
-#Refactor mode_selection_screen
+#ai_engine_pyx - BD - 25JUN25
+#Refactor
 
 
 
@@ -2099,7 +2099,7 @@ cpdef tuple determine_best_action(
     list rack, list tiles, list board, set blanks, list bag, bint first_play,
     bint use_simulation, bint use_endgame_solver, bint is_plaid_mode,
     int opponent_rack_len, int num_ai_candidates, int num_opponent_sims, int num_post_sim_candidates,
-    int current_score_diff_for_endgame,
+    int current_score_diff_for_endgame, int pass_count,
     str practice_mode, list letter_checks, object bbb_thresholds, # New practice mode params
     bint is_silent_batch_run_param=False
 ):
@@ -2130,7 +2130,7 @@ cpdef tuple determine_best_action(
     if use_endgame_solver and bag_count == 0:
         # Unpack the tuple, ignoring the formatted lines and full sequence for this function's purpose
         best_first_move_endgame, _, _ = solve_endgame(
-            rack, [], tiles, blanks, board, current_score_diff_for_endgame, True
+            rack, [], tiles, blanks, board, current_score_diff_for_endgame, pass_count, True
         )
         if best_first_move_endgame == "PASS": return 'pass', None
         elif isinstance(best_first_move_endgame, dict): return 'play', best_first_move_endgame
@@ -2553,7 +2553,7 @@ cpdef tuple negamax_endgame(list rack_player, list rack_opponent, list tiles, se
 @cython.cdivision(True)
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cpdef object solve_endgame(list rack_player, list opponent_rack, list tiles, set blanks, list board, int current_score_diff, bint is_silent_batch_run_param=False):
+cpdef object solve_endgame(list rack_player, list opponent_rack, list tiles, set blanks, list board, int current_score_diff, int pass_count, bint is_silent_batch_run_param=False):
     """
     Top-level function to initiate the endgame solver.
     Returns a tuple: (best_move_object, list_of_formatted_result_strings, best_full_sequence_of_move_objects)
@@ -2611,7 +2611,7 @@ cpdef object solve_endgame(list rack_player, list opponent_rack, list tiles, set
         sim_pass_count_for_opp = 0
 
         if ai_first_move_obj == "PASS":
-            sim_pass_count_for_opp = 1
+            sim_pass_count_for_opp = pass_count + 1
         elif isinstance(ai_first_move_obj, dict):
             sim_pass_count_for_opp = 0
             newly_placed = ai_first_move_obj.get('newly_placed', [])
