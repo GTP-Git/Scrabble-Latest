@@ -3,9 +3,10 @@
 
 
 #python
-#Scrabble BA
-#Added correct solution, score and coordinates to 8LB "Incorrect!" msg dialog
-#Re-Added option to select endgame
+#Scrabble BB
+#Added feature to set up a board and then play from point on
+#Alphabetize racks in Endgame Practice mode
+
 
 
 
@@ -2513,18 +2514,14 @@ def is_word_length_allowed(word_len, number_checks):
 
 
 
-# In Scrabble Game.py
 
-# This is the full, complete function with no code omitted.
 def mode_selection_screen():
     """Display and handle the game mode selection screen, including Load Game via a dedicated dialog."""
     print("--- mode_selection_screen() entered ---")
     global main_called
     global pyperclip_available, pyperclip # Used by show_load_game_dialog
     global DEV_CPROFILE_ENABLED_SESSION, DEV_VISUALIZE_BATCH_ENABLED_SESSION
-    # --- NEW: Access definition loading status ---
     global word_definitions_loading_status, WORD_DEFINITIONS
-    # --- END NEW ---
 
     try:
         print("--- mode_selection_screen(): Attempting to load background image... ---")
@@ -2591,14 +2588,17 @@ def mode_selection_screen():
 
         # --- Button Definitions ---
         play_later_rect = pygame.Rect(WINDOW_WIDTH - BUTTON_WIDTH - 10, WINDOW_HEIGHT - BUTTON_HEIGHT - 10, BUTTON_WIDTH, BUTTON_HEIGHT)
-        load_game_button_rect = pygame.Rect(play_later_rect.left - BUTTON_GAP - BUTTON_WIDTH, play_later_rect.top, BUTTON_WIDTH, BUTTON_HEIGHT)
+        
+        # --- MODIFICATION START: Adjust button layout for new "Set Up Board" button ---
+        setup_board_button_width = 120
+        setup_board_button_rect = pygame.Rect(play_later_rect.left - BUTTON_GAP - setup_board_button_width, play_later_rect.top, setup_board_button_width, BUTTON_HEIGHT)
+        load_game_button_rect = pygame.Rect(setup_board_button_rect.left - BUTTON_GAP - BUTTON_WIDTH, play_later_rect.top, BUTTON_WIDTH, BUTTON_HEIGHT)
         batch_game_button_rect = pygame.Rect(load_game_button_rect.left - BUTTON_GAP - BUTTON_WIDTH, play_later_rect.top, BUTTON_WIDTH, BUTTON_HEIGHT)
         
-        # --- NEW: Word Lookup Button ---
-        word_lookup_button_width = 130 # Slightly wider for "Word Lookup"
+        word_lookup_button_width = 130
         word_lookup_button_rect = pygame.Rect(batch_game_button_rect.left - BUTTON_GAP - word_lookup_button_width, play_later_rect.top, word_lookup_button_width, BUTTON_HEIGHT)
         start_game_button_rect = pygame.Rect(word_lookup_button_rect.left - BUTTON_GAP - BUTTON_WIDTH, play_later_rect.top, BUTTON_WIDTH, BUTTON_HEIGHT)
-        # --- END NEW ---
+        # --- MODIFICATION END ---
 
         dev_tools_button_width = 150
         dev_tools_button_rect = pygame.Rect(10, WINDOW_HEIGHT - BUTTON_HEIGHT - 10, dev_tools_button_width, BUTTON_HEIGHT)
@@ -2816,6 +2816,12 @@ def mode_selection_screen():
                         if not is_starting_batch_silent :
                              print(f"--- mode_selection_screen(): Start Game clicked. Mode: {selected_mode} ---")
                         break 
+                    # --- MODIFICATION START: Handle "Set Up Board" click ---
+                    elif setup_board_button_rect.collidepoint(x, y):
+                        print("--- mode_selection_screen(): Set Up Board button clicked ---")
+                        selected_mode = "SETUP_BOARD"
+                        break
+                    # --- MODIFICATION END ---
                     elif load_game_button_rect.collidepoint(x, y):
                         print("--- mode_selection_screen(): Load Game button clicked, showing dialog ---")
                         filename_to_load = show_load_game_dialog()
@@ -3082,6 +3088,15 @@ def mode_selection_screen():
         play_later_text_rect = play_later_text_surf.get_rect(center=play_later_rect.center)
         screen.blit(play_later_text_surf, play_later_text_rect)
 
+        # --- MODIFICATION START: Draw "Set Up Board" button ---
+        hover = setup_board_button_rect.collidepoint(pygame.mouse.get_pos())
+        color = BUTTON_HOVER if hover else BUTTON_COLOR
+        pygame.draw.rect(screen, color, setup_board_button_rect)
+        setup_board_text_surf = button_font.render("Set Up Board", True, BLACK)
+        setup_board_text_rect = setup_board_text_surf.get_rect(center=setup_board_button_rect.center)
+        screen.blit(setup_board_text_surf, setup_board_text_rect)
+        # --- MODIFICATION END ---
+
         hover = load_game_button_rect.collidepoint(pygame.mouse.get_pos())
         color = BUTTON_HOVER if hover else BUTTON_COLOR
         pygame.draw.rect(screen, color, load_game_button_rect)
@@ -3236,6 +3251,11 @@ def mode_selection_screen():
                                ai_sim_num_candidates, ai_sim_num_opponent_sims, ai_sim_num_post_sim_candidates)
     elif selected_mode == "BATCH_MODE":
         return selected_mode, loaded_game_data
+    # --- MODIFICATION START: Handle new SETUP_BOARD mode ---
+    elif selected_mode == "SETUP_BOARD":
+        # For setup mode, we don't need to return any specific data yet, as the setup screen will handle it.
+        return selected_mode, None
+    # --- MODIFICATION END ---
     else: 
         standard_game_settings = (
             player_names,
@@ -3255,6 +3275,293 @@ def mode_selection_screen():
             bbb_8l_max_prob_input_str
         )
         return selected_mode, standard_game_settings
+
+
+
+
+
+
+def board_setup_screen():
+    """
+    Displays a UI for the user to manually set up the board, racks, and starting player.
+    The bag's contents are automatically deduced.
+    Returns a complete game state tuple on "Start Game", or None on "Cancel".
+    """
+    global screen, font, ui_font, button_font, dialog_font
+    global WHITE, BLACK, GREEN, GRAY, LIGHT_BLUE, BUTTON_COLOR, BUTTON_HOVER, DIALOG_COLOR, RED, ARROW_COLOR
+    global GRID_SIZE, SQUARE_SIZE, TILE_WIDTH, TILE_HEIGHT, BUTTON_WIDTH, BUTTON_HEIGHT, BUTTON_GAP, DOUBLE_CLICK_TIME
+    global TILE_DISTRIBUTION, LETTERS
+
+    # --- Local state for the setup screen ---
+    setup_tiles = [['' for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+    setup_blanks = set()
+    p1_rack_input = ""
+    p2_rack_input = ""
+    active_input_field = None  # 0 for P1 rack, 1 for P2 rack
+    start_player = 1  # P1 starts by default
+    error_message = ""
+
+    # --- NEW: State variables for typing on the board ---
+    selected_square = None  # (row, col, direction)
+    typing_on_board = False
+    typed_word_positions = [] # List of (r, c, letter) for the current word being typed
+    current_cursor_pos = None # (r, c) tuple for the blinking cursor
+    last_click_time = 0
+    last_click_pos = None
+
+    setup_running = True
+    while setup_running:
+        # --- Event Loop ---
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                x, y = event.pos
+                error_message = "" # Clear error on any click
+
+                # --- UI Element Rects ---
+                ui_start_x = BOARD_SIZE + 50
+                p1_rack_rect = pygame.Rect(ui_start_x, 100, 250, 35)
+                p2_rack_rect = pygame.Rect(ui_start_x, 180, 250, 35)
+                p1_starts_rect = pygame.Rect(ui_start_x, 260, 120, 30)
+                p2_starts_rect = pygame.Rect(ui_start_x + 130, 260, 120, 30)
+                validate_rect = pygame.Rect(ui_start_x, 320, BUTTON_WIDTH, BUTTON_HEIGHT)
+                clear_rect = pygame.Rect(ui_start_x + BUTTON_WIDTH + BUTTON_GAP, 320, BUTTON_WIDTH, BUTTON_HEIGHT)
+                start_game_rect = pygame.Rect(ui_start_x, 370, BUTTON_WIDTH, BUTTON_HEIGHT)
+                cancel_rect = pygame.Rect(ui_start_x + BUTTON_WIDTH + BUTTON_GAP, 370, BUTTON_WIDTH, BUTTON_HEIGHT)
+
+                # --- Reset typing state when clicking any UI element ---
+                def reset_typing_state():
+                    nonlocal typing_on_board, typed_word_positions, selected_square, current_cursor_pos
+                    typing_on_board = False
+                    typed_word_positions = []
+                    selected_square = None
+                    current_cursor_pos = None
+
+                if p1_rack_rect.collidepoint(x, y):
+                    active_input_field = 0
+                    reset_typing_state()
+                elif p2_rack_rect.collidepoint(x, y):
+                    active_input_field = 1
+                    reset_typing_state()
+                elif p1_starts_rect.collidepoint(x, y) or p2_starts_rect.collidepoint(x, y):
+                    start_player = 1 if p1_starts_rect.collidepoint(x, y) else 2
+                    reset_typing_state()
+                elif clear_rect.collidepoint(x, y):
+                    setup_tiles = [['' for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+                    setup_blanks.clear()
+                    reset_typing_state()
+                elif cancel_rect.collidepoint(x, y):
+                    return None
+                elif validate_rect.collidepoint(x, y) or start_game_rect.collidepoint(x, y):
+                    reset_typing_state() # Finalize typing before validation/start
+                    # --- Validation Logic ---
+                    full_dist_counter = Counter(create_standard_bag())
+                    user_setup_counter = Counter()
+                    
+                    for r in range(GRID_SIZE):
+                        for c in range(GRID_SIZE):
+                            if setup_tiles[r][c]:
+                                tile = ' ' if (r, c) in setup_blanks else setup_tiles[r][c]
+                                user_setup_counter[tile] += 1
+                    
+                    p1_rack_list = [char if char != '?' else ' ' for char in p1_rack_input.upper()]
+                    p2_rack_list = [char if char != '?' else ' ' for char in p2_rack_input.upper()]
+                    user_setup_counter.update(p1_rack_list)
+                    user_setup_counter.update(p2_rack_list)
+
+                    is_valid = True
+                    for tile, count in user_setup_counter.items():
+                        if count > full_dist_counter.get(tile, 0):
+                            error_message = f"Invalid: Too many '{tile}' tiles specified."
+                            is_valid = False
+                            break
+                    
+                    if is_valid:
+                        if start_game_rect.collidepoint(x, y):
+                            bag_counter = full_dist_counter - user_setup_counter
+                            final_bag = list(bag_counter.elements())
+                            random.shuffle(final_bag)
+                            is_first_play = not any(any(row) for row in setup_tiles)
+
+                            custom_state = (
+                                "SETUP_MODE", False, ["Player 1", "Player 2"], [], None, None,
+                                create_board()[0], setup_tiles, [0, 0], setup_blanks,
+                                [p1_rack_list, p2_rack_list], final_bag, False, 0, None,
+                                [False, False], 1, is_first_play, [p1_rack_list[:], p2_rack_list[:]],
+                                [True]*6, False, 0, 0, [], {}, GADDAG_STRUCTURE, [], None, [], [True]*4,
+                                start_player, 0, 0, 0, set(), False, gaddag_loading_status,
+                                final_bag[:], None, None, False, DEFAULT_AI_CANDIDATES,
+                                DEFAULT_OPPONENT_SIMULATIONS, DEFAULT_POST_SIM_CANDIDATES,
+                                0, -1, 1000, 1000, [True, True]
+                            )
+                            return custom_state
+                        else:
+                            error_message = "State is valid!"
+                else:
+                    # --- Board Click Logic ---
+                    col = (x - 40) // SQUARE_SIZE
+                    row = (y - 40) // SQUARE_SIZE
+                    if 0 <= row < GRID_SIZE and 0 <= col < GRID_SIZE:
+                        active_input_field = None # Deactivate text fields
+                        if typing_on_board:
+                            reset_typing_state()
+
+                        if event.button == 1: # Left click
+                            if not setup_tiles[row][col]:
+                                current_time = pygame.time.get_ticks()
+                                is_double_click = (last_click_pos == (row, col) and current_time - last_click_time < DOUBLE_CLICK_TIME)
+                                
+                                if is_double_click:
+                                    selected_square = None
+                                elif selected_square and selected_square[:2] == (row, col):
+                                    new_dir = "down" if selected_square[2] == "right" else "right"
+                                    selected_square = (row, col, new_dir)
+                                else:
+                                    selected_square = (row, col, "right")
+                                
+                                last_click_pos = (row, col)
+                                last_click_time = current_time
+                            else:
+                                selected_square = None
+                        elif event.button == 3: # Right click
+                            if setup_tiles[row][col]:
+                                if (row, col) in setup_blanks:
+                                    setup_blanks.remove((row, col))
+                                else:
+                                    setup_blanks.add((row, col))
+                    else:
+                        reset_typing_state()
+                        active_input_field = None
+
+            elif event.type == pygame.KEYDOWN:
+                error_message = ""
+                if active_input_field is not None:
+                    target_input = p1_rack_input if active_input_field == 0 else p2_rack_input
+                    if event.key == pygame.K_BACKSPACE:
+                        target_input = target_input[:-1]
+                    elif len(target_input) < 7:
+                        char = event.unicode.upper()
+                        if 'A' <= char <= 'Z' or char == '?':
+                            target_input += char
+                    if active_input_field == 0: p1_rack_input = target_input
+                    else: p2_rack_input = target_input
+                elif selected_square:
+                    if not typing_on_board:
+                        typing_on_board = True
+                        typed_word_positions = []
+                        current_cursor_pos = selected_square[:2]
+
+                    if event.key == pygame.K_BACKSPACE:
+                        if typed_word_positions:
+                            r, c, _ = typed_word_positions.pop()
+                            setup_tiles[r][c] = ''
+                            if (r, c) in setup_blanks:
+                                setup_blanks.remove((r, c))
+                            current_cursor_pos = (r, c)
+                        if not typed_word_positions:
+                            typing_on_board = False
+                    elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_ESCAPE):
+                        reset_typing_state()
+                    elif event.unicode.isalpha() and current_cursor_pos:
+                        r, c = current_cursor_pos
+                        letter = event.unicode.upper()
+                        setup_tiles[r][c] = letter
+                        typed_word_positions.append((r, c, letter))
+                        
+                        # Advance cursor
+                        direction = selected_square[2]
+                        if direction == "right":
+                            c += 1
+                            while 0 <= c < GRID_SIZE and setup_tiles[r][c]:
+                                c += 1
+                        else: # down
+                            r += 1
+                            while 0 <= r < GRID_SIZE and setup_tiles[r][c]:
+                                r += 1
+                        
+                        if 0 <= r < GRID_SIZE and 0 <= c < GRID_SIZE:
+                            current_cursor_pos = (r, c)
+                        else:
+                            current_cursor_pos = None # Off board
+
+        # --- Drawing ---
+        screen.fill(WHITE)
+        draw_board_labels(screen, ui_font)
+        
+        for r in range(GRID_SIZE):
+            for c in range(GRID_SIZE):
+                pygame.draw.rect(screen, create_board()[0][r][c], (40 + c * SQUARE_SIZE, 40 + r * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE))
+                pygame.draw.rect(screen, BLACK, (40 + c * SQUARE_SIZE, 40 + r * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE), 1)
+                if setup_tiles[r][c]:
+                    is_blank = (r, c) in setup_blanks
+                    tile_char = setup_tiles[r][c].lower() if is_blank else setup_tiles[r][c]
+                    text_surf = font.render(tile_char, True, BLACK)
+                    text_rect = text_surf.get_rect(center=(40 + c * SQUARE_SIZE + SQUARE_SIZE // 2, 40 + r * SQUARE_SIZE + SQUARE_SIZE // 2))
+                    screen.blit(text_surf, text_rect)
+        
+        if selected_square and not typing_on_board:
+            draw_arrow(selected_square[0], selected_square[1], selected_square[2])
+        elif typing_on_board and current_cursor_pos:
+            r, c = current_cursor_pos
+            cursor_x = 40 + c * SQUARE_SIZE + SQUARE_SIZE // 2
+            cursor_y = 40 + r * SQUARE_SIZE + SQUARE_SIZE - 5
+            if int(time.time() * 2) % 2 == 0:
+                pygame.draw.line(screen, BLACK, (cursor_x - 5, cursor_y), (cursor_x + 5, cursor_y), 2)
+
+        # Draw UI Panel
+        ui_start_x = BOARD_SIZE + 50
+        title_surf = dialog_font.render("Board Setup", True, BLACK)
+        screen.blit(title_surf, (ui_start_x, 20))
+        p1_rack_label = ui_font.render("Player 1 Rack:", True, BLACK)
+        screen.blit(p1_rack_label, (ui_start_x, 75))
+        p1_rack_rect = pygame.Rect(ui_start_x, 100, 250, 35)
+        pygame.draw.rect(screen, WHITE, p1_rack_rect)
+        pygame.draw.rect(screen, BLACK, p1_rack_rect, 2 if active_input_field == 0 else 1)
+        p1_text_surf = ui_font.render(p1_rack_input.upper(), True, BLACK)
+        screen.blit(p1_text_surf, (p1_rack_rect.x + 5, p1_rack_rect.y + 5))
+        p2_rack_label = ui_font.render("Player 2 Rack:", True, BLACK)
+        screen.blit(p2_rack_label, (ui_start_x, 155))
+        p2_rack_rect = pygame.Rect(ui_start_x, 180, 250, 35)
+        pygame.draw.rect(screen, WHITE, p2_rack_rect)
+        pygame.draw.rect(screen, BLACK, p2_rack_rect, 2 if active_input_field == 1 else 1)
+        p2_text_surf = ui_font.render(p2_rack_input.upper(), True, BLACK)
+        screen.blit(p2_text_surf, (p2_rack_rect.x + 5, p2_rack_rect.y + 5))
+        p1_starts_rect = pygame.Rect(ui_start_x, 260, 120, 30)
+        p2_starts_rect = pygame.Rect(ui_start_x + 130, 260, 120, 30)
+        pygame.draw.rect(screen, BUTTON_COLOR, p1_starts_rect)
+        pygame.draw.rect(screen, BUTTON_COLOR, p2_starts_rect)
+        if start_player == 1: pygame.draw.rect(screen, BLACK, p1_starts_rect, 2)
+        else: pygame.draw.rect(screen, BLACK, p2_starts_rect, 2)
+        p1_start_text = button_font.render("P1 Starts", True, BLACK)
+        p2_start_text = button_font.render("P2 Starts", True, BLACK)
+        screen.blit(p1_start_text, p1_start_text.get_rect(center=p1_starts_rect.center))
+        screen.blit(p2_start_text, p2_start_text.get_rect(center=p2_starts_rect.center))
+        validate_rect = pygame.Rect(ui_start_x, 320, BUTTON_WIDTH, BUTTON_HEIGHT)
+        clear_rect = pygame.Rect(ui_start_x + BUTTON_WIDTH + BUTTON_GAP, 320, BUTTON_WIDTH, BUTTON_HEIGHT)
+        start_game_rect = pygame.Rect(ui_start_x, 370, BUTTON_WIDTH, BUTTON_HEIGHT)
+        cancel_rect = pygame.Rect(ui_start_x + BUTTON_WIDTH + BUTTON_GAP, 370, BUTTON_WIDTH, BUTTON_HEIGHT)
+        pygame.draw.rect(screen, BUTTON_COLOR, validate_rect)
+        pygame.draw.rect(screen, BUTTON_COLOR, clear_rect)
+        pygame.draw.rect(screen, BUTTON_COLOR, start_game_rect)
+        pygame.draw.rect(screen, BUTTON_COLOR, cancel_rect)
+        validate_text = button_font.render("Validate", True, BLACK)
+        clear_text = button_font.render("Clear Board", True, BLACK)
+        start_text = button_font.render("Start Game", True, BLACK)
+        cancel_text = button_font.render("Cancel", True, BLACK)
+        screen.blit(validate_text, validate_text.get_rect(center=validate_rect.center))
+        screen.blit(clear_text, clear_text.get_rect(center=clear_rect.center))
+        screen.blit(start_text, start_text.get_rect(center=start_game_rect.center))
+        screen.blit(cancel_text, cancel_text.get_rect(center=cancel_rect.center))
+        if error_message:
+            msg_color = GREEN if "valid" in error_message.lower() else RED
+            msg_surf = ui_font.render(error_message, True, msg_color)
+            screen.blit(msg_surf, (ui_start_x, 420))
+
+        pygame.display.flip()
+        pygame.time.Clock().tick(30)
 
 
 
@@ -6249,7 +6556,6 @@ def ai_turn(state):
 # In Scrabble Game.py
 
 # This is the full, complete function with no code omitted.
-
 def initialize_game(selected_mode_result, return_data, main_called_flag):
     """
     Initializes the game state based on the selected mode and data.
@@ -6542,7 +6848,7 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                     loading_text_surf = ui_font.render("Generating Insights for Loaded Game...", True, BLUE)
                     screen.blit(loading_text_surf, ( (WINDOW_WIDTH - loading_text_surf.get_width()) // 2, (WINDOW_HEIGHT - loading_text_surf.get_height()) // 2))
                     pygame.display.flip()
-                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_run_param=is_silent_run_for_init)
+                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_batch_run_param=is_silent_run_for_init)
             else:
                 insights_data_for_replay = [] 
                 if not is_silent_run_for_init and gaddag_loading_status == 'loading':
@@ -6566,7 +6872,7 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                     loading_text_surf = ui_font.render("Generating Insights...", True, BLUE)
                     screen.blit(loading_text_surf, ( (WINDOW_WIDTH - loading_text_surf.get_width()) // 2, (WINDOW_HEIGHT - loading_text_surf.get_height()) // 2))
                     pygame.display.flip()
-                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_run_param=is_silent_run_for_init)
+                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_batch_run_param=is_silent_run_for_init)
             else:
                 insights_data_for_replay = []
                 if not is_silent_run_for_init and gaddag_loading_status == 'loading':
@@ -6673,6 +6979,13 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                 racks_init[player_to_move_idx] = puzzle_state.get("rack_player_to_move", [])
                 racks_init[opponent_idx] = puzzle_state.get("rack_opponent", [])
                 
+                # --- MODIFICATION START: Sort the racks after loading ---
+                if racks_init[0] is not None:
+                    racks_init[0].sort()
+                if racks_init[1] is not None:
+                    racks_init[1].sort()
+                # --- MODIFICATION END ---
+
                 bag_init = [] 
                 first_play = False 
                 sgs_initial_bag = []
@@ -13047,8 +13360,6 @@ def execute_game_session(is_initialized_from_outer_loop_param):
             practice_mode = current_state_dict['practice_mode']
             letter_checks = list(current_state_dict['letter_checks'])
             number_checks = list(current_state_dict['number_checks'])
-            USE_ENDGAME_SOLVER = current_state_dict['USE_ENDGAME_SOLVER']
-            USE_AI_SIMULATION = current_state_dict['USE_AI_SIMULATION']
             active_practice_state_data = current_state_dict['active_practice_state_data']
             if not is_batch_running:
                 ai_sim_num_candidates_global = current_state_dict.get('ai_sim_num_candidates_cfg', DEFAULT_AI_CANDIDATES)
@@ -13169,6 +13480,7 @@ def populate_dummy_analyzer_data(move_history_list):
 
 
 
+
 def main(is_initialized_from_outer_loop_param): # Renamed for clarity
     global GADDAG_STRUCTURE, gaddag_loading_status, gaddag_load_thread
     global DEV_CPROFILE_ENABLED_SESSION, DEV_VISUALIZE_BATCH_ENABLED_SESSION
@@ -13248,7 +13560,21 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
             print("--- WARNING: GADDAG not loaded. AI Engine initialization skipped. AI will not function. ---")
         
         selected_mode_result, return_data_mode_sel = mode_selection_screen()
-        init_result = initialize_game(selected_mode_result, return_data_mode_sel, False) # False for main_called_flag
+        
+        # --- MODIFICATION START: Handle SETUP_BOARD mode ---
+        if selected_mode_result == "SETUP_BOARD":
+            # Call the new setup screen function. It returns a complete, ready-to-play game state tuple, or None.
+            init_result = board_setup_screen()
+            if init_result is None:
+                # User cancelled the setup screen, so we should loop back to the mode selection screen.
+                # We do this by returning (True, False) which tells the outer loop to re-run main()
+                # without the "is_initialized" flag set.
+                return True, False
+        else:
+            # For all other modes, use the existing initialize_game function.
+            init_result = initialize_game(selected_mode_result, return_data_mode_sel, False)
+        # --- MODIFICATION END ---
+
         if init_result is None:
             print("--- main(): Initialization failed. Exiting. ---")
             return False, False
