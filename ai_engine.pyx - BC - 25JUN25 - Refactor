@@ -1,9 +1,9 @@
 
 # ai_engine.pyx
 
-#ai_engine_pyx - BB - 25JUN25
-#Added feature to set up a board and then play from point on
-#Alphabetize racks in Endgame Practice mode
+#ai_engine_pyx - BC - 25JUN25
+#Refactor mode_selection_screen
+
 
 
 
