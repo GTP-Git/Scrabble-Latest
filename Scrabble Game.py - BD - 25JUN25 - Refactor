@@ -3,8 +3,10 @@
 
 
 #python
-#Scrabble BC
-#Refactor mode_selection_screen
+#Scrabble BE
+#Refactor
+
+
 
 
 #25JUN25
@@ -26,6 +28,7 @@ from collections import Counter
 import copy
 import threading
 import ai_engine
+import signal
 
 
 
@@ -2889,6 +2892,117 @@ def handle_practice_dropdown_events(event, dropdown_open, dropdown_rect, option_
 
 
 
+
+def handle_dev_tools_dialog_events(event, cprofile_checked, visualize_checked, rects):
+    """
+    Handles events for the Developer Tools dialog.
+    Returns a dictionary with the status and updated checkbox values.
+    """
+    status = 'running'
+    cprofile_checkbox_rect = rects.get('cprofile_checkbox_rect')
+    visualize_checkbox_rect = rects.get('visualize_checkbox_rect')
+    ok_button_rect = rects.get('ok_button_rect')
+
+    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+        x, y = event.pos
+        if cprofile_checkbox_rect and cprofile_checkbox_rect.collidepoint(x, y):
+            cprofile_checked = not cprofile_checked
+        elif visualize_checkbox_rect and visualize_checkbox_rect.collidepoint(x, y):
+            visualize_checked = not visualize_checked
+        elif ok_button_rect and ok_button_rect.collidepoint(x, y):
+            status = 'ok'
+
+    elif event.type == pygame.KEYDOWN:
+        if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_ESCAPE):
+            status = 'ok'
+            
+    return {
+        'status': status,
+        'cprofile_checked': cprofile_checked,
+        'visualize_checked': visualize_checked
+    }
+
+
+
+def handle_simulation_config_dialog_events(event, inputs, active_input, rects):
+    """
+    Handles events for the AI Simulation Configuration dialog.
+    Returns a dictionary with the status and updated input values.
+    """
+    status = 'running'
+    input_rects = rects.get('input_rects', [])
+    ok_rect = rects.get('ok_rect')
+    cancel_rect = rects.get('cancel_rect')
+
+    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+        x, y = event.pos
+        clicked_input = False
+        for i, rect in enumerate(input_rects):
+            if rect.collidepoint(x, y):
+                active_input = i
+                clicked_input = True
+                break
+        if not clicked_input:
+            active_input = None
+
+        if ok_rect and ok_rect.collidepoint(x, y):
+            status = 'ok'
+        elif cancel_rect and cancel_rect.collidepoint(x, y):
+            status = 'cancel'
+
+    elif event.type == pygame.KEYDOWN:
+        if active_input is not None:
+            if event.key == pygame.K_BACKSPACE:
+                inputs[active_input] = inputs[active_input][:-1]
+            elif event.key == pygame.K_TAB:
+                active_input = (active_input + 1) % len(inputs)
+            elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                status = 'ok'
+            elif event.unicode.isdigit():
+                if len(inputs[active_input]) < 4: # Limit input length
+                    inputs[active_input] += event.unicode
+        elif event.key == pygame.K_ESCAPE:
+            status = 'cancel'
+            
+    return {
+        'status': status,
+        'inputs': inputs,
+        'active_input': active_input
+    }
+
+
+
+
+def handle_power_tiles_dialog_events(event, state):
+    """
+    Placeholder for handling events for the Power Tiles practice dialog.
+    This dialog's logic is not yet implemented.
+    """
+    # When implemented, this function will handle clicks on checkboxes,
+    # the OK button, etc., and return a dictionary with the status and
+    # updated state for the power tiles practice settings.
+    # For now, it does nothing and assumes the dialog is closed with ESC.
+    if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+        return {'status': 'cancel'}
+    return {'status': 'running'}
+
+
+
+def handle_bbb_prob_dialog_events(event, state):
+    """
+    Placeholder for handling events for the Bingo, Bango, Bongo dialog.
+    This dialog's logic is not yet implemented.
+    """
+    # When implemented, this function will handle text input for probabilities,
+    # button clicks, etc., and return a dictionary with the status and
+    # updated probability values.
+    # For now, it does nothing and assumes the dialog is closed with ESC.
+    if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+        return {'status': 'cancel'}
+    return {'status': 'running'}
+
+
+
 def mode_selection_screen():
     """Display and handle the game mode selection screen, including Load Game via a dedicated dialog."""
     print("--- mode_selection_screen() entered ---")
@@ -2922,7 +3036,7 @@ def mode_selection_screen():
     dropdown_open = False
     showing_power_tiles_dialog = False
     letter_checks = [True, True, True, True]
-    number_checks = [True, True, True, True, False, False]
+    number_checks = [True] * 6
     practice_state = None
     loaded_game_data = None
 
@@ -2969,51 +3083,83 @@ def mode_selection_screen():
                 sys.exit()
 
             # --- Dialog Event Handling (Highest Priority) ---
+            dialog_event_handled = False
             if showing_ai_sim_config_dialog:
-                # This block would contain the event handling logic for the AI config dialog
-                # For brevity, we assume it's handled and might set showing_ai_sim_config_dialog to False
-                pass # Placeholder for AI config dialog event logic
+                dialog_event_handled = True
+                result = handle_simulation_config_dialog_events(event, ai_sim_config_inputs, ai_sim_config_active_input, {'input_rects': ai_sim_config_rects, 'ok_rect': ai_sim_config_ok_rect, 'cancel_rect': ai_sim_config_cancel_rect})
+                ai_sim_config_inputs = result['inputs']
+                ai_sim_config_active_input = result['active_input']
+                if result['status'] == 'ok':
+                    try:
+                        ai_sim_num_candidates = int(ai_sim_config_inputs[0]) if ai_sim_config_inputs[0] else DEFAULT_AI_CANDIDATES
+                        ai_sim_num_opponent_sims = int(ai_sim_config_inputs[1]) if ai_sim_config_inputs[1] else DEFAULT_OPPONENT_SIMULATIONS
+                        ai_sim_num_post_sim_candidates = int(ai_sim_config_inputs[2]) if ai_sim_config_inputs[2] else DEFAULT_POST_SIM_CANDIDATES
+                        if ai_sim_num_candidates <= 0 or ai_sim_num_opponent_sims <= 0 or ai_sim_num_post_sim_candidates <= 0: raise ValueError("Values must be positive.")
+                        if ai_sim_num_post_sim_candidates > ai_sim_num_candidates: raise ValueError("Post-sim candidates cannot exceed initial candidates.")
+                        showing_ai_sim_config_dialog = False
+                    except (ValueError, TypeError) as e:
+                        show_message_dialog(f"Invalid simulation parameters: {e}", "Input Error")
+                elif result['status'] == 'cancel':
+                    showing_ai_sim_config_dialog = False
+            
             elif showing_dev_tools_dialog:
-                # Placeholder for Dev Tools dialog event logic
-                pass
+                dialog_event_handled = True
+                result = handle_dev_tools_dialog_events(event, dev_cprofile_checked, dev_visualize_batch_checked, {'cprofile_checkbox_rect': dev_cprofile_checkbox_rect, 'visualize_checkbox_rect': dev_visualize_checkbox_rect, 'ok_button_rect': dev_ok_button_rect})
+                dev_cprofile_checked = result['cprofile_checked']
+                dev_visualize_batch_checked = result['visualize_checked']
+                if result['status'] == 'ok':
+                    DEV_CPROFILE_ENABLED_SESSION = dev_cprofile_checked
+                    DEV_VISUALIZE_BATCH_ENABLED_SESSION = dev_visualize_batch_checked
+                    showing_dev_tools_dialog = False
+
             elif showing_power_tiles_dialog:
-                # Placeholder for Power Tiles dialog event logic
-                pass
+                dialog_event_handled = True
+                result = handle_power_tiles_dialog_events(event, {}) # Pass relevant state when implemented
+                if result['status'] != 'running':
+                    showing_power_tiles_dialog = False # Close dialog on 'ok' or 'cancel'
+
             elif showing_bbb_prob_dialog:
-                # Placeholder for BBB dialog event logic
-                pass
-            else:
+                dialog_event_handled = True
+                result = handle_bbb_prob_dialog_events(event, {}) # Pass relevant state when implemented
+                if result['status'] != 'running':
+                    showing_bbb_prob_dialog = False # Close dialog on 'ok' or 'cancel'
+
+            if not dialog_event_handled:
                 # --- Main Screen Event Handling ---
-                # Mode Selection Buttons
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     for i, rect in enumerate(mode_rects):
                         if rect.collidepoint(event.pos):
                             current_input = i
                             dropdown_open = False
-                            # Reset player names/states based on new mode
                             if i == 0: player_names, input_active = ["Player 1", "Player 2"], [False, False]
                             elif i == 1: player_names, input_active = ["Player 1", "AI"] if human_player == 1 else ["AI", "Player 2"], [True, False] if human_player == 1 else [False, True]
                             elif i == 2: player_names, input_active = ["AI 1", "AI 2"], [False, False]
                 
-                # AI Options
                 use_endgame_solver_checked, use_ai_simulation_checked, show_sim_config = \
                     handle_ai_option_events(event, ai_option_rects, use_endgame_solver_checked, use_ai_simulation_checked)
                 if show_sim_config:
                     showing_ai_sim_config_dialog = True
                 
-                # Player UI
                 player_names, input_active, human_player, clicked_player_ui = \
                     handle_player_ui_events(event, modes[current_input], player_names, input_active, human_player, player_ui_rects)
 
-                # Practice Dropdown
                 if modes[current_input] == MODE_HVH:
                     dropdown_open, practice_choice = handle_practice_dropdown_events(event, dropdown_open, practice_dropdown_rect, practice_option_rects)
                     if practice_choice:
-                        # Handle the selected practice mode (e.g., show another dialog or set state)
                         if practice_choice == "Power Tiles": showing_power_tiles_dialog = True
-                        # ... other practice modes ...
+                        elif practice_choice == "8-Letter Bingos":
+                            proceed, p_board, p_tiles, p_racks, p_blanks, p_bag, p_params = eight_letter_practice()
+                            if proceed:
+                                selected_mode = "PRACTICE_8L"
+                                practice_state = {"board": p_board, "tiles": p_tiles, "racks": p_racks, "blanks": p_blanks, "bag": p_bag, "first_play": False, "scores": [0,0], "turn": 1, "practice_params": p_params, "sgs_initial_bag": p_bag[:]}
+                        elif practice_choice == "Bingo, Bango, Bongo": showing_bbb_prob_dialog = True
+                        elif practice_choice == "Only Fives": practice_mode = "only_fives"; selected_mode = modes[current_input]
+                        elif practice_choice == "End Game":
+                            filename = show_endgame_puzzle_selection_dialog()
+                            if filename is not None:
+                                selected_mode = "PRACTICE_ENDGAME"
+                                practice_state = {'filename': filename}
                 
-                # Action Buttons
                 action, data = handle_action_button_events(event, action_button_rects, modes[current_input], player_names, human_player, use_endgame_solver_checked, use_ai_simulation_checked, dev_cprofile_checked, dev_visualize_batch_checked, (ai_sim_num_candidates, ai_sim_num_opponent_sims, ai_sim_num_post_sim_candidates))
                 if action == "START_GAME": selected_mode = modes[current_input]
                 elif action == "SETUP_BOARD": selected_mode = "SETUP_BOARD"
@@ -3021,7 +3167,6 @@ def mode_selection_screen():
                 elif action == "BATCH_MODE": selected_mode, loaded_game_data = "BATCH_MODE", data
                 elif action == "SHOW_DEV_TOOLS": showing_dev_tools_dialog = True
                 
-                # If a click was not handled by any component, deactivate text inputs
                 if event.type == pygame.MOUSEBUTTONDOWN and not clicked_player_ui:
                     is_on_any_button = any(rect.collidepoint(event.pos) for rect in mode_rects) or \
                                        any(rect.collidepoint(event.pos) for rect in ai_option_rects.values()) or \
@@ -3070,6 +3215,10 @@ def mode_selection_screen():
         return selected_mode, loaded_game_data
     elif selected_mode == "SETUP_BOARD":
         return selected_mode, None
+    elif selected_mode == "PRACTICE_8L":
+        return selected_mode, (player_names, human_player, "eight_letter", letter_checks, number_checks, use_endgame_solver_checked, use_ai_simulation_checked, practice_state, dev_cprofile_checked, dev_visualize_batch_checked, ai_sim_num_candidates, ai_sim_num_opponent_sims, ai_sim_num_post_sim_candidates, bbb_7l_max_prob_input_str, bbb_8l_max_prob_input_str)
+    elif selected_mode == "PRACTICE_ENDGAME":
+        return selected_mode, (player_names, human_player, "endgame", letter_checks, number_checks, use_endgame_solver_checked, use_ai_simulation_checked, practice_state, dev_cprofile_checked, dev_visualize_batch_checked, ai_sim_num_candidates, ai_sim_num_opponent_sims, ai_sim_num_post_sim_candidates, bbb_7l_max_prob_input_str, bbb_8l_max_prob_input_str)
     else: 
         standard_game_settings = (
             player_names,
@@ -6236,6 +6385,7 @@ def ai_turn(state):
     opponent_rack_len = len(state['racks'][opponent_idx]) if 0 <= opponent_idx < len(state['racks']) and state['racks'][opponent_idx] is not None else 7
     current_score_diff = state['scores'][player_idx] - state['scores'][opponent_idx]
     is_plaid_mode = state.get('initial_game_config', {}).get('plaid_mode', False)
+    pass_count = state.get('pass_count', 0)
     
     # Prepare BBB thresholds to pass to Cython
     bbb_thresholds = {
@@ -6252,7 +6402,7 @@ def ai_turn(state):
         opponent_rack_len, state.get('ai_sim_num_candidates_cfg', DEFAULT_AI_CANDIDATES),
         state.get('ai_sim_num_opponent_sims_cfg', DEFAULT_OPPONENT_SIMULATIONS),
         state.get('ai_sim_num_post_sim_candidates_cfg', DEFAULT_POST_SIM_CANDIDATES),
-        current_score_diff, state['practice_mode'], state['letter_checks'], bbb_thresholds,
+        current_score_diff, pass_count, state['practice_mode'], state['letter_checks'], bbb_thresholds,
         is_silent_batch_run_param=is_silent_batch_run_param
     )
 
@@ -6662,7 +6812,7 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                     loading_text_surf = ui_font.render("Generating Insights for Loaded Game...", True, BLUE)
                     screen.blit(loading_text_surf, ( (WINDOW_WIDTH - loading_text_surf.get_width()) // 2, (WINDOW_HEIGHT - loading_text_surf.get_height()) // 2))
                     pygame.display.flip()
-                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_batch_run_param=is_silent_run_for_init)
+                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_run_param=is_silent_run_for_init)
             else:
                 insights_data_for_replay = [] 
                 if not is_silent_run_for_init and gaddag_loading_status == 'loading':
@@ -6686,7 +6836,7 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                     loading_text_surf = ui_font.render("Generating Insights...", True, BLUE)
                     screen.blit(loading_text_surf, ( (WINDOW_WIDTH - loading_text_surf.get_width()) // 2, (WINDOW_HEIGHT - loading_text_surf.get_height()) // 2))
                     pygame.display.flip()
-                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_batch_run_param=is_silent_run_for_init)
+                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_run_param=is_silent_run_for_init)
             else:
                 insights_data_for_replay = []
                 if not is_silent_run_for_init and gaddag_loading_status == 'loading':
@@ -7862,7 +8012,6 @@ def _handle_mouse_down_replay_buttons(event, state, drawn_rects):
         state['last_scoreboard_click_idx'] = -1
         state['analyzer_selected_move_index'] = None # Clear IW selection
 
-        # --- MODIFICATION START: Calculate and store replay state ONCE ---
         sgs_data_for_nav = state.get('sgs_loaded_game_data')
         if not sgs_data_for_nav:
              sgs_data_for_nav = {
@@ -7888,9 +8037,198 @@ def _handle_mouse_down_replay_buttons(event, state, drawn_rects):
         elif sgs_turn == 2 and len(sgs_racks) > 0 and sgs_racks[0] is not None:
             combined_unseen.extend(sgs_racks[0])
         state['replay_unseen_tiles_for_display'] = Counter(combined_unseen)
-        # --- MODIFICATION END ---
 
     return action_taken
+
+
+
+def _handle_mouse_down_replay_ui(event, state, drawn_rects):
+    """
+    Handles MOUSEBUTTONDOWN events for all replay-specific UI elements.
+    This includes replay buttons, scoreboard navigation, and the insights UI.
+    Modifies state directly.
+    """
+    global insights_data_for_replay, sgs_loaded_game_data
+
+    is_silent_run = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
+    x, y = event.pos
+
+    # Handle replay navigation buttons (Start, Prev, Next, End)
+    if _handle_mouse_down_replay_buttons(event, state, drawn_rects):
+        return # Event was handled
+
+    # Handle scoreboard navigation clicks
+    if event.button == 1 and _handle_mouse_down_scoreboard_replay_nav(event, state, drawn_rects):
+        if state.get('last_scoreboard_click_idx') == -1: # A double-click jump occurred
+            state = clear_current_preview(state)
+        return # Event was handled
+
+    # Handle Insights UI (checkbox, move list) and Solve button
+    insights_button_rect = drawn_rects.get('insights_button_rect')
+    if insights_button_rect and insights_button_rect.collidepoint(x, y):
+        print("Insights button clicked. Running analysis...")
+        target_turn_for_state = max(0, state['current_replay_turn'] - 1)
+        sgs_data = state.get('sgs_loaded_game_data')
+        if not sgs_data:
+            show_message_dialog("Error: Cannot run analysis, game data is missing.", "Error")
+            return
+        historical_tiles, historical_blanks, _, sim_racks, sim_bag, turn_of_last_move = get_sgs_replay_state(sgs_data, target_turn_for_state, is_silent_batch_run_param=True)
+        current_player_turn_num = 1 if target_turn_for_state == 0 else 3 - turn_of_last_move
+        sim_player_idx = current_player_turn_num - 1
+        sim_opponent_idx = 1 - sim_player_idx
+        sim_ai_rack = sim_racks[sim_player_idx]
+        sim_opponent_rack_len = len(sim_racks[sim_opponent_idx])
+        all_moves_for_sim = ai_engine.generate_all_moves_gaddag(sim_ai_rack, historical_tiles, state['board'], historical_blanks, is_silent_batch_run_param=True)
+        simulation_results = ai_engine.run_ai_simulation(all_moves_for_sim, sim_ai_rack, sim_opponent_rack_len, historical_tiles, historical_blanks, state['board'], sim_bag, state.get('ai_sim_num_candidates_cfg', DEFAULT_AI_CANDIDATES), state.get('ai_sim_num_opponent_sims_cfg', DEFAULT_OPPONENT_SIMULATIONS), state.get('ai_sim_num_post_sim_candidates_cfg', DEFAULT_POST_SIM_CANDIDATES), is_silent_batch_run_param=True)
+        analysis_data = ai_engine.analyze_board_state(historical_tiles, historical_blanks, sim_bag, sim_racks[sim_opponent_idx], state['board'])
+        show_insights_dialog(analysis_data, simulation_results, state)
+        return
+
+    analyzer_checkbox_rect_local = drawn_rects.get('analyzer_checkbox_rect')
+    if analyzer_checkbox_rect_local and analyzer_checkbox_rect_local.collidepoint(x, y):
+        state['analyzer_show'] = not state.get('analyzer_show', False)
+        if not state.get('analyzer_show', False):
+            state['analyzer_selected_move_index'] = None
+            state = clear_current_preview(state)
+        return
+
+    if state.get('analyzer_show', False) and event.button == 1:
+        insights_item_rects = drawn_rects.get('insights_item_rects', [])
+        for item_rect, unique_key in insights_item_rects:
+            if item_rect.collidepoint(x, y):
+                state = clear_current_preview(state)
+                turn_index_for_data = unique_key // 1000
+                move_idx_in_turn_list = unique_key % 1000
+                sgs_data_for_preview_base = state.get('sgs_loaded_game_data')
+                if not sgs_data_for_preview_base:
+                    sgs_data_for_preview_base = {'sgs_initial_bag': state.get('sgs_initial_bag', []), 'initial_racks_sgs': state.get('initial_racks', [[],[]]), 'full_move_history': state.get('move_history', [])}
+                historical_tiles_N, historical_blanks_N, _, _, _, _ = get_sgs_replay_state(sgs_data_for_preview_base, turn_index_for_data, is_silent_batch_run_param=True)
+                state['tiles'] = copy.deepcopy(historical_tiles_N)
+                state['blanks'] = historical_blanks_N.copy()
+                if insights_data_for_replay and 0 <= turn_index_for_data < len(insights_data_for_replay) and 0 <= move_idx_in_turn_list < len(insights_data_for_replay[turn_index_for_data]):
+                    move_data_from_insights = insights_data_for_replay[turn_index_for_data][move_idx_in_turn_list]
+                    move_for_preview_func = {'newly_placed': move_data_from_insights.get('newly_placed', []), 'blanks': move_data_from_insights.get('blanks_in_move', set())}
+                    state = apply_move_as_preview(state, move_for_preview_func)
+                    state['analyzer_selected_move_index'] = unique_key
+                else:
+                    if not is_silent_run:
+                        print(f"Warning: Could not retrieve insights move for key {unique_key} to apply preview.")
+                    state['analyzer_selected_move_index'] = None
+                return
+
+    solve_endgame_button_rect = drawn_rects.get('solve_endgame_button_rect')
+    if solve_endgame_button_rect and solve_endgame_button_rect.collidepoint(x, y):
+        if not is_silent_run:
+            print("Solve Endgame button clicked in Replay Mode.")
+        sgs_data_for_solve = state.get('sgs_loaded_game_data')
+        move_history_for_solve = state.get('move_history', [])
+        turn_to_solve_num = state.get('current_replay_turn', 0)
+        if sgs_data_for_solve and 0 < turn_to_solve_num <= len(move_history_for_solve):
+            state['is_solving_endgame'] = True
+            draw_game_screen(screen, state)
+            pygame.display.flip()
+            pre_move_turn_idx = turn_to_solve_num - 1
+            board_state_tiles, board_state_blanks, scores_before_move, _, _, _ = get_sgs_replay_state(sgs_data_for_solve, pre_move_turn_idx, is_silent_batch_run_param=True)
+            move_data = move_history_for_solve[pre_move_turn_idx]
+            player_to_move = move_data['player']
+            player_idx = player_to_move - 1
+            opponent_idx = 1 - player_idx
+            rack_player = move_data.get('rack', [])
+            rack_opponent = sgs_data_for_solve.get('initial_racks_sgs', [[],[]])[opponent_idx][:]
+            for i in range(pre_move_turn_idx):
+                prev_move = move_history_for_solve[i]
+                if prev_move['player'] - 1 == opponent_idx:
+                    temp_rack = list(rack_opponent)
+                    tiles_consumed = []
+                    if prev_move.get('move_type') == 'place':
+                        tiles_consumed = prev_move.get('tiles_played_from_rack', [])
+                    elif prev_move.get('move_type') == 'exchange':
+                        tiles_consumed = prev_move.get('exchanged_tiles', [])
+                    for tile_to_remove in tiles_consumed:
+                        if tile_to_remove in temp_rack:
+                            temp_rack.remove(tile_to_remove)
+                    drawn_tiles = prev_move.get('drawn', [])
+                    temp_rack.extend(drawn_tiles)
+                    rack_opponent = temp_rack
+            score_diff = scores_before_move[player_idx] - scores_before_move[opponent_idx]
+            
+            pass_count_at_turn = 0
+            for i in range(pre_move_turn_idx - 1, -1, -1):
+                if move_history_for_solve[i]['move_type'] == 'pass':
+                    pass_count_at_turn += 1
+                else:
+                    break # Stop counting on a non-pass move
+
+            if not is_silent_run:
+                print(f"  Solving for P{player_to_move} at turn {turn_to_solve_num}")
+                print(f"  Player Rack: {rack_player}")
+                print(f"  Opponent Rack (Reconstructed): {rack_opponent}")
+                print(f"  Score Diff: {score_diff}")
+                print(f"  Pass Count at Turn: {pass_count_at_turn}")
+
+            start_time = time.perf_counter()
+            _, formatted_lines, _ = ai_engine.solve_endgame(
+                rack_player, rack_opponent, board_state_tiles, board_state_blanks, 
+                state['board'], score_diff, pass_count_at_turn, is_silent_batch_run_param=True
+            )
+            end_time = time.perf_counter()
+            duration = end_time - start_time
+            duration_str = f"Solved in {duration:.2f} seconds"
+            state['is_solving_endgame'] = False
+            if formatted_lines:
+                show_endgame_results_dialog(formatted_lines, state, duration_str)
+            else:
+                show_message_dialog("Endgame solver found no valid lines or moves.", "Solver Results")
+        else:
+            err_msg = "Cannot solve endgame: "
+            if not sgs_data_for_solve:
+                err_msg += "Game data not found."
+            else:
+                err_msg += f"Invalid turn index {turn_to_solve_num}."
+            print(f"ERROR: {err_msg}")
+            show_message_dialog(err_msg, "Error")
+        return
+
+    if _handle_mouse_down_simulate_button(event, state, drawn_rects):
+        return
+
+
+
+
+def _handle_mouse_down_live_game_ui(event, state, drawn_rects):
+    """
+    Handles MOUSEBUTTONDOWN events for all live-game UI elements.
+    This includes suggest/simulate buttons and rack controls.
+    Modifies state directly.
+    """
+    x, y = event.pos
+
+    # Handle Suggest button click
+    if _handle_mouse_down_suggest_button(event, state, drawn_rects):
+        return
+
+    # Handle Simulate button click
+    if _handle_mouse_down_simulate_button(event, state, drawn_rects):
+        return
+
+    # Handle rack visibility icons
+    p1_eye_rect = drawn_rects.get('p1_eye_rect')
+    p2_eye_rect = drawn_rects.get('p2_eye_rect')
+    if p1_eye_rect and p1_eye_rect.collidepoint(x, y):
+        state['rack_visibility'][0] = not state['rack_visibility'][0]
+        return
+    if p2_eye_rect and p2_eye_rect.collidepoint(x, y):
+        state['rack_visibility'][1] = not state['rack_visibility'][1]
+        return
+
+    # Handle rack sorting and tile dragging initiation
+    if _handle_mouse_down_rack_ui_elements(event, state, drawn_rects):
+        return
+
+
+
+
+
 
 
 
@@ -7902,172 +8240,34 @@ def _handle_general_mouse_down(event, state, drawn_rects):
     Handles general MOUSEBUTTONDOWN events (non-dialog specific).
     Delegates board clicks and handles other UI element interactions.
     """
-    global DEV_VISUALIZE_BATCH_ENABLED_SESSION, insights_data_for_replay, sgs_loaded_game_data
-    is_silent_run_local = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
-    updated_state_flags = {}
+    global DEV_VISUALIZE_BATCH_ENABLED_SESSION
+
+    updated_state_flags = {} # This function doesn't set loop control flags
     x, y = event.pos
 
+    # 1. Handle Options Menu button click (to open it)
     options_rect_base = drawn_rects.get('options_rect_base')
     if not state.get('dropdown_open') and options_rect_base and options_rect_base.collidepoint(x, y):
-        state['dropdown_open'] = True; state['hinting'] = False; state['showing_all_words'] = False
-        state['exchanging'] = False; state['specifying_rack'] = False; state['showing_simulation_config'] = False
+        state['dropdown_open'] = True
+        state['hinting'] = False
+        state['showing_all_words'] = False
+        state['exchanging'] = False
+        state['specifying_rack'] = False
+        state['showing_simulation_config'] = False
         state = clear_current_preview(state)
         return updated_state_flags
 
-    if not state.get('dragged_tile'): state = _handle_mouse_down_board_click(event, state)
+    # 2. Handle clicks on the game board itself
+    if not state.get('dragged_tile'):
+        state = _handle_mouse_down_board_click(event, state)
 
+    # 3. Delegate to the appropriate UI handler based on game mode
     if state.get('replay_mode', False) or state.get('is_loaded_game', False):
-        if _handle_mouse_down_replay_buttons(event, state, drawn_rects): return updated_state_flags
-        if event.button == 1 and _handle_mouse_down_scoreboard_replay_nav(event, state, drawn_rects):
-            if state.get('last_scoreboard_click_idx') == -1: state = clear_current_preview(state)
-            return updated_state_flags
-
-        insights_button_rect = drawn_rects.get('insights_button_rect')
-        if insights_button_rect and insights_button_rect.collidepoint(x, y):
-            print("Insights button clicked. Running analysis...")
-            target_turn_for_state = max(0, state['current_replay_turn'] - 1)
-            sgs_data = state.get('sgs_loaded_game_data')
-            if not sgs_data: show_message_dialog("Error: Cannot run analysis, game data is missing.", "Error"); return updated_state_flags
-            historical_tiles, historical_blanks, _, sim_racks, sim_bag, turn_of_last_move = get_sgs_replay_state(sgs_data, target_turn_for_state, is_silent_batch_run_param=True)
-            current_player_turn_num = 1 if target_turn_for_state == 0 else 3 - turn_of_last_move
-            sim_player_idx = current_player_turn_num - 1; sim_opponent_idx = 1 - sim_player_idx
-            sim_ai_rack = sim_racks[sim_player_idx]; sim_opponent_rack_len = len(sim_racks[sim_opponent_idx])
-            all_moves_for_sim = ai_engine.generate_all_moves_gaddag(sim_ai_rack, historical_tiles, state['board'], historical_blanks, is_silent_batch_run_param=True)
-            simulation_results = ai_engine.run_ai_simulation(all_moves_for_sim, sim_ai_rack, sim_opponent_rack_len, historical_tiles, historical_blanks, state['board'], sim_bag, state.get('ai_sim_num_candidates_cfg', DEFAULT_AI_CANDIDATES), state.get('ai_sim_num_opponent_sims_cfg', DEFAULT_OPPONENT_SIMULATIONS), state.get('ai_sim_num_post_sim_candidates_cfg', DEFAULT_POST_SIM_CANDIDATES), is_silent_batch_run_param=True)
-            analysis_data = ai_engine.analyze_board_state(historical_tiles, historical_blanks, sim_bag, sim_racks[sim_opponent_idx], state['board'])
-            show_insights_dialog(analysis_data, simulation_results, state)
-            return updated_state_flags
-
-        analyzer_checkbox_rect_local = drawn_rects.get('analyzer_checkbox_rect')
-        if analyzer_checkbox_rect_local and analyzer_checkbox_rect_local.collidepoint(x,y):
-            state['analyzer_show'] = not state.get('analyzer_show', False)
-            if not state.get('analyzer_show', False): state['analyzer_selected_move_index'] = None; state = clear_current_preview(state)
-            return updated_state_flags
-        
-        if state.get('analyzer_show', False) and event.button == 1: 
-            insights_item_rects = drawn_rects.get('insights_item_rects', [])
-            for item_rect, unique_key in insights_item_rects:
-                if item_rect.collidepoint(x, y):
-                    state = clear_current_preview(state)
-                    turn_index_for_data = unique_key // 1000; move_idx_in_turn_list = unique_key % 1000
-                    sgs_data_for_preview_base = state.get('sgs_loaded_game_data') 
-                    if not sgs_data_for_preview_base: sgs_data_for_preview_base = {'sgs_initial_bag': state.get('sgs_initial_bag', []), 'initial_racks_sgs': state.get('initial_racks', [[],[]]), 'full_move_history': state.get('move_history', [])}
-                    historical_tiles_N, historical_blanks_N, _, _, _, _ = get_sgs_replay_state(sgs_data_for_preview_base, turn_index_for_data, is_silent_batch_run_param=True)
-                    state['tiles'] = copy.deepcopy(historical_tiles_N); state['blanks'] = historical_blanks_N.copy()
-                    if insights_data_for_replay and 0 <= turn_index_for_data < len(insights_data_for_replay) and 0 <= move_idx_in_turn_list < len(insights_data_for_replay[turn_index_for_data]):
-                        move_data_from_insights = insights_data_for_replay[turn_index_for_data][move_idx_in_turn_list]
-                        move_for_preview_func = {'newly_placed': move_data_from_insights.get('newly_placed', []), 'blanks': move_data_from_insights.get('blanks_in_move', set())}
-                        state = apply_move_as_preview(state, move_for_preview_func); state['analyzer_selected_move_index'] = unique_key
-                    else:
-                        if not is_silent_run_local: print(f"Warning: Could not retrieve insights move for key {unique_key} to apply preview.")
-                        state['analyzer_selected_move_index'] = None 
-                    return updated_state_flags 
-        
-        # In Scrabble Game.py -> _handle_general_mouse_down()
-
-        solve_endgame_button_rect = drawn_rects.get('solve_endgame_button_rect')
-        if solve_endgame_button_rect and solve_endgame_button_rect.collidepoint(x, y):
-            if not is_silent_run_local: print("Solve Endgame button clicked in Replay Mode.")
-            
-            sgs_data_for_solve = state.get('sgs_loaded_game_data')
-            move_history_for_solve = state.get('move_history', [])
-            turn_to_solve_num = state.get('current_replay_turn', 0)
-
-            if sgs_data_for_solve and 0 < turn_to_solve_num <= len(move_history_for_solve):
-                state['is_solving_endgame'] = True
-                draw_game_screen(screen, state)
-                pygame.display.flip()
-
-                pre_move_turn_idx = turn_to_solve_num - 1
-                board_state_tiles, board_state_blanks, scores_before_move, _, _, _ = get_sgs_replay_state(
-                    sgs_data_for_solve, pre_move_turn_idx, is_silent_batch_run_param=True
-                )
-
-                move_data = move_history_for_solve[pre_move_turn_idx]
-                player_to_move = move_data['player']
-                player_idx = player_to_move - 1
-                opponent_idx = 1 - player_idx
-                
-                rack_player = move_data.get('rack', [])
-                
-                # --- CORRECTED RACK RECONSTRUCTION LOGIC ---
-                # Start with the opponent's initial rack from the beginning of the game
-                rack_opponent = sgs_data_for_solve.get('initial_racks_sgs', [[],[]])[opponent_idx][:]
-                
-                # Simulate the opponent's rack changes turn by turn up to the point of the solve
-                for i in range(pre_move_turn_idx):
-                    prev_move = move_history_for_solve[i]
-                    if prev_move['player'] - 1 == opponent_idx:
-                        # Create a mutable copy of the rack for this turn's operations
-                        temp_rack = list(rack_opponent)
-                        
-                        # Determine tiles consumed (either from a play or an exchange)
-                        tiles_consumed = []
-                        if prev_move.get('move_type') == 'place':
-                            tiles_consumed = prev_move.get('tiles_played_from_rack', [])
-                        elif prev_move.get('move_type') == 'exchange':
-                            tiles_consumed = prev_move.get('exchanged_tiles', [])
-
-                        # Remove the consumed tiles
-                        for tile_to_remove in tiles_consumed:
-                            if tile_to_remove in temp_rack:
-                                temp_rack.remove(tile_to_remove)
-                        
-                        # Add the drawn tiles
-                        drawn_tiles = prev_move.get('drawn', [])
-                        temp_rack.extend(drawn_tiles)
-                        
-                        # Update the main opponent rack variable for the next iteration
-                        rack_opponent = temp_rack
-                # --- END OF CORRECTION ---
-
-                score_diff = scores_before_move[player_idx] - scores_before_move[opponent_idx]
-
-                if not is_silent_run_local:
-                    print(f"  Solving for P{player_to_move} at turn {turn_to_solve_num}")
-                    print(f"  Player Rack: {rack_player}")
-                    print(f"  Opponent Rack (Reconstructed): {rack_opponent}")
-                    print(f"  Score Diff: {score_diff}")
-
-                # --- MODIFICATION START: Time the solver call ---
-                start_time = time.perf_counter()
-                _, formatted_lines, _ = ai_engine.solve_endgame(
-                    rack_player, rack_opponent, board_state_tiles, board_state_blanks, 
-                    state['board'], score_diff, is_silent_batch_run_param=True
-                )
-                end_time = time.perf_counter()
-                duration = end_time - start_time
-                duration_str = f"Solved in {duration:.2f} seconds"
-                # --- MODIFICATION END ---
-                
-                state['is_solving_endgame'] = False
-                
-                if formatted_lines:
-                    # --- MODIFICATION START: Pass duration to dialog ---
-                    show_endgame_results_dialog(formatted_lines, state, duration_str)
-                    # --- MODIFICATION END ---
-                else:
-                    show_message_dialog("Endgame solver found no valid lines or moves.", "Solver Results")
-
-            else:
-                err_msg = "Cannot solve endgame: "
-                if not sgs_data_for_solve: err_msg += "Game data not found."
-                else: err_msg += f"Invalid turn index {turn_to_solve_num}."
-                print(f"ERROR: {err_msg}")
-                show_message_dialog(err_msg, "Error")
-
-            return updated_state_flags
-        
-        if _handle_mouse_down_simulate_button(event, state, drawn_rects): return updated_state_flags
-        return updated_state_flags
-
-    if not state['replay_mode'] and not state['game_over_state'] and not state.get('is_batch_running', False) and not state.get('dropdown_open'):
-        if _handle_mouse_down_suggest_button(event, state, drawn_rects): return updated_state_flags
-        if _handle_mouse_down_simulate_button(event, state, drawn_rects): return updated_state_flags
-        p1_eye_rect = drawn_rects.get('p1_eye_rect'); p2_eye_rect = drawn_rects.get('p2_eye_rect')
-        if p1_eye_rect and p1_eye_rect.collidepoint(x, y): state['rack_visibility'][0] = not state['rack_visibility'][0]; return updated_state_flags
-        if p2_eye_rect and p2_eye_rect.collidepoint(x, y): state['rack_visibility'][1] = not state['rack_visibility'][1]; return updated_state_flags
-        if _handle_mouse_down_rack_ui_elements(event, state, drawn_rects): return updated_state_flags
+        # Handle all clicks related to the replay interface
+        _handle_mouse_down_replay_ui(event, state, drawn_rects)
+    elif not state['replay_mode'] and not state['game_over_state'] and not state.get('is_batch_running', False) and not state.get('dropdown_open'):
+        # Handle all clicks related to a live game interface
+        _handle_mouse_down_live_game_ui(event, state, drawn_rects)
 
     return updated_state_flags
 
@@ -10421,7 +10621,7 @@ def _handle_keydown_event(event, state, drawn_rects):
     batch_stop_requested = state.get('batch_stop_requested', False)
     start_new_game_same_mode = state.get('start_new_game_same_mode', False)
 
-    # --- MODIFICATION START: Handle practice end dialog shortcuts first ---
+    # 1. Handle practice end dialog shortcuts first (as it's a modal state)
     if state.get('showing_practice_end_dialog'):
         if event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
             state['restart_practice_mode'] = True
@@ -10434,24 +10634,22 @@ def _handle_keydown_event(event, state, drawn_rects):
             state['running_inner'] = False
             state['batch_stop_requested'] = True
         
-        # After handling, return the updated loop control flags from the state
         return state['running_inner'], state['return_to_mode_selection'], state['batch_stop_requested'], state['start_new_game_same_mode']
-    # --- MODIFICATION END ---
 
-    # 1. Handle ESC for visualized batch stop (highest priority for ESC)
+    # 2. Handle ESC for visualized batch stop (highest priority for ESC)
     if event.key == pygame.K_ESCAPE and \
        state.get('is_batch_running', False) and \
        DEV_VISUALIZE_BATCH_ENABLED_SESSION:
-        if not (state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION): # is_silent_run
+        if not (state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
             print("--- ESCAPE pressed during visualized batch. Requesting stop after current game. ---")
         state['visual_batch_esc_stop_pending'] = True
         return running_inner, return_to_mode_selection, batch_stop_requested, start_new_game_same_mode
 
-    # 2. Handle dialog-specific keyboard navigation (includes ESC for those dialogs)
+    # 3. Handle dialog-specific keyboard navigation (includes ESC for those dialogs)
     if _handle_keydown_dialog_navigation(event, state, drawn_rects):
         return running_inner, return_to_mode_selection, batch_stop_requested, start_new_game_same_mode
 
-    # 3. Handle typing on the board
+    # 4. Handle typing on the board
     current_player_idx = state['turn'] - 1
     is_human_turn_or_paused_for_typing = (
         0 <= current_player_idx < len(state['is_ai']) and
@@ -10466,12 +10664,12 @@ def _handle_keydown_event(event, state, drawn_rects):
         state = _handle_keydown_typing_on_board(event, state)
         return running_inner, return_to_mode_selection, batch_stop_requested, start_new_game_same_mode
 
-    # 4. Handle Game Over dialog shortcuts (if game over and not in a sub-dialog like stats)
+    # 5. Handle Game Over dialog shortcuts (if game over and not in a sub-dialog like stats)
     if state.get('game_over_state') and not state.get('is_batch_running', False) and not state.get('showing_stats'):
         if _handle_keydown_game_over_shortcuts(event, state, drawn_rects):
             return running_inner, return_to_mode_selection, batch_stop_requested, start_new_game_same_mode
             
-    # 5. Handle general shortcuts (like ESC for closing non-modal states or opening options)
+    # 6. Handle general shortcuts (like ESC for closing non-modal states or opening options)
     if _handle_keydown_general_shortcuts(event, state):
         return running_inner, return_to_mode_selection, batch_stop_requested, start_new_game_same_mode
 
@@ -10980,36 +11178,23 @@ def draw_all_words_dialog(state, moves, selected_index, current_scroll_offset, d
 
 
 
-
-
-
-def draw_game_screen(screen, state):
+def _draw_base_game_ui(screen, state, drawn_rects):
     """
-    Draws the entire game screen based on the current state.
-    This is a full and complete function with no code omitted.
+    Draws the base game UI: board, racks, scoreboard, and standard buttons.
+    This is a helper function for the main draw_game_screen orchestrator.
     """
-    global DEV_VISUALIZE_BATCH_ENABLED_SESSION
-    global word_definitions_loading_status
-    global REPLAY_BUTTON_WIDTH, REPLAY_BUTTON_HEIGHT, REPLAY_BUTTON_GAP
-    global GRID_SIZE, SQUARE_SIZE, OPTIONS_WIDTH, BUTTON_HEIGHT, BUTTON_GAP
+    global GRID_SIZE, SQUARE_SIZE, OPTIONS_WIDTH, BUTTON_HEIGHT, BUTTON_GAP, LETTERS
+    global WHITE, BLACK, PALE_YELLOW, YELLOW, GREEN, FONT_SIZE, ui_font, button_font
     global WINDOW_WIDTH, WINDOW_HEIGHT, DIALOG_WIDTH, DIALOG_HEIGHT
-    global ALL_WORDS_DIALOG_WIDTH, ALL_WORDS_DIALOG_HEIGHT
-    global FONT_SIZE, ui_font, button_font, tile_count_font, dialog_font, font
-    global WHITE, BLACK, RED, PINK, BLUE, LIGHT_BLUE, HIGHLIGHT_BLUE, YELLOW, GRAY, GREEN, DARK_GREEN, PALE_YELLOW, BUTTON_COLOR, BUTTON_HOVER, TURN_INDICATOR_COLOR, DIALOG_COLOR, DROPDOWN_COLOR, SELECTED_TILE_COLOR, GRAYED_OUT_COLOR, ARROW_COLOR, HINT_NORMAL_COLOR, HINT_SELECTED_COLOR
-    global LETTERS
-    is_silent_run = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
-
+    
+    # Unpack state variables needed for drawing the base UI
     board_layout_multipliers = state['board']
     current_tiles_on_board = state['tiles']
     current_blanks_on_board = state['blanks']
-
     scores_main = state['scores']
     racks_main = state['racks']
     turn = state['turn']
     player_names = state['player_names']
-    dragged_tile = state['dragged_tile']
-    drag_pos = state['drag_pos']
-    drag_offset = state['drag_offset']
     practice_mode = state['practice_mode']
     bag = state['bag']
     move_history = state['move_history']
@@ -11030,47 +11215,13 @@ def draw_game_screen(screen, state):
     current_batch_game_num = state['current_batch_game_num']
     total_batch_games = state['total_batch_games']
     gaddag_loading_status_local = state['gaddag_loading_status']
-    showing_simulation_config = state['showing_simulation_config']
-    simulation_config_inputs = state['simulation_config_inputs']
-    simulation_config_active_input = state['simulation_config_active_input']
-    specifying_rack = state['specifying_rack']
-    specify_rack_inputs = state['specify_rack_inputs']
-    specify_rack_active_input = state['specify_rack_active_input']
-    specify_rack_original_racks = state['specify_rack_original_racks']
-    confirming_override = state['confirming_override']
-    exchanging = state['exchanging']
-    selected_tiles = state['selected_tiles']
-    hinting = state['hinting']
-    hint_moves = state['hint_moves']
-    selected_hint_index = state['selected_hint_index']
-    showing_all_words = state['showing_all_words']
-    all_moves = state['all_moves']
-    practice_target_moves = state['practice_target_moves']
     paused_for_power_tile = state['paused_for_power_tile']
-    current_power_tile = state['current_power_tile']
-    number_checks = state['number_checks']
     paused_for_bingo_practice = state['paused_for_bingo_practice']
-    all_words_scroll_offset = state['all_words_scroll_offset']
-    showing_practice_end_dialog = state['showing_practice_end_dialog']
-    practice_end_message = state['practice_end_message']
-    dialog_x = state['dialog_x']
-    dialog_y = state['dialog_y']
-    reason = state.get('reason', '')
-    showing_stats = state['showing_stats']
-    stats_dialog_x = state['stats_dialog_x']
-    stats_dialog_y = state['stats_dialog_y']
-    stats_scroll_offset = state['stats_scroll_offset']
     dropdown_open = state['dropdown_open']
     bag_count_live = len(bag)
-    hint_dialog_x = state['hint_dialog_x']
-    hint_dialog_y = state['hint_dialog_y']
-    all_words_dialog_x = state.get('all_words_dialog_x', (WINDOW_WIDTH - ALL_WORDS_DIALOG_WIDTH) // 2)
-    all_words_dialog_y = state.get('all_words_dialog_y', (WINDOW_HEIGHT - ALL_WORDS_DIALOG_HEIGHT) // 2)
-    hint_scroll_offset = state.get('hint_scroll_offset', 0)
+    showing_practice_end_dialog = state.get('showing_practice_end_dialog', False)
 
-    drawn_rects = {}
-    screen.fill(WHITE)
-
+    # Determine which state variables to use for display (live vs. replay)
     racks_to_display_for_draw_rack_func = state.get('replay_racks_for_display', racks_main) if replay_mode else racks_main
     scores_to_display_func = state.get('replay_scores_for_display', scores_main) if replay_mode else (final_scores_state if game_over_state else scores_main)
     turn_to_display_for_ui_func = state.get('replay_turn_for_display', turn) if replay_mode else turn
@@ -11078,6 +11229,7 @@ def draw_game_screen(screen, state):
     history_to_draw_func = move_history[:current_replay_turn] if replay_mode else move_history
     is_final_turn_in_replay_func = (current_replay_turn == len(move_history)) if replay_mode else game_over_state
 
+    # Draw Board and Tiles
     for r_draw_board in range(GRID_SIZE):
         for c_draw_board in range(GRID_SIZE):
             pygame.draw.rect(screen, board_layout_multipliers[r_draw_board][c_draw_board], (40 + c_draw_board * SQUARE_SIZE, 40 + r_draw_board * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE))
@@ -11113,6 +11265,7 @@ def draw_game_screen(screen, state):
                     text_rect = text_surf.get_rect(center=tile_rect.center)
                     screen.blit(text_surf, text_rect)
 
+    # Draw Highlights for Replay
     if replay_mode and current_replay_turn > 0 and current_replay_turn <= len(move_history):
         last_move_data_replay = move_history[current_replay_turn - 1]
         if last_move_data_replay['move_type'] == 'place':
@@ -11122,9 +11275,10 @@ def draw_game_screen(screen, state):
                     if 0 <= r_hl < GRID_SIZE and 0 <= c_hl < GRID_SIZE:
                         pygame.draw.rect(screen, PALE_YELLOW, (40 + c_hl * SQUARE_SIZE, 40 + r_hl * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE), 3)
 
+    # Draw Labels, Racks, Scoreboard, etc.
     draw_board_labels(screen, ui_font)
     p1_alpha_rect, p1_rand_rect, p2_alpha_rect, p2_rand_rect, p1_eye_rect, p2_eye_rect = draw_player_racks(
-        screen, racks_to_display_for_draw_rack_func, scores_to_display_func, turn_to_display_for_ui_func, player_names, dragged_tile, drag_pos, practice_mode, state['rack_visibility'], is_ai, replay_mode, game_over_state
+        screen, racks_to_display_for_draw_rack_func, scores_to_display_func, turn_to_display_for_ui_func, player_names, state['dragged_tile'], state['drag_pos'], practice_mode, state['rack_visibility'], is_ai, replay_mode, game_over_state
     )
     drawn_rects['p1_alpha_rect'] = p1_alpha_rect
     drawn_rects['p1_rand_rect'] = p1_rand_rect
@@ -11140,27 +11294,59 @@ def draw_game_screen(screen, state):
     sb_y = 40
     sb_w = max(200, WINDOW_WIDTH - sb_x - 20)
     sb_h = (WINDOW_HEIGHT - 80) // 2
-    if sb_x + sb_w > WINDOW_WIDTH - 10:
-        sb_w = WINDOW_WIDTH - sb_x - 10
-    if sb_w < 150:
-        sb_x = WINDOW_WIDTH - 160
-        sb_w = 150
+    if sb_x + sb_w > WINDOW_WIDTH - 10: sb_w = WINDOW_WIDTH - sb_x - 10
+    if sb_w < 150: sb_x = WINDOW_WIDTH - 160; sb_w = 150
     scoreboard_display_rect = pygame.Rect(sb_x, sb_y, sb_w, sb_h)
     drawn_rects['scoreboard_rect'] = scoreboard_display_rect
     returned_scroll_offset = draw_scoreboard(screen, history_to_draw_func, state['scroll_offset'], scores_to_display_func, is_ai, player_names, final_scores=final_scores_state, game_over_state=(game_over_state or is_final_turn_in_replay_func))
     state['scroll_offset'] = returned_scroll_offset
 
+    # Draw Typing Cursor / Selection Arrow
+    if selected_square and not typing:
+        draw_arrow(selected_square[0], selected_square[1], selected_square[2])
+    elif typing:
+        if current_r is not None and current_c is not None:
+            if 0 <= current_r < GRID_SIZE and 0 <= current_c < GRID_SIZE:
+                cursor_x_draw = 40 + current_c * SQUARE_SIZE + SQUARE_SIZE // 2
+                cursor_y_draw = 40 + current_r * SQUARE_SIZE + SQUARE_SIZE - 5
+                if int(time.time() * 2) % 2 == 0:
+                    pygame.draw.line(screen, BLACK, (cursor_x_draw - 5, cursor_y_draw), (cursor_x_draw + 5, cursor_y_draw), 2)
+
+    # Draw Status Indicators (Loading, Solving, Batch)
+    indicator_center_x = sb_x + sb_w // 2
+    indicator_base_y = sb_y
+    indicator_y_offset = 0
+    if is_solving_endgame:
+        draw_endgame_solving_indicator(indicator_center_x, indicator_base_y)
+        indicator_y_offset += 25
+    elif gaddag_loading_status_local == 'loading':
+        draw_loading_indicator(sb_x, indicator_base_y, sb_w)
+        indicator_y_offset += 25
+    elif is_batch_running_local_draw and DEV_VISUALIZE_BATCH_ENABLED_SESSION:
+        batch_text = f"Running Game: {current_batch_game_num} / {total_batch_games}"
+        batch_surf = ui_font.render(batch_text, True, BLUE)
+        indicator_top_y_batch = indicator_base_y + indicator_y_offset - batch_surf.get_height() - 5
+        batch_rect_draw = batch_surf.get_rect(centerx=indicator_center_x, top=max(5, indicator_top_y_batch))
+        screen.blit(batch_surf, batch_rect_draw)
+        indicator_y_offset += batch_surf.get_height() + 5
+
+    definitions_indicator_y = indicator_base_y - indicator_y_offset - 25
+    if definitions_indicator_y < 5: definitions_indicator_y = 5
+    if word_definitions_loading_status == 'loading':
+        def_load_text = "Loading Definitions..."
+        def_load_surf = ui_font.render(def_load_text, True, BLUE)
+        def_load_rect = def_load_surf.get_rect(centerx=indicator_center_x, top=definitions_indicator_y)
+        screen.blit(def_load_surf, def_load_rect)
+    elif word_definitions_loading_status == 'error':
+        def_err_text = "Definitions Error!"
+        def_err_surf = ui_font.render(def_err_text, True, RED)
+        def_err_rect = def_err_surf.get_rect(centerx=indicator_center_x, top=definitions_indicator_y)
+        screen.blit(def_err_surf, def_err_rect)
+
+    # Draw Main Action Buttons
     is_human_turn_or_paused_practice = (0 <= turn-1 < len(is_ai)) and (not is_ai[turn-1] or paused_for_power_tile or paused_for_bingo_practice)
     show_suggest_button = is_human_turn_or_paused_practice and not state.get('is_loaded_game', False) and not state.get('replay_mode', False)
     show_secondary_buttons = is_human_turn_or_paused_practice or state.get('replay_mode', False) or state.get('is_loaded_game', False)
-
-    suggest_rect_base = None
-    simulate_button_rect = None
-    profile_button_rect = None
-    preview_checkbox_rect = None
-    word_lookup_button_in_game_rect = None
-    solve_endgame_button_rect = None
-    solutions_button_rect = None
 
     if not is_batch_running_local_draw:
         top_button_x = 10 + OPTIONS_WIDTH + BUTTON_GAP
@@ -11168,8 +11354,8 @@ def draw_game_screen(screen, state):
         current_button_y = top_button_y
         
         if show_suggest_button:
-            suggest_rect_base = draw_suggest_button()
-            current_button_y = suggest_rect_base.bottom + BUTTON_GAP
+            drawn_rects['suggest_rect_base'] = draw_suggest_button()
+            current_button_y = drawn_rects['suggest_rect_base'].bottom + BUTTON_GAP
         
         if show_secondary_buttons:
             simulate_button_rect = pygame.Rect(top_button_x, current_button_y, OPTIONS_WIDTH, BUTTON_HEIGHT)
@@ -11177,8 +11363,8 @@ def draw_game_screen(screen, state):
             color_sim = BUTTON_HOVER if hover_sim else BUTTON_COLOR
             pygame.draw.rect(screen, color_sim, simulate_button_rect)
             simulate_text = button_font.render("Simulate", True, BLACK)
-            simulate_text_rect = simulate_text.get_rect(center=simulate_button_rect.center)
-            screen.blit(simulate_text, simulate_text_rect)
+            screen.blit(simulate_text, simulate_text.get_rect(center=simulate_button_rect.center))
+            drawn_rects['simulate_button_rect'] = simulate_button_rect
             current_button_y = simulate_button_rect.bottom + BUTTON_GAP
 
             if replay_mode:
@@ -11187,8 +11373,8 @@ def draw_game_screen(screen, state):
                 color_solve = BUTTON_HOVER if hover_solve else BUTTON_COLOR
                 pygame.draw.rect(screen, color_solve, solve_endgame_button_rect)
                 solve_text = button_font.render("Solve", True, BLACK)
-                solve_text_rect = solve_text.get_rect(center=solve_endgame_button_rect.center)
-                screen.blit(solve_text, solve_text_rect)
+                screen.blit(solve_text, solve_text.get_rect(center=solve_endgame_button_rect.center))
+                drawn_rects['solve_endgame_button_rect'] = solve_endgame_button_rect
                 current_button_y = solve_endgame_button_rect.bottom + BUTTON_GAP
 
             word_lookup_button_in_game_rect = pygame.Rect(top_button_x, current_button_y, OPTIONS_WIDTH, BUTTON_HEIGHT)
@@ -11196,8 +11382,8 @@ def draw_game_screen(screen, state):
             color_lookup = BUTTON_HOVER if hover_lookup else BUTTON_COLOR
             pygame.draw.rect(screen, color_lookup, word_lookup_button_in_game_rect)
             lookup_text = button_font.render("Lookup", True, BLACK)
-            lookup_text_rect = lookup_text.get_rect(center=word_lookup_button_in_game_rect.center)
-            screen.blit(lookup_text, lookup_text_rect)
+            screen.blit(lookup_text, lookup_text.get_rect(center=word_lookup_button_in_game_rect.center))
+            drawn_rects['word_lookup_button_in_game_rect'] = word_lookup_button_in_game_rect
             current_button_y = word_lookup_button_in_game_rect.bottom + BUTTON_GAP
 
             if practice_mode == 'endgame':
@@ -11206,8 +11392,8 @@ def draw_game_screen(screen, state):
                 color_solutions = BUTTON_HOVER if hover_solutions else BUTTON_COLOR
                 pygame.draw.rect(screen, color_solutions, solutions_button_rect)
                 solutions_text = button_font.render("Solutions", True, BLACK)
-                solutions_text_rect = solutions_text.get_rect(center=solutions_button_rect.center)
-                screen.blit(solutions_text, solutions_text_rect)
+                screen.blit(solutions_text, solutions_text.get_rect(center=solutions_button_rect.center))
+                drawn_rects['solutions_button_rect'] = solutions_button_rect
                 current_button_y = solutions_button_rect.bottom + BUTTON_GAP
 
         if is_human_turn_or_paused_practice:
@@ -11229,15 +11415,9 @@ def draw_game_screen(screen, state):
                     score_x_pv = label_x_draw + label_surf.get_width() + 2
                     score_y_pv = label_y_draw
                     screen.blit(score_surf_pv, (score_x_pv, score_y_pv))
+                drawn_rects['preview_checkbox_rect'] = preview_checkbox_rect
 
-    drawn_rects['suggest_rect_base'] = suggest_rect_base
-    drawn_rects['simulate_button_rect'] = simulate_button_rect
-    drawn_rects['solve_endgame_button_rect'] = solve_endgame_button_rect
-    drawn_rects['solutions_button_rect'] = solutions_button_rect
-    drawn_rects['profile_button_rect'] = profile_button_rect
-    drawn_rects['preview_checkbox_rect'] = preview_checkbox_rect
-    drawn_rects['word_lookup_button_in_game_rect'] = word_lookup_button_in_game_rect
-
+    # Draw Replay/Insights UI
     if replay_mode or state.get('is_loaded_game', False):
         new_replay_button_y = scoreboard_display_rect.bottom + 4
         insights_button_width = 80
@@ -11265,139 +11445,127 @@ def draw_game_screen(screen, state):
         color_insights = BUTTON_HOVER if hover_insights else BUTTON_COLOR
         pygame.draw.rect(screen, color_insights, insights_button_rect)
         insights_text = button_font.render("Insights", True, BLACK)
-        insights_text_rect = insights_text.get_rect(center=insights_button_rect.center)
-        screen.blit(insights_text, insights_text_rect)
-        insights_checkbox_rect_val, insights_item_rects_val = draw_insights_window(screen, state) 
+        screen.blit(insights_text, insights_text.get_rect(center=insights_button_rect.center))
+        insights_checkbox_rect_val, insights_item_rects_val = draw_insights_window(screen, state)
         drawn_rects['analyzer_checkbox_rect'] = insights_checkbox_rect_val
         drawn_rects['insights_item_rects'] = insights_item_rects_val
 
-    if selected_square and not typing:
-        draw_arrow(selected_square[0], selected_square[1], selected_square[2])
-    elif typing:
-        if current_r is not None and current_c is not None:
-            if 0 <= current_r < GRID_SIZE and 0 <= current_c < GRID_SIZE:
-                cursor_x_draw = 40 + current_c * SQUARE_SIZE + SQUARE_SIZE // 2
-                cursor_y_draw = 40 + current_r * SQUARE_SIZE + SQUARE_SIZE - 5
-                if int(time.time() * 2) % 2 == 0:
-                    pygame.draw.line(screen, BLACK, (cursor_x_draw - 5, cursor_y_draw), (cursor_x_draw + 5, cursor_y_draw), 2)
+    # Draw Options Menu (if open)
+    if not showing_practice_end_dialog and not is_batch_running_local_draw:
+        options_rect_base_draw, dropdown_rects_base_draw = draw_options_menu(turn_to_display_for_ui_func, dropdown_open, bag_count_live, is_batch_running_local_draw, replay_mode, game_over_state)
+        drawn_rects['options_rect_base'] = options_rect_base_draw
+        drawn_rects['dropdown_rects_base'] = dropdown_rects_base_draw
 
-    indicator_center_x = sb_x + sb_w // 2
-    indicator_base_y = sb_y
-    indicator_y_offset = 0
-    if is_solving_endgame:
-        draw_endgame_solving_indicator(indicator_center_x, indicator_base_y)
-        indicator_y_offset += 25
-    elif gaddag_loading_status_local == 'loading':
-        draw_loading_indicator(sb_x, indicator_base_y, sb_w)
-        indicator_y_offset += 25
-    elif is_batch_running_local_draw and DEV_VISUALIZE_BATCH_ENABLED_SESSION:
-        batch_text = f"Running Game: {current_batch_game_num} / {total_batch_games}"
-        batch_surf = ui_font.render(batch_text, True, BLUE)
-        indicator_top_y_batch = indicator_base_y + indicator_y_offset - batch_surf.get_height() - 5
-        batch_rect_draw = batch_surf.get_rect(centerx=indicator_center_x, top=max(5, indicator_top_y_batch))
-        screen.blit(batch_surf, batch_rect_draw)
-        indicator_y_offset += batch_surf.get_height() + 5
 
-    definitions_indicator_y = indicator_base_y - indicator_y_offset - 25 
-    if definitions_indicator_y < 5:
-        definitions_indicator_y = 5 
-    if word_definitions_loading_status == 'loading':
-        def_load_text = "Loading Definitions..."
-        def_load_surf = ui_font.render(def_load_text, True, BLUE)
-        def_load_rect = def_load_surf.get_rect(centerx=indicator_center_x, top=definitions_indicator_y)
-        screen.blit(def_load_surf, def_load_rect)
-    elif word_definitions_loading_status == 'error':
-        def_err_text = "Definitions Error!"
-        def_err_surf = ui_font.render(def_err_text, True, RED)
-        def_err_rect = def_err_surf.get_rect(centerx=indicator_center_x, top=definitions_indicator_y)
-        screen.blit(def_err_surf, def_err_rect)
 
-    drawn_rects.update({'sim_input_rects': [], 'sim_simulate_rect': None, 'sim_cancel_rect': None, 'p1_input_rect_sr': None, 'p2_input_rect_sr': None, 'p1_reset_rect_sr': None, 'p2_reset_rect_sr': None, 'confirm_rect_sr': None, 'cancel_rect_sr': None, 'go_back_rect_ov': None, 'override_rect_ov': None, 'tile_rects': [], 'exchange_button_rect': None, 'cancel_button_rect': None, 'hint_rects': [], 'play_button_rect': None, 'ok_button_rect': None, 'all_words_button_rect': None, 'all_words_rects': [], 'all_words_play_rect': None, 'all_words_ok_rect': None, 'practice_play_again_rect': None, 'practice_main_menu_rect': None, 'practice_quit_rect': None, 'save_rect': None, 'quit_rect': None, 'replay_rect_game_over_dialog': None, 'play_again_rect': None, 'stats_rect': None, 'main_menu_rect': None, 'stats_ok_button_rect': None, 'stats_total_content_height': 0})
+
+def _draw_dialogs_and_overlays(screen, state, drawn_rects):
+    """
+    Draws any active dialogs or modal UI elements over the base game screen.
+    This is a helper function for the main draw_game_screen orchestrator.
+    """
+    # Unpack all necessary state variables for the various dialogs
+    showing_practice_end_dialog = state['showing_practice_end_dialog']
+    showing_simulation_config = state['showing_simulation_config']
+    specifying_rack = state['specifying_rack']
+    exchanging = state['exchanging']
+    hinting = state['hinting']
+    showing_all_words = state['showing_all_words']
+    game_over_state = state['game_over_state']
+    is_batch_running = state['is_batch_running']
+    
+    # Draw dialogs based on state
     if showing_practice_end_dialog:
         dialog_x_practice = state.get('practice_dialog_x', (WINDOW_WIDTH - 400) // 2)
         dialog_y_practice = state.get('practice_dialog_y', (WINDOW_HEIGHT - 180) // 2)
-        practice_play_again_rect_draw, practice_main_menu_rect_draw, practice_quit_rect_draw, practice_dialog_width, practice_dialog_height = draw_practice_end_dialog(practice_end_message, state, dialog_x_practice, dialog_y_practice)
+        practice_play_again_rect_draw, practice_main_menu_rect_draw, practice_quit_rect_draw, practice_dialog_width, practice_dialog_height = draw_practice_end_dialog(state['practice_end_message'], state, dialog_x_practice, dialog_y_practice)
         drawn_rects['practice_play_again_rect'] = practice_play_again_rect_draw
         drawn_rects['practice_main_menu_rect'] = practice_main_menu_rect_draw
         drawn_rects['practice_quit_rect'] = practice_quit_rect_draw
         drawn_rects['practice_dialog_width'] = practice_dialog_width
         drawn_rects['practice_dialog_height'] = practice_dialog_height
     elif showing_simulation_config:
-        sim_input_rects_draw, sim_simulate_rect_draw, sim_cancel_rect_draw, profile_checkbox_rect_sim_dialog = draw_simulation_config_dialog(simulation_config_inputs, simulation_config_active_input, state)
+        sim_input_rects_draw, sim_simulate_rect_draw, sim_cancel_rect_draw, profile_checkbox_rect_sim_dialog = draw_simulation_config_dialog(state['simulation_config_inputs'], state['simulation_config_active_input'], state)
         drawn_rects['sim_input_rects'] = sim_input_rects_draw
         drawn_rects['sim_simulate_rect'] = sim_simulate_rect_draw
         drawn_rects['sim_cancel_rect'] = sim_cancel_rect_draw
         drawn_rects['profile_checkbox_rect_sim_dialog'] = profile_checkbox_rect_sim_dialog
     elif specifying_rack:
-        p1_name_disp = player_names[0] if player_names and player_names[0] else "Player 1"
-        p2_name_disp = player_names[1] if player_names and len(player_names) > 1 and player_names[1] else "Player 2"
-        p1_input_rect_sr_draw, p2_input_rect_sr_draw, p1_reset_rect_sr_draw, p2_reset_rect_sr_draw, confirm_rect_sr_draw, cancel_rect_sr_draw = draw_specify_rack_dialog(p1_name_disp, p2_name_disp, specify_rack_inputs, specify_rack_active_input, specify_rack_original_racks)
+        p1_name_disp = state['player_names'][0] if state['player_names'] and state['player_names'][0] else "Player 1"
+        p2_name_disp = state['player_names'][1] if state['player_names'] and len(state['player_names']) > 1 and state['player_names'][1] else "Player 2"
+        p1_input_rect_sr_draw, p2_input_rect_sr_draw, p1_reset_rect_sr_draw, p2_reset_rect_sr_draw, confirm_rect_sr_draw, cancel_rect_sr_draw = draw_specify_rack_dialog(p1_name_disp, p2_name_disp, state['specify_rack_inputs'], state['specify_rack_active_input'], state['specify_rack_original_racks'])
         drawn_rects['p1_input_rect_sr'] = p1_input_rect_sr_draw
         drawn_rects['p2_input_rect_sr'] = p2_input_rect_sr_draw
         drawn_rects['p1_reset_rect_sr'] = p1_reset_rect_sr_draw
         drawn_rects['p2_reset_rect_sr'] = p2_reset_rect_sr_draw
         drawn_rects['confirm_rect_sr'] = confirm_rect_sr_draw
         drawn_rects['cancel_rect_sr'] = cancel_rect_sr_draw
-        if confirming_override:
+        if state['confirming_override']:
             go_back_rect_ov_draw, override_rect_ov_draw = draw_override_confirmation_dialog()
             drawn_rects['go_back_rect_ov'] = go_back_rect_ov_draw
             drawn_rects['override_rect_ov'] = override_rect_ov_draw
     elif exchanging:
-        current_player_rack_for_exchange = racks_main[turn-1] if 0 <= turn-1 < len(racks_main) and racks_main[turn-1] is not None else []
-        tile_rects_draw, exchange_button_rect_draw, cancel_button_rect_draw = draw_exchange_dialog(current_player_rack_for_exchange, selected_tiles)
+        current_player_rack_for_exchange = state['racks'][state['turn']-1] if 0 <= state['turn']-1 < len(state['racks']) and state['racks'][state['turn']-1] is not None else []
+        tile_rects_draw, exchange_button_rect_draw, cancel_button_rect_draw = draw_exchange_dialog(current_player_rack_for_exchange, state['selected_tiles'])
         drawn_rects['tile_rects'] = tile_rects_draw
         drawn_rects['exchange_button_rect'] = exchange_button_rect_draw
         drawn_rects['cancel_button_rect'] = cancel_button_rect_draw
     elif hinting:
-        is_simulation_result = bool(hint_moves and isinstance(hint_moves[0], dict) and 'final_score' in hint_moves[0])
-        is_play_disabled_in_replay_sim = replay_mode and is_simulation_result
+        is_simulation_result = bool(state['hint_moves'] and isinstance(state['hint_moves'][0], dict) and 'final_score' in state['hint_moves'][0])
+        is_play_disabled_in_replay_sim = state['replay_mode'] and is_simulation_result
         is_loaded_or_replay = state.get('replay_mode', False)
-        hint_rects_draw, play_button_rect_local_hint, ok_button_rect_local_hint, all_words_button_rect_hint = draw_hint_dialog(screen, hint_moves, selected_hint_index, hint_dialog_x, hint_dialog_y, hint_scroll_offset, is_simulation_result=is_simulation_result, is_play_disabled=is_play_disabled_in_replay_sim, is_loaded_or_replay_mode=is_loaded_or_replay)
+        hint_rects_draw, play_button_rect_local_hint, ok_button_rect_local_hint, all_words_button_rect_hint = draw_hint_dialog(screen, state['hint_moves'], state['selected_hint_index'], state['hint_dialog_x'], state['hint_dialog_y'], state['hint_scroll_offset'], is_simulation_result=is_simulation_result, is_play_disabled=is_play_disabled_in_replay_sim, is_loaded_or_replay_mode=is_loaded_or_replay)
         drawn_rects['hint_rects'] = hint_rects_draw
         drawn_rects['play_button_rect'] = play_button_rect_local_hint
         drawn_rects['ok_button_rect'] = ok_button_rect_local_hint
         drawn_rects['all_words_button_rect'] = all_words_button_rect_hint
     elif showing_all_words:
-        if practice_mode == "eight_letter":
-            moves_for_all = practice_target_moves
-        elif practice_mode == "power_tiles" and paused_for_power_tile:
-            moves_for_all = sorted([m for m in all_moves if any(letter_aw_ds == current_power_tile for _, _, letter_aw_ds in m.get('newly_placed',[])) and is_word_length_allowed(len(m.get('word','')), number_checks)], key=lambda m: m['score'], reverse=True)
-        elif practice_mode == "bingo_bango_bongo" and paused_for_bingo_practice:
-            moves_for_all = sorted([m for m in all_moves if m.get('is_bingo', False)], key=lambda m: m['score'], reverse=True)
-        else:
-            moves_for_all = all_moves
-        is_simulation_result_aw = bool(hint_moves and isinstance(hint_moves[0], dict) and 'final_score' in hint_moves[0])
-        is_play_disabled_in_all_words = replay_mode and is_simulation_result_aw
+        if state['practice_mode'] == "eight_letter": moves_for_all = state['practice_target_moves']
+        elif state['practice_mode'] == "power_tiles" and state['paused_for_power_tile']: moves_for_all = sorted([m for m in state['all_moves'] if any(letter_aw_ds == state['current_power_tile'] for _, _, letter_aw_ds in m.get('newly_placed',[])) and is_word_length_allowed(len(m.get('word','')), state['number_checks'])], key=lambda m: m['score'], reverse=True)
+        elif state['practice_mode'] == "bingo_bango_bongo" and state['paused_for_bingo_practice']: moves_for_all = sorted([m for m in state['all_moves'] if m.get('is_bingo', False)], key=lambda m: m['score'], reverse=True)
+        else: moves_for_all = state['all_moves']
+        is_simulation_result_aw = bool(state['hint_moves'] and isinstance(state['hint_moves'][0], dict) and 'final_score' in state['hint_moves'][0])
+        is_play_disabled_in_all_words = state['replay_mode'] and is_simulation_result_aw
         is_loaded_or_replay = state.get('replay_mode', False)
-        all_words_rects_draw, all_words_play_rect_draw, all_words_ok_rect_draw = draw_all_words_dialog(state, moves_for_all, selected_hint_index, all_words_scroll_offset, all_words_dialog_x, all_words_dialog_y, is_play_disabled=is_play_disabled_in_all_words, is_loaded_or_replay_mode=is_loaded_or_replay)
+        all_words_rects_draw, all_words_play_rect_draw, all_words_ok_rect_draw = draw_all_words_dialog(state, moves_for_all, state['selected_hint_index'], state['all_words_scroll_offset'], state.get('all_words_dialog_x'), state.get('all_words_dialog_y'), is_play_disabled=is_play_disabled_in_all_words, is_loaded_or_replay_mode=is_loaded_or_replay)
         drawn_rects['all_words_rects'] = all_words_rects_draw
         drawn_rects['all_words_play_rect'] = all_words_play_rect_draw
         drawn_rects['all_words_ok_rect'] = all_words_ok_rect_draw
-    elif game_over_state and not is_batch_running_local_draw:
-        if final_scores_state is not None:
-            save_rect_go, quit_rect_go, replay_rect_go_dlg, play_again_rect_go, stats_rect_go, main_menu_rect_go = draw_game_over_dialog(dialog_x, dialog_y, final_scores_state, reason, player_names)
+    elif game_over_state and not is_batch_running:
+        if state['final_scores'] is not None:
+            save_rect_go, quit_rect_go, replay_rect_go_dlg, play_again_rect_go, stats_rect_go, main_menu_rect_go = draw_game_over_dialog(state['dialog_x'], state['dialog_y'], state['final_scores'], state['reason'], state['player_names'])
             drawn_rects['save_rect'] = save_rect_go
             drawn_rects['quit_rect'] = quit_rect_go
             drawn_rects['replay_rect_game_over_dialog'] = replay_rect_go_dlg
             drawn_rects['play_again_rect'] = play_again_rect_go
             drawn_rects['stats_rect'] = stats_rect_go
             drawn_rects['main_menu_rect'] = main_menu_rect_go
-        if showing_stats and final_scores_state:
-            stats_ok_button_rect_stats, stats_total_content_height_stats = draw_stats_dialog(stats_dialog_x, stats_dialog_y, player_names, final_scores_state, current_tiles_on_board, stats_scroll_offset, move_history)
+        if state['showing_stats'] and state['final_scores']:
+            stats_ok_button_rect_stats, stats_total_content_height_stats = draw_stats_dialog(state['stats_dialog_x'], state['stats_dialog_y'], state['player_names'], state['final_scores'], state['tiles'], state['stats_scroll_offset'], state['move_history'])
             drawn_rects['stats_ok_button_rect'] = stats_ok_button_rect_stats
             drawn_rects['stats_total_content_height'] = stats_total_content_height_stats
 
-    if not showing_practice_end_dialog and not is_batch_running_local_draw:
-        options_rect_base_draw, dropdown_rects_base_draw = draw_options_menu(turn_to_display_for_ui_func, dropdown_open, bag_count_live, is_batch_running_local_draw, replay_mode, game_over_state)
-        drawn_rects['options_rect_base'] = options_rect_base_draw
-        drawn_rects['dropdown_rects_base'] = dropdown_rects_base_draw
+
+
+
+def _draw_dragged_tile(screen, state):
+    """
+    Draws the tile currently being dragged by the mouse, ensuring it's on top.
+    This is a helper function for the main draw_game_screen orchestrator.
+    """
+    global TILE_WIDTH, TILE_HEIGHT, GREEN, BLACK, WHITE, font
+    
+    dragged_tile = state.get('dragged_tile')
+    drag_pos = state.get('drag_pos')
+    drag_offset = state.get('drag_offset', (0,0))
+    racks_to_display = state.get('replay_racks_for_display', state['racks']) if state['replay_mode'] else state['racks']
 
     if dragged_tile and drag_pos:
         player_idx_drag = dragged_tile[0]-1
         tile_val = None
-        current_racks_for_drag = racks_to_display_for_draw_rack_func
-        if 0 <= player_idx_drag < len(current_racks_for_drag) and current_racks_for_drag[player_idx_drag] is not None and 0 <= dragged_tile[1] < len(current_racks_for_drag[player_idx_drag]):
-            tile_val = current_racks_for_drag[player_idx_drag][dragged_tile[1]]
+        if 0 <= player_idx_drag < len(racks_to_display) and racks_to_display[player_idx_drag] is not None and 0 <= dragged_tile[1] < len(racks_to_display[player_idx_drag]):
+            tile_val = racks_to_display[player_idx_drag][dragged_tile[1]]
+        
         if tile_val:
             draw_x_drag = drag_pos[0] - (TILE_WIDTH // 2) - drag_offset[0]
             draw_y_drag = drag_pos[1] - (TILE_HEIGHT // 2) - drag_offset[1]
@@ -11413,6 +11581,52 @@ def draw_game_screen(screen, state):
                 text_drag = font.render(tile_val, True, BLACK)
                 screen.blit(text_drag, (draw_x_drag + 5, draw_y_drag + 5))
 
+
+
+
+
+
+
+
+
+
+
+
+def draw_game_screen(screen, state):
+    """
+    Draws the entire game screen based on the current state.
+    This is a full and complete function with no code omitted.
+    """
+    global WHITE
+
+    # Initialize drawn_rects for this frame
+    drawn_rects = {
+        'sim_input_rects': [], 'sim_simulate_rect': None, 'sim_cancel_rect': None, 
+        'p1_input_rect_sr': None, 'p2_input_rect_sr': None, 'p1_reset_rect_sr': None, 
+        'p2_reset_rect_sr': None, 'confirm_rect_sr': None, 'cancel_rect_sr': None, 
+        'go_back_rect_ov': None, 'override_rect_ov': None, 'tile_rects': [], 
+        'exchange_button_rect': None, 'cancel_button_rect': None, 'hint_rects': [], 
+        'play_button_rect': None, 'ok_button_rect': None, 'all_words_button_rect': None, 
+        'all_words_rects': [], 'all_words_play_rect': None, 'all_words_ok_rect': None, 
+        'practice_play_again_rect': None, 'practice_main_menu_rect': None, 
+        'practice_quit_rect': None, 'save_rect': None, 'quit_rect': None, 
+        'replay_rect_game_over_dialog': None, 'play_again_rect': None, 'stats_rect': None, 
+        'main_menu_rect': None, 'stats_ok_button_rect': None, 'stats_total_content_height': 0
+    }
+    state['drawn_rects'] = drawn_rects # Ensure state has the dict for helpers to use
+
+    # 1. Fill the background
+    screen.fill(WHITE)
+
+    # 2. Draw the base game UI (board, racks, scoreboard, main buttons)
+    _draw_base_game_ui(screen, state, drawn_rects)
+
+    # 3. Draw any active dialogs or overlays on top of the base UI
+    _draw_dialogs_and_overlays(screen, state, drawn_rects)
+
+    # 4. Draw the dragged tile last so it's on top of everything
+    _draw_dragged_tile(screen, state)
+   
     return drawn_rects
    
    
@@ -13109,6 +13323,7 @@ def execute_game_session(is_initialized_from_outer_loop_param):
                             puzzle_state_to_save['blanks'],
                             puzzle_state_to_save['board'],
                             score_diff_for_solve,
+                            current_state_dict.get('pass_count', 0),
                             is_silent_batch_run_param=True
                         )
                         
@@ -13209,9 +13424,15 @@ def execute_game_session(is_initialized_from_outer_loop_param):
 
     finally:
         if is_batch_running and sgs_data_buffer:
-            print(f"--- Interruption/End of Batch: Saving remaining {len(sgs_data_buffer)} buffered SGS files... ---")
-            save_sgs_batch(sgs_data_buffer, is_silent_run=(not DEV_VISUALIZE_BATCH_ENABLED_SESSION))
-            sgs_data_buffer.clear()
+            original_sigint_handler = signal.getsignal(signal.SIGINT)
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+            try:
+                print(f"--- Interruption/End of Batch: Saving remaining {len(sgs_data_buffer)} buffered SGS files... ---")
+                save_sgs_batch(sgs_data_buffer, is_silent_run=(not DEV_VISUALIZE_BATCH_ENABLED_SESSION))
+                sgs_data_buffer.clear()
+            finally:
+                # ALWAYS restore the original signal handler
+                signal.signal(signal.SIGINT, original_sigint_handler)
 
     if is_batch_running and batch_results: 
         total_batch_duration_seconds = time.perf_counter() - batch_start_time
