@@ -1,7 +1,16 @@
 To-Do List
 
 
--- Racks should be auto-alphabetized in Batch Endgame mode
+
+-- Add a Scenario Batch feature where I can set up a board and then batch from there.
+for example, Josh Sokol likes to play bingos on the first move that take an ess and place them
+one square away from the TWS. I want to set that up and then batch through those scenarios to see what the data says.
+
+-- I should be able to load game from GCG or Woogles format. Seriously.
+
+
+-- When an Endgame Puzzle is solved, it should be removed from the Endgame Practice folder and placed in the Solved Endgames folder
+
 
 -- Play Again from the Game Over menu in Batch Endgame practice mode doesn't make sense, and doesn't work, either way.
 
@@ -76,8 +85,6 @@ dynamics, like Openness score (35%).
 -- Cursor focus should default to thh first text box in any dialog
 
 
--- Save Batch statistics to a Google Sheets. I asked Gemini about this and is easily implemented, but requires OAuth flow, etc. I already have account set up so just need to add sheet ID, etc.
-
 -- In Suggest and All Words, if bingo, show probablilty.
 
 -- Show difference between the predicted opponent average score and the actual opponent score. Collate those stats on the Batch stats file. And in the end-of-game stats.
@@ -85,8 +92,8 @@ dynamics, like Openness score (35%).
 -- Allow different AI strengths. From best to worst:
 
   1. My Strength Is Ten-Fold
-  2. I was National Champ in 1989. I Hardly Ever Think About It Anymore
-  3. I See You Play Scrabble. I Play A Little Scrabble Myself
+  2. I was National Champ in 1989. I Hardly Ever Think About It Anymore.
+  3. I See You Play Scrabble. I Play A Little Scrabble Myself.
   4. DEI
 
 -- In at least somee game modes, allow the user to go back/forward during live games, like Quackle does. Use same Replay functionality and set-up that I have now. Great for endgame what-ifs.
@@ -282,6 +289,11 @@ Endgame Practice mode is chosen, load one of the already solved endgames for the
 -- Remove Great move! You scored x points! from Only Fives practice mode
 
 -- Bug where AI exchanged six and only six tiles were on rack, early in game
+
+-- User should be able to select which endgame they want for Endgame Practice Mode
+
+-- Racks should be auto-alphabetized in Batch Endgame mode
+
 
 
 
