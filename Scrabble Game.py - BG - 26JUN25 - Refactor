@@ -3,7 +3,7 @@
 
 
 #python
-#Scrabble BF
+#Scrabble BG
 #Refactor
 
 
@@ -6497,6 +6497,401 @@ def ai_turn(state):
 
 
 
+def _parse_mode_selection_results(selected_mode, return_data):
+    """Parses the results from the mode_selection_screen into a structured dictionary."""
+    # Default settings
+    settings = {
+        'dev_cprofile': False,
+        'dev_visualize': False,
+        'use_endgame_solver': False,
+        'use_ai_simulation': False,
+        'ai_sim_candidates': DEFAULT_AI_CANDIDATES,
+        'ai_sim_opp_sims': DEFAULT_OPPONENT_SIMULATIONS,
+        'ai_sim_post_sim_candidates': DEFAULT_POST_SIM_CANDIDATES,
+        'bbb_7l_max_prob': 1000,
+        'bbb_8l_max_prob': 1000,
+        'sgs_loaded_data': None,
+        'player_names': ["Player 1", "Player 2"],
+        'human_player': 1,
+        'practice_mode': None,
+        'letter_checks': [True] * 4,
+        'number_checks': [True] * 6,
+        'practice_state': None,
+        'batch_num_games': 0,
+        'batch_plaid_mode': False,
+        'batch_generate_endgames': False,
+        'game_mode_tuple': None # For BATCH_MODE
+    }
+
+    if selected_mode == "LOADED_GAME":
+        if len(return_data) == 6:
+            settings['sgs_loaded_data'] = return_data[0]
+            settings['dev_cprofile'] = return_data[1]
+            settings['dev_visualize'] = return_data[2]
+            if isinstance(settings['sgs_loaded_data'], dict):
+                game_settings_load = settings['sgs_loaded_data'].get('game_settings', {})
+                settings['use_endgame_solver'] = game_settings_load.get('use_endgame_solver', False)
+                settings['use_ai_simulation'] = game_settings_load.get('use_ai_simulation', False)
+                ai_sim_config_sgs = game_settings_load.get('ai_simulation_parameters')
+                if isinstance(ai_sim_config_sgs, dict):
+                    settings['ai_sim_candidates'] = ai_sim_config_sgs.get('num_candidates', DEFAULT_AI_CANDIDATES)
+                    settings['ai_sim_opp_sims'] = ai_sim_config_sgs.get('num_opponent_sims', DEFAULT_OPPONENT_SIMULATIONS)
+                    settings['ai_sim_post_sim_candidates'] = ai_sim_config_sgs.get('num_post_sim_candidates', DEFAULT_POST_SIM_CANDIDATES)
+                else: 
+                    settings['ai_sim_candidates'] = return_data[3]
+                    settings['ai_sim_opp_sims'] = return_data[4]
+                    settings['ai_sim_post_sim_candidates'] = return_data[5]
+                settings['bbb_7l_max_prob'] = game_settings_load.get('bbb_7l_max_prob', 1000)
+                settings['bbb_8l_max_prob'] = game_settings_load.get('bbb_8l_max_prob', 1000)
+            else: 
+                settings['ai_sim_candidates'] = return_data[3]
+                settings['ai_sim_opp_sims'] = return_data[4]
+                settings['ai_sim_post_sim_candidates'] = return_data[5]
+        elif len(return_data) == 3: 
+            settings['sgs_loaded_data'] = return_data[0]
+            settings['dev_cprofile'] = return_data[1]
+            settings['dev_visualize'] = return_data[2]
+            if isinstance(settings['sgs_loaded_data'], dict): 
+                game_settings_load = settings['sgs_loaded_data'].get('game_settings', {})
+                settings['use_endgame_solver'] = game_settings_load.get('use_endgame_solver', False)
+                settings['use_ai_simulation'] = game_settings_load.get('use_ai_simulation', False)
+                ai_sim_config_sgs = game_settings_load.get('ai_simulation_parameters') 
+                if isinstance(ai_sim_config_sgs, dict):
+                    settings['ai_sim_candidates'] = ai_sim_config_sgs.get('num_candidates', DEFAULT_AI_CANDIDATES)
+                    settings['ai_sim_opp_sims'] = ai_sim_config_sgs.get('num_opponent_sims', DEFAULT_OPPONENT_SIMULATIONS)
+                    settings['ai_sim_post_sim_candidates'] = ai_sim_config_sgs.get('num_post_sim_candidates', DEFAULT_POST_SIM_CANDIDATES)
+                settings['bbb_7l_max_prob'] = game_settings_load.get('bbb_7l_max_prob', 1000)
+                settings['bbb_8l_max_prob'] = game_settings_load.get('bbb_8l_max_prob', 1000)
+        else:
+            print(f"Warning (_parse_mode_selection_results): Unexpected return_data structure for LOADED_GAME: length {len(return_data)}.")
+            if len(return_data) >= 2: 
+                settings['sgs_loaded_data'] = return_data[0]
+                settings['dev_cprofile'] = return_data[1]
+
+    elif selected_mode == "BATCH_MODE":
+        if len(return_data) == 13:
+            settings['game_mode_tuple'], settings['player_names'], settings['human_player'], settings['use_endgame_solver'], \
+            settings['use_ai_simulation'], settings['batch_num_games'], settings['dev_cprofile'], settings['dev_visualize'], \
+            settings['ai_sim_candidates'], settings['ai_sim_opp_sims'], settings['ai_sim_post_sim_candidates'], \
+            settings['batch_plaid_mode'], settings['batch_generate_endgames'] = return_data
+        elif len(return_data) == 12:
+            settings['game_mode_tuple'], settings['player_names'], settings['human_player'], settings['use_endgame_solver'], \
+            settings['use_ai_simulation'], settings['batch_num_games'], settings['dev_cprofile'], settings['dev_visualize'], \
+            settings['ai_sim_candidates'], settings['ai_sim_opp_sims'], settings['ai_sim_post_sim_candidates'], \
+            settings['batch_plaid_mode'] = return_data
+        elif len(return_data) == 11:
+            settings['game_mode_tuple'], settings['player_names'], settings['human_player'], settings['use_endgame_solver'], \
+            settings['use_ai_simulation'], settings['batch_num_games'], settings['dev_cprofile'], settings['dev_visualize'], \
+            settings['ai_sim_candidates'], settings['ai_sim_opp_sims'], settings['ai_sim_post_sim_candidates'] = return_data
+        elif len(return_data) == 8:
+            settings['game_mode_tuple'], settings['player_names'], settings['human_player'], settings['use_endgame_solver'], \
+            settings['use_ai_simulation'], settings['batch_num_games'], settings['dev_cprofile'], settings['dev_visualize'] = return_data
+        else:
+            print(f"Error: Unexpected data structure for BATCH_MODE in _parse_mode_selection_results: length {len(return_data)}.")
+        
+        # Plaid mode overrides simulation
+        if settings['batch_plaid_mode']:
+            settings['use_ai_simulation'] = False
+
+    elif selected_mode is not None:
+        if len(return_data) == 15:
+            settings['player_names'], settings['human_player'], settings['practice_mode'], settings['letter_checks'], \
+            settings['number_checks'], settings['use_endgame_solver'], settings['use_ai_simulation'], \
+            settings['practice_state'], settings['dev_cprofile'], settings['dev_visualize'], \
+            settings['ai_sim_candidates'], settings['ai_sim_opp_sims'], settings['ai_sim_post_sim_candidates'], \
+            bbb_7l_str, bbb_8l_str = return_data
+            try:
+                settings['bbb_7l_max_prob'] = int(bbb_7l_str) if bbb_7l_str else 1000
+            except ValueError:
+                settings['bbb_7l_max_prob'] = 1000
+            try:
+                settings['bbb_8l_max_prob'] = int(bbb_8l_str) if bbb_8l_str else 1000
+            except ValueError:
+                settings['bbb_8l_max_prob'] = 1000
+        elif len(return_data) == 13:
+            settings['player_names'], settings['human_player'], settings['practice_mode'], settings['letter_checks'], \
+            settings['number_checks'], settings['use_endgame_solver'], settings['use_ai_simulation'], \
+            settings['practice_state'], settings['dev_cprofile'], settings['dev_visualize'], \
+            settings['ai_sim_candidates'], settings['ai_sim_opp_sims'], settings['ai_sim_post_sim_candidates'] = return_data
+        elif len(return_data) == 10:
+            settings['player_names'], settings['human_player'], settings['practice_mode'], settings['letter_checks'], \
+            settings['number_checks'], settings['use_endgame_solver'], settings['use_ai_simulation'], \
+            settings['practice_state'], settings['dev_cprofile'], settings['dev_visualize'] = return_data
+        else:
+            print(f"Warning (_parse_mode_selection_results): Unexpected return_data structure for standard game mode: length {len(return_data)}.")
+
+    return settings
+
+
+
+
+def _setup_new_game(game_mode, human_player, is_silent_run):
+    """Sets up the state for a new standard game."""
+    if not is_silent_run:
+        print("--- _setup_new_game: Initializing new game state ---")
+
+    temp_full_bag = create_standard_bag()
+    random.shuffle(temp_full_bag)
+    sgs_initial_bag = temp_full_bag[:]
+    bag_init = temp_full_bag[:]
+    
+    racks_init = [[], []]
+    scores_init = [0, 0]
+    turn = 1
+    blanks_init = set()
+    first_play = True
+    
+    try:
+        racks_init[0] = [bag_init.pop() for _ in range(7)]
+        racks_init[1] = [bag_init.pop() for _ in range(7)]
+    except IndexError:
+        print("Error: Not enough tiles in bag for initial deal.")
+        pygame.quit()
+        sys.exit()
+
+    is_ai = [False, False]
+    if game_mode == MODE_HVA:
+        is_ai[2 - human_player] = True
+    elif game_mode == MODE_AVA:
+        is_ai = [True, True]
+
+    # For a standard new game, racks are always sorted for the user's convenience
+    # unless it's a silent batch run where performance is key.
+    should_sort_racks = not is_silent_run
+    if should_sort_racks:
+        for rack_item in racks_init:
+            if rack_item is not None:
+                rack_item.sort()
+        if not is_silent_run:
+            print(f"  _setup_new_game: After initial sort, P1 rack: {racks_init[0]}, P2 rack: {racks_init[1]}")
+
+    initial_racks_at_game_start = [r[:] for r in racks_init]
+
+    return (
+        bag_init, racks_init, scores_init, turn, blanks_init, first_play,
+        is_ai, sgs_initial_bag, initial_racks_at_game_start
+    )
+
+
+
+
+
+def _setup_loaded_game(sgs_data, is_silent_run):
+    """Sets up the game state from loaded SGS data."""
+    if not is_silent_run:
+        print("--- _setup_loaded_game: Initializing from SGS data ---")
+
+    # Default values in case SGS data is partial
+    game_mode = "LOADED_GAME"
+    is_loaded_game = True
+    is_batch_running = False
+    player_names = sgs_data.get('player_names', ["Player1", "Player2"])
+    sgs_initial_bag = sgs_data.get('sgs_initial_bag', [])
+    initial_racks_at_game_start = sgs_data.get('initial_racks_sgs', [[], []])
+    move_history = sgs_data.get('full_move_history', [])
+    
+    game_settings = sgs_data.get('game_settings', {})
+    is_ai = game_settings.get('is_ai_config', [False, False])
+    human_player = game_settings.get('human_player_if_hva', 1)
+    practice_mode = game_settings.get('practice_mode_str', None)
+    letter_checks = game_settings.get('letter_checks', [True] * 4)
+    number_checks = game_settings.get('number_checks', [True] * 6)
+    
+    # Board and tiles will be overwritten by snapshot or replay state
+    board_init, _, tiles_init = create_board()
+    blanks_init = set()
+    racks_init = [[], []]
+    bag_init = []
+    scores_init = [0, 0]
+    turn = 1
+    first_play = True
+    pass_count = 0
+    exchange_count = 0
+    consecutive_zero_point_turns = 0
+    last_played_highlight_coords = set()
+    replay_mode = False
+    game_over_at_init = False
+    final_scores_at_init = None
+    current_replay_turn = 0
+    rack_visibility = [True, True] # Default
+
+    snapshot = sgs_data.get('current_game_state_snapshot')
+    
+    # Check if it's an in-progress game
+    if snapshot and 'final_scores_adjusted' not in sgs_data:
+        if not is_silent_run:
+            print("  _setup_loaded_game: Loading IN-PROGRESS game state from snapshot.")
+        
+        board_init = snapshot.get('board_layout_multipliers', board_init)
+        tiles_init = snapshot.get('tiles_on_board', tiles_init)
+        blanks_init = snapshot.get('blanks_on_board', set())
+        racks_init = snapshot.get('current_racks', [[], []])
+        bag_init = snapshot.get('current_bag', [])
+        scores_init = snapshot.get('current_scores', [0, 0])
+        turn = snapshot.get('current_turn', 1)
+        first_play = snapshot.get('current_first_play_flag', True)
+        pass_count = snapshot.get('current_pass_count', 0)
+        exchange_count = snapshot.get('current_exchange_count', 0)
+        consecutive_zero_point_turns = snapshot.get('current_consecutive_zero_point_turns', 0)
+        last_played_highlight_coords = snapshot.get('current_last_played_highlight_coords', set())
+        
+        loaded_visibility = snapshot.get('rack_visibility', [True, True])
+        game_mode_from_settings = game_settings.get('game_mode_str', game_mode)
+        rack_visibility = [True, True] if game_mode_from_settings == MODE_AVA else loaded_visibility
+
+        if not isinstance(racks_init, list) or len(racks_init) != 2 or \
+           not all(isinstance(r, list) for r in racks_init) or \
+           not all(isinstance(t, str) for r in racks_init for t in r):
+            if not is_silent_run:
+                print(f"  Warning: Loaded racks_init from snapshot is not in expected format: {racks_init}. Resetting.")
+            racks_init = [[], []]
+            
+        replay_mode = False
+        game_over_at_init = False
+        final_scores_at_init = None
+        current_replay_turn = len(move_history)
+        
+        if not is_silent_run:
+            print(f"  In-progress game loaded. Turn: {turn}, First Play: {first_play}, Moves: {len(move_history)}")
+
+    else: # It's a completed game for replay
+        if not is_silent_run:
+            print("  _setup_loaded_game: Loading COMPLETED game state for replay.")
+        
+        final_scores_from_sgs = sgs_data.get('final_scores_adjusted')
+        if final_scores_from_sgs is not None:
+            game_over_at_init = True
+            final_scores_at_init = final_scores_from_sgs
+        
+        replay_mode = True
+        rack_visibility = [True, True]
+        current_replay_turn = 0
+
+    # Generate insights data for either loaded or replayed games
+    global insights_data_for_replay
+    if gaddag_loading_status == 'loaded':
+        if not is_silent_run:
+            screen.fill(WHITE)
+            loading_text_surf = ui_font.render("Generating Insights for Loaded Game...", True, BLUE)
+            screen.blit(loading_text_surf, ((WINDOW_WIDTH - loading_text_surf.get_width()) // 2, (WINDOW_HEIGHT - loading_text_surf.get_height()) // 2))
+            pygame.display.flip()
+        insights_data_for_replay = generate_turn_insights_data(sgs_data, is_silent_run_param=is_silent_run)
+    else:
+        insights_data_for_replay = []
+        if not is_silent_run and gaddag_loading_status == 'loading':
+            print("  Insights generation skipped: GADDAG not ready.")
+
+    return (
+        game_mode, is_loaded_game, player_names, move_history, final_scores_at_init,
+        sgs_initial_bag, board_init, tiles_init, scores_init, blanks_init, racks_init, bag_init,
+        replay_mode, current_replay_turn, practice_mode, is_ai, human_player,
+        first_play, initial_racks_at_game_start, number_checks, letter_checks,
+        game_over_at_init, pass_count, exchange_count, consecutive_zero_point_turns,
+        last_played_highlight_coords, rack_visibility
+    )
+
+
+
+
+def _setup_batch_run(game_mode_tuple, player_names_sel, human_player_sel, num_games, plaid_mode_checked, generate_endgames_checked, is_silent_run):
+    """Sets up the initial state and configuration for a batch run."""
+    if not is_silent_run:
+        print("--- _setup_batch_run: Initializing batch run state ---")
+
+    is_batch_running = True
+    rack_visibility = [True, True]
+    game_mode = game_mode_tuple
+    total_batch_games = num_games
+    current_batch_game_num = 1
+    batch_results = []
+    practice_mode = None
+    letter_checks = [True] * 4
+    number_checks = [True] * 6
+    active_practice_state_data = None
+    
+    # Generate a unique filename prefix for this batch run
+    batch_now = datetime.datetime.now()
+    batch_date_str = batch_now.strftime("%d%b%y").upper()
+    batch_time_str = batch_now.strftime("%H%M")
+    batch_seq_num = 1
+    max_existing_batch_num = 0
+    try:
+        for filename_os in os.listdir('.'):
+            if filename_os.startswith(f"{batch_date_str}-") and filename_os.endswith(".txt") and "-BATCH-" in filename_os:
+                parts = filename_os[:-4].split('-')
+                if len(parts) == 4 and parts[2] == "BATCH" and parts[-1].isdigit():
+                    num = int(parts[-1])
+                    max_existing_batch_num = max(max_existing_batch_num, num)
+        batch_seq_num = max_existing_batch_num + 1
+    except OSError as e_os_err:
+        print(f"Warning: Error listing directory for batch sequence number: {e_os_err}. Using sequence 1.")
+    
+    batch_base_filename_prefix = f"{batch_date_str}-{batch_time_str}-BATCH-{batch_seq_num}"
+
+    # Create the initial game configuration dictionary
+    initial_game_config = {
+        'game_mode': game_mode,
+        'player_names': player_names_sel,
+        'human_player': human_player_sel,
+        'use_endgame_solver': USE_ENDGAME_SOLVER,
+        'use_ai_simulation': USE_AI_SIMULATION,
+        'batch_filename_prefix': batch_base_filename_prefix,
+        'ai_sim_num_candidates': ai_sim_num_candidates_global,
+        'ai_sim_num_opponent_sims': ai_sim_num_opponent_sims_global,
+        'ai_sim_num_post_sim_candidates': ai_sim_num_post_sim_candidates_global,
+        'bbb_7l_max_prob': bbb_7l_max_prob_global,
+        'bbb_8l_max_prob': bbb_8l_max_prob_global,
+        'plaid_mode': plaid_mode_checked,
+        'generate_endgames_mode': generate_endgames_checked
+    }
+
+    player_names = player_names_sel
+    human_player = human_player_sel
+    is_ai = [False, False]
+    if initial_game_config['game_mode'] == MODE_HVA:
+        is_ai[2 - initial_game_config['human_player']] = True
+    elif initial_game_config['game_mode'] == MODE_AVA:
+        is_ai = [True, True]
+    initial_game_config['is_ai'] = is_ai
+
+    # Initialize the state for the first game of the batch
+    reset_result = reset_game_state(initial_game_config, is_silent_batch_run_param=is_silent_run)
+    if reset_result is None:
+        print("FATAL: Could not initialize first batch game.")
+        pygame.quit()
+        sys.exit()
+        
+    (board_init, tiles_init, racks_init, blanks_init, scores_init, turn, first_play, bag_init,
+     move_history, pass_count, exchange_count, consecutive_zero_point_turns,
+     last_played_highlight_coords, is_solving_endgame,
+     sgs_initial_bag) = reset_result
+     
+    initial_racks_at_game_start = [r[:] for r in racks_init]
+    game_over_at_init = False
+    final_scores_at_init = None
+    insights_data_for_replay = []
+
+    if not is_silent_run:
+        print(f"--- _setup_batch_run: Batch Mode Setup Complete. Running {total_batch_games} games. Base Filename Prefix: {batch_base_filename_prefix} ---")
+
+    return (
+        is_batch_running, rack_visibility, game_mode, total_batch_games, current_batch_game_num,
+        batch_results, practice_mode, letter_checks, number_checks, active_practice_state_data,
+        initial_game_config, player_names, human_player, is_ai,
+        board_init, tiles_init, racks_init, blanks_init, scores_init, turn, first_play, bag_init,
+        move_history, pass_count, exchange_count, consecutive_zero_point_turns,
+        last_played_highlight_coords, is_solving_endgame, sgs_initial_bag,
+        initial_racks_at_game_start, game_over_at_init, final_scores_at_init, insights_data_for_replay
+    )
+
+
+
+
+
+
+
+
+
 
 
 
@@ -6525,16 +6920,9 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
     global screen, ui_font, RED, WHITE, BLACK, BLUE
     global TILE_DISTRIBUTION, LETTERS, GRID_SIZE 
 
-    dev_cprofile_checked_init = False
-    dev_visualize_batch_checked_init = False
-
-    ai_sim_num_candidates_init = DEFAULT_AI_CANDIDATES
-    ai_sim_num_opponent_sims_init = DEFAULT_OPPONENT_SIMULATIONS
-    ai_sim_num_post_sim_candidates_init = DEFAULT_POST_SIM_CANDIDATES
-
-    bbb_7l_max_prob_init = 1000
-    bbb_8l_max_prob_init = 1000
-
+    # --- REFACTORED: Parameter parsing is now handled by a helper function ---
+    
+    # Determine if this is a silent batch run before printing anything
     _is_potentially_silent_batch = False
     if selected_mode_result == "BATCH_MODE":
         # Check based on new signature with plaid mode
@@ -6549,126 +6937,36 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
     if not _is_potentially_silent_batch:
         print("--- initialize_game() entered ---")
 
+    # This block only runs on the very first game launch to set session-wide globals
     if not main_called_flag:
-        sgs_loaded_game_data_from_param = None 
-        if selected_mode_result == "LOADED_GAME":
-            if len(return_data) == 6:
-                sgs_loaded_game_data_from_param = return_data[0]
-                dev_cprofile_checked_init = return_data[1]
-                dev_visualize_batch_checked_init = return_data[2]
-                if isinstance(sgs_loaded_game_data_from_param, dict):
-                    game_settings_load = sgs_loaded_game_data_from_param.get('game_settings', {})
-                    USE_ENDGAME_SOLVER = game_settings_load.get('use_endgame_solver', False)
-                    USE_AI_SIMULATION = game_settings_load.get('use_ai_simulation', False)
-                    ai_sim_config_sgs = game_settings_load.get('ai_simulation_parameters')
-                    if isinstance(ai_sim_config_sgs, dict):
-                        ai_sim_num_candidates_init = ai_sim_config_sgs.get('num_candidates', DEFAULT_AI_CANDIDATES)
-                        ai_sim_num_opponent_sims_init = ai_sim_config_sgs.get('num_opponent_sims', DEFAULT_OPPONENT_SIMULATIONS)
-                        ai_sim_num_post_sim_candidates_init = ai_sim_config_sgs.get('num_post_sim_candidates', DEFAULT_POST_SIM_CANDIDATES)
-                    else: 
-                        ai_sim_num_candidates_init = return_data[3] if len(return_data) == 6 else DEFAULT_AI_CANDIDATES
-                        ai_sim_num_opponent_sims_init = return_data[4] if len(return_data) == 6 else DEFAULT_OPPONENT_SIMULATIONS
-                        ai_sim_num_post_sim_candidates_init = return_data[5] if len(return_data) == 6 else DEFAULT_POST_SIM_CANDIDATES
-                    bbb_7l_max_prob_init = game_settings_load.get('bbb_7l_max_prob', 1000)
-                    bbb_8l_max_prob_init = game_settings_load.get('bbb_8l_max_prob', 1000)
-                else: 
-                    ai_sim_num_candidates_init = return_data[3] if len(return_data) == 6 else DEFAULT_AI_CANDIDATES
-                    ai_sim_num_opponent_sims_init = return_data[4] if len(return_data) == 6 else DEFAULT_OPPONENT_SIMULATIONS
-                    ai_sim_num_post_sim_candidates_init = return_data[5] if len(return_data) == 6 else DEFAULT_POST_SIM_CANDIDATES
-            elif len(return_data) == 3: 
-                sgs_loaded_game_data_from_param = return_data[0]
-                dev_cprofile_checked_init = return_data[1]
-                dev_visualize_batch_checked_init = return_data[2]
-                if isinstance(sgs_loaded_game_data_from_param, dict): 
-                    game_settings_load = sgs_loaded_game_data_from_param.get('game_settings', {})
-                    USE_ENDGAME_SOLVER = game_settings_load.get('use_endgame_solver', False)
-                    USE_AI_SIMULATION = game_settings_load.get('use_ai_simulation', False)
-                    ai_sim_config_sgs = game_settings_load.get('ai_simulation_parameters') 
-                    if isinstance(ai_sim_config_sgs, dict):
-                        ai_sim_num_candidates_init = ai_sim_config_sgs.get('num_candidates', DEFAULT_AI_CANDIDATES)
-                        ai_sim_num_opponent_sims_init = ai_sim_config_sgs.get('num_opponent_sims', DEFAULT_OPPONENT_SIMULATIONS)
-                        ai_sim_num_post_sim_candidates_init = ai_sim_config_sgs.get('num_post_sim_candidates', DEFAULT_POST_SIM_CANDIDATES)
-                    bbb_7l_max_prob_init = game_settings_load.get('bbb_7l_max_prob', 1000)
-                    bbb_8l_max_prob_init = game_settings_load.get('bbb_8l_max_prob', 1000)
-            else:
-                if not _is_potentially_silent_batch:
-                    print("Warning (initialize_game): Unexpected return_data structure for LOADED_GAME.")
-                if len(return_data) >= 2: 
-                    sgs_loaded_game_data_from_param = return_data[0]
-                    dev_cprofile_checked_init = return_data[1]
+        # Call the new helper function to parse results from the mode selection screen
+        settings = _parse_mode_selection_results(selected_mode_result, return_data)
 
-        elif selected_mode_result == "BATCH_MODE":
-            plaid_mode_checked = False # Default
-            generate_endgames_checked = False # Default
-            # --- MODIFICATION START: Handle new 13-item tuple ---
-            if len(return_data) == 13: # New signature with generate_endgames
-                game_mode_tuple, player_names_sel, human_player_sel, use_endgame_solver_checked, \
-                use_ai_simulation_checked, num_games, dev_cprofile_checked_init, dev_visualize_batch_checked_init, \
-                ai_sim_num_cand_batch, ai_sim_num_opp_batch, ai_sim_num_post_batch, plaid_mode_checked, generate_endgames_checked = return_data
-                ai_sim_num_candidates_init = ai_sim_num_cand_batch
-                ai_sim_num_opponent_sims_init = ai_sim_num_opp_batch
-                ai_sim_num_post_sim_candidates_init = ai_sim_num_post_batch
-            elif len(return_data) == 12: # Old signature with plaid_mode
-                game_mode_tuple, player_names_sel, human_player_sel, use_endgame_solver_checked, \
-                use_ai_simulation_checked, num_games, dev_cprofile_checked_init, dev_visualize_batch_checked_init, \
-                ai_sim_num_cand_batch, ai_sim_num_opp_batch, ai_sim_num_post_batch, plaid_mode_checked = return_data
-                ai_sim_num_candidates_init = ai_sim_num_cand_batch
-                ai_sim_num_opponent_sims_init = ai_sim_num_opp_batch
-                ai_sim_num_post_sim_candidates_init = ai_sim_num_post_batch
-            # --- MODIFICATION END ---
-            elif len(return_data) == 11: # Old signature without plaid
-                game_mode_tuple, player_names_sel, human_player_sel, use_endgame_solver_checked, \
-                use_ai_simulation_checked, num_games, dev_cprofile_checked_init, dev_visualize_batch_checked_init, \
-                ai_sim_num_candidates_init, ai_sim_num_opponent_sims_init, ai_sim_num_post_sim_candidates_init = return_data
-            elif len(return_data) == 8: # Older signature
-                game_mode_tuple, player_names_sel, human_player_sel, use_endgame_solver_checked, \
-                use_ai_simulation_checked, num_games, dev_cprofile_checked_init, dev_visualize_batch_checked_init = return_data
-            else:
-                if not _is_potentially_silent_batch: print("Error: Unexpected data structure for BATCH_MODE in initialize_game (main logic).")
-                return None
+        # Set session-wide global flags from the parsed settings
+        DEV_CPROFILE_ENABLED_SESSION = settings['dev_cprofile']
+        DEV_VISUALIZE_BATCH_ENABLED_SESSION = settings['dev_visualize']
+        USE_ENDGAME_SOLVER = settings['use_endgame_solver']
+        USE_AI_SIMULATION = settings['use_ai_simulation']
+        
+        # Unpack other settings into local variables for use in this function
+        sgs_loaded_game_data_from_param = settings['sgs_loaded_data']
+        game_mode_tuple = settings['game_mode_tuple']
+        player_names_sel = settings['player_names']
+        human_player_sel = settings['human_player']
+        practice_mode_sel = settings['practice_mode']
+        letter_checks_sel = settings['letter_checks']
+        number_checks_sel = settings['number_checks']
+        practice_state_from_mode_sel = settings['practice_state']
+        num_games = settings['batch_num_games']
+        plaid_mode_checked = settings['batch_plaid_mode']
+        generate_endgames_checked = settings['batch_generate_endgames']
+        ai_sim_num_candidates_init = settings['ai_sim_candidates']
+        ai_sim_num_opponent_sims_init = settings['ai_sim_opp_sims']
+        ai_sim_num_post_sim_candidates_init = settings['ai_sim_post_sim_candidates']
+        bbb_7l_max_prob_init = settings['bbb_7l_max_prob']
+        bbb_8l_max_prob_init = settings['bbb_8l_max_prob']
 
-            # Set globals from batch config
-            USE_ENDGAME_SOLVER = use_endgame_solver_checked
-            # Plaid mode overrides simulation
-            USE_AI_SIMULATION = use_ai_simulation_checked and not plaid_mode_checked
-
-        elif selected_mode_result is not None: 
-            if len(return_data) == 15: 
-                player_names_sel, human_player_sel, practice_mode_sel, letter_checks_sel, \
-                number_checks_sel, use_endgame_solver_sel, use_ai_simulation_sel, \
-                practice_state_from_mode_sel, dev_cprofile_checked_init, dev_visualize_batch_checked_init, \
-                ai_sim_num_candidates_init, ai_sim_num_opponent_sims_init, ai_sim_num_post_sim_candidates_init, \
-                bbb_7l_str, bbb_8l_str = return_data 
-                USE_ENDGAME_SOLVER = use_endgame_solver_sel
-                USE_AI_SIMULATION = use_ai_simulation_sel
-                try:
-                    bbb_7l_max_prob_init = int(bbb_7l_str) if bbb_7l_str else 1000
-                except ValueError:
-                    bbb_7l_max_prob_init = 1000
-                try:
-                    bbb_8l_max_prob_init = int(bbb_8l_str) if bbb_8l_str else 1000
-                except ValueError:
-                    bbb_8l_max_prob_init = 1000
-            elif len(return_data) == 13: 
-                 player_names_sel, human_player_sel, practice_mode_sel, letter_checks_sel, \
-                number_checks_sel, use_endgame_solver_sel, use_ai_simulation_sel, \
-                practice_state_from_mode_sel, dev_cprofile_checked_init, dev_visualize_batch_checked_init, \
-                ai_sim_num_candidates_init, ai_sim_num_opponent_sims_init, ai_sim_num_post_sim_candidates_init = return_data
-                 USE_ENDGAME_SOLVER = use_endgame_solver_sel
-                 USE_AI_SIMULATION = use_ai_simulation_sel
-            elif len(return_data) == 10: 
-                 player_names_sel, human_player_sel, practice_mode_sel, letter_checks_sel, \
-                number_checks_sel, use_endgame_solver_sel, use_ai_simulation_sel, \
-                practice_state_from_mode_sel, _, _ = return_data
-                 USE_ENDGAME_SOLVER = use_endgame_solver_sel
-                 USE_AI_SIMULATION = use_ai_simulation_sel
-            else:
-                if not _is_potentially_silent_batch:
-                    print("Warning (initialize_game): Unexpected return_data structure for standard game mode.")
-
-        DEV_CPROFILE_ENABLED_SESSION = dev_cprofile_checked_init
-        DEV_VISUALIZE_BATCH_ENABLED_SESSION = dev_visualize_batch_checked_init
-
+        # This check needs to be repeated after parsing settings
         _is_potentially_silent_batch = (selected_mode_result == "BATCH_MODE" and not DEV_VISUALIZE_BATCH_ENABLED_SESSION)
 
         if not _is_potentially_silent_batch:
@@ -6676,6 +6974,8 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
             print(f"--- initialize_game(): Global DEV_VISUALIZE_BATCH_ENABLED_SESSION set to: {DEV_VISUALIZE_BATCH_ENABLED_SESSION} ---")
             print(f"--- initialize_game(): AI Sim Params Initialized: Cands={ai_sim_num_candidates_init}, OppSims={ai_sim_num_opponent_sims_init}, PostSimCands={ai_sim_num_post_sim_candidates_init} ---")
             print(f"--- initialize_game(): BBB Params Initialized: 7L Max Prob={bbb_7l_max_prob_init}, 8L Max Prob={bbb_8l_max_prob_init} ---")
+
+    # --- END REFACTORED BLOCK ---
 
     game_mode = None
     is_loaded_game = False
@@ -6727,165 +7027,30 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
         print(f"--- initialize_game(): Starting game state initialization for mode: {selected_mode_result} ---")
 
     if selected_mode_result == "LOADED_GAME":
-        if not is_silent_run_for_init:
-            print("--- initialize_game(): Handling LOADED_GAME setup (SGS) ---")
         if not sgs_loaded_game_data_from_param or not isinstance(sgs_loaded_game_data_from_param, dict):
-            print("Error: No valid SGS data provided for loaded game (checked before main logic).")
+            print("Error: No valid SGS data provided for loaded game.")
             return None
+        
         sgs_loaded_game_data = sgs_loaded_game_data_from_param
-        game_mode = "LOADED_GAME" 
-        is_loaded_game = True
-        is_batch_running = False 
-        player_names = sgs_loaded_game_data.get('player_names', ["Player1", "Player2"])
-        sgs_initial_bag = sgs_loaded_game_data.get('sgs_initial_bag', []) 
-        initial_racks_at_game_start = sgs_loaded_game_data.get('initial_racks_sgs', [[],[]]) 
-        move_history = sgs_loaded_game_data.get('full_move_history', [])
-        game_settings = sgs_loaded_game_data.get('game_settings', {})
-        is_ai = game_settings.get('is_ai_config', [False, False])
-        human_player = game_settings.get('human_player_if_hva', 1)
-        practice_mode = game_settings.get('practice_mode_str', None)
-        letter_checks = game_settings.get('letter_checks', [True]*4)
-        number_checks = game_settings.get('number_checks', [True]*6)
-        bbb_7l_max_prob_init = game_settings.get('bbb_7l_max_prob', 1000)
-        bbb_8l_max_prob_init = game_settings.get('bbb_8l_max_prob', 1000)
-        ai_sim_config_sgs = game_settings.get('ai_simulation_parameters')
-        if isinstance(ai_sim_config_sgs, dict):
-            ai_sim_num_candidates_init = ai_sim_config_sgs.get('num_candidates', DEFAULT_AI_CANDIDATES)
-            ai_sim_num_opponent_sims_init = ai_sim_config_sgs.get('num_opponent_sims', DEFAULT_OPPONENT_SIMULATIONS)
-            ai_sim_num_post_sim_candidates_init = ai_sim_config_sgs.get('num_post_sim_candidates', DEFAULT_POST_SIM_CANDIDATES)
-        snapshot = sgs_loaded_game_data.get('current_game_state_snapshot')
-        if snapshot and 'final_scores_adjusted' not in sgs_loaded_game_data: 
-            if not is_silent_run_for_init:
-                print("--- initialize_game(): Loading IN-PROGRESS game state from snapshot ---")
-            board_init = snapshot.get('board_layout_multipliers', board_init) 
-            tiles_init = snapshot.get('tiles_on_board', tiles_init) 
-            blanks_init = snapshot.get('blanks_on_board', set())
-            racks_init = snapshot.get('current_racks', [[],[]])
-            bag_init = snapshot.get('current_bag', [])
-            scores_init = snapshot.get('current_scores', [0,0])
-            turn = snapshot.get('current_turn', 1)
-            first_play = snapshot.get('current_first_play_flag', True)
-            pass_count = snapshot.get('current_pass_count', 0)
-            exchange_count = snapshot.get('current_exchange_count', 0)
-            consecutive_zero_point_turns = snapshot.get('current_consecutive_zero_point_turns', 0)
-            last_played_highlight_coords = snapshot.get('current_last_played_highlight_coords', set())
-            loaded_visibility = snapshot.get('rack_visibility', [True, True])
-            game_mode_from_settings = game_settings.get('game_mode_str', game_mode)
-            if game_mode_from_settings in [MODE_AVA]:
-                 rack_visibility = [True, True]
-            else:
-                 rack_visibility = loaded_visibility
-            if not isinstance(racks_init, list) or len(racks_init) != 2 or \
-               not all(isinstance(r, list) for r in racks_init) or \
-               not all(isinstance(t, str) for r in racks_init for t in r):
-                if not is_silent_run_for_init:
-                    print(f"Warning: Loaded racks_init from snapshot is not in expected format: {racks_init}. Resetting to empty.")
-                racks_init = [[], []]
-            replay_mode = False 
-            game_over_at_init = False 
-            final_scores_at_init = None
-            current_replay_turn = len(move_history) 
-            if not is_silent_run_for_init:
-                print(f"  In-progress game loaded. Turn: {turn}, First Play: {first_play}, Moves: {len(move_history)}")
-                p1r_disp = racks_init[0] if len(racks_init)>0 and racks_init[0] is not None else 'N/A'
-                p2r_disp = racks_init[1] if len(racks_init)>1 and racks_init[1] is not None else 'N/A'
-                print(f"  Racks from snapshot: P1={p1r_disp}, P2={p2r_disp}")
-                print(f"  Bag size from snapshot: {len(bag_init)}")
-            if gaddag_loading_status == 'loaded':
-                if not is_silent_run_for_init:
-                    screen.fill(WHITE) 
-                    loading_text_surf = ui_font.render("Generating Insights for Loaded Game...", True, BLUE)
-                    screen.blit(loading_text_surf, ( (WINDOW_WIDTH - loading_text_surf.get_width()) // 2, (WINDOW_HEIGHT - loading_text_surf.get_height()) // 2))
-                    pygame.display.flip()
-                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_run_param=is_silent_run_for_init)
-            else:
-                insights_data_for_replay = [] 
-                if not is_silent_run_for_init and gaddag_loading_status == 'loading':
-                     print("Insights generation skipped for in-progress game: GADDAG not ready.")
-        else: 
-            if not is_silent_run_for_init:
-                print("--- initialize_game(): Loading COMPLETED game state (or older format) for replay ---")
-            final_scores_from_sgs = sgs_loaded_game_data.get('final_scores_adjusted')
-            if final_scores_from_sgs is not None:
-                game_over_at_init = True
-                final_scores_at_init = final_scores_from_sgs 
-            else: 
-                game_over_at_init = False 
-                final_scores_at_init = None
-            replay_mode = True
-            rack_visibility = [True, True]
-            current_replay_turn = 0 
-            if gaddag_loading_status == 'loaded':
-                if not is_silent_run_for_init:
-                    screen.fill(WHITE)
-                    loading_text_surf = ui_font.render("Generating Insights...", True, BLUE)
-                    screen.blit(loading_text_surf, ( (WINDOW_WIDTH - loading_text_surf.get_width()) // 2, (WINDOW_HEIGHT - loading_text_surf.get_height()) // 2))
-                    pygame.display.flip()
-                insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data, is_silent_run_param=is_silent_run_for_init)
-            else:
-                insights_data_for_replay = []
-                if not is_silent_run_for_init and gaddag_loading_status == 'loading':
-                     print("Insights generation skipped for replay: GADDAG not ready.")
-        if not is_silent_run_for_init:
-            print(f"--- initialize_game(): Loaded SGS Game. Players: {player_names}, Moves: {len(move_history)} ---")
+        (
+            game_mode, is_loaded_game, player_names, move_history, final_scores_at_init,
+            sgs_initial_bag, board_init, tiles_init, scores_init, blanks_init, racks_init, bag_init,
+            replay_mode, current_replay_turn, practice_mode, is_ai, human_player,
+            first_play, initial_racks_at_game_start, number_checks, letter_checks,
+            game_over_at_init, pass_count, exchange_count, consecutive_zero_point_turns,
+            last_played_highlight_coords, rack_visibility
+        ) = _setup_loaded_game(sgs_loaded_game_data, is_silent_run_for_init)
 
     elif selected_mode_result == "BATCH_MODE":
-        is_batch_running = True
-        rack_visibility = [True, True]
-        game_mode = game_mode_tuple
-        total_batch_games = num_games
-        current_batch_game_num = 1 
-        batch_results = []
-        practice_mode = None
-        letter_checks = [True]*4
-        number_checks = [True]*6
-        active_practice_state_data = None
-        bbb_7l_max_prob_init = 1000
-        bbb_8l_max_prob_init = 1000
-        batch_now = datetime.datetime.now()
-        batch_date_str = batch_now.strftime("%d%b%y").upper()
-        batch_time_str = batch_now.strftime("%H%M")
-        batch_seq_num = 1; max_existing_batch_num = 0
-        try:
-            for filename_os in os.listdir('.'):
-                if filename_os.startswith(f"{batch_date_str}-") and filename_os.endswith(".txt") and "-BATCH-" in filename_os:
-                    parts = filename_os[:-4].split('-');
-                    if len(parts) == 4 and parts[2] == "BATCH" and parts[-1].isdigit():
-                        num = int(parts[-1]); max_existing_batch_num = max(max_existing_batch_num, num)
-            batch_seq_num = max_existing_batch_num + 1
-        except OSError as e_os_err: print(f"Warning: Error listing directory for batch sequence number: {e_os_err}. Using sequence 1.")
-        batch_base_filename_prefix = f"{batch_date_str}-{batch_time_str}-BATCH-{batch_seq_num}"
-        # --- MODIFICATION START: Add generate_endgames_mode to config ---
-        initial_game_config = {
-            'game_mode': game_mode, 'player_names': player_names_sel, 'human_player': human_player_sel,
-            'use_endgame_solver': USE_ENDGAME_SOLVER, 'use_ai_simulation': USE_AI_SIMULATION,
-            'batch_filename_prefix': batch_base_filename_prefix,
-            'ai_sim_num_candidates': ai_sim_num_candidates_init,
-            'ai_sim_num_opponent_sims': ai_sim_num_opponent_sims_init,
-            'ai_sim_num_post_sim_candidates': ai_sim_num_post_sim_candidates_init,
-            'bbb_7l_max_prob': bbb_7l_max_prob_init, 
-            'bbb_8l_max_prob': bbb_8l_max_prob_init,
-            'plaid_mode': plaid_mode_checked,
-            'generate_endgames_mode': generate_endgames_checked
-        }
-        # --- MODIFICATION END ---
-        player_names = player_names_sel
-        human_player = human_player_sel
-        is_ai = [False, False]
-        if initial_game_config['game_mode'] == MODE_HVA: is_ai[2 - initial_game_config['human_player']] = True
-        elif initial_game_config['game_mode'] == MODE_AVA: is_ai = [True, True]
-        initial_game_config['is_ai'] = is_ai
-        reset_result = reset_game_state(initial_game_config, is_silent_batch_run_param=is_silent_run_for_init)
-        if reset_result is None:
-             print("FATAL: Could not initialize first batch game."); pygame.quit(); sys.exit()
-        (board_init, tiles_init, racks_init, blanks_init, scores_init, turn, first_play, bag_init,
-         move_history, pass_count, exchange_count, consecutive_zero_point_turns,
-         last_played_highlight_coords, is_solving_endgame,
-         sgs_initial_bag) = reset_result
-        initial_racks_at_game_start = [r[:] for r in racks_init] 
-        game_over_at_init = False; final_scores_at_init = None
-        insights_data_for_replay = []
-        if not is_silent_run_for_init: print(f"--- initialize_game(): Batch Mode Setup Complete. Running {total_batch_games} games. Base Filename Prefix: {batch_base_filename_prefix} ---")
+        (
+            is_batch_running, rack_visibility, game_mode, total_batch_games, current_batch_game_num,
+            batch_results, practice_mode, letter_checks, number_checks, active_practice_state_data,
+            initial_game_config, player_names, human_player, is_ai,
+            board_init, tiles_init, racks_init, blanks_init, scores_init, turn, first_play, bag_init,
+            move_history, pass_count, exchange_count, consecutive_zero_point_turns,
+            last_played_highlight_coords, is_solving_endgame, sgs_initial_bag,
+            initial_racks_at_game_start, game_over_at_init, final_scores_at_init, insights_data_for_replay
+        ) = _setup_batch_run(game_mode_tuple, player_names_sel, human_player_sel, num_games, plaid_mode_checked, generate_endgames_checked, is_silent_run_for_init)
 
     elif selected_mode_result is not None: 
         is_batch_running = False
@@ -7016,7 +7181,8 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                                 pass_count_for_print_sim = 0
                             else: # PASS
                                 pass_count_for_print_sim += 1
-                            move_idx_in_seq += 1
+                        
+                        move_idx_in_seq += 1
                         
                         turn_counter += 1
 
@@ -7062,26 +7228,15 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
                     if game_mode == MODE_HVA: is_ai[2 - human_player] = True
                     elif game_mode == MODE_AVA or practice_mode == "power_tiles" or practice_mode == "bingo_bango_bongo": is_ai = [True, True]
         else: 
-            if not is_silent_run_for_init: print("Performing standard game initialization (no pre-set practice_state)...")
-            temp_full_bag = create_standard_bag()
-            random.shuffle(temp_full_bag)
-            sgs_initial_bag = temp_full_bag[:] 
-            bag_init = temp_full_bag[:]
-            racks_init = [[], []]; scores_init = [0, 0]; turn = 1; blanks_init = set(); first_play = True
-            try:
-                racks_init[0] = [bag_init.pop() for _ in range(7)]
-                racks_init[1] = [bag_init.pop() for _ in range(7)]
-            except IndexError: print("Error: Not enough tiles in bag."); pygame.quit(); sys.exit()
-            is_ai = [False, False] 
-            if game_mode == MODE_HVA: is_ai[2 - human_player] = True
-            elif game_mode == MODE_AVA: is_ai = [True, True]
-            should_sort_racks_init_std = not is_silent_run_for_init
-            if should_sort_racks_init_std:
-                for i, rack_item in enumerate(racks_init):
-                    if rack_item is not None: rack_item.sort()
-                if not is_silent_run_for_init: 
-                    print(f"DEBUG initialize_game (standard new game): After initial sort, P1 rack: {racks_init[0]}, P2 rack: {racks_init[1]}")
-        initial_racks_at_game_start = [rack_item[:] for rack_item in racks_init] 
+            # --- REFACTORED: Call the new helper function for new game setup ---
+            (
+                bag_init, racks_init, scores_init, turn, blanks_init, first_play,
+                is_ai, sgs_initial_bag, initial_racks_at_game_start
+            ) = _setup_new_game(game_mode, human_player_sel, is_silent_run_for_init)
+            # --- END REFACTORED BLOCK ---
+        
+        if 'initial_racks_at_game_start' not in locals():
+            initial_racks_at_game_start = [rack_item[:] for rack_item in racks_init] 
         game_over_at_init = False; final_scores_at_init = None
         insights_data_for_replay = []
 
