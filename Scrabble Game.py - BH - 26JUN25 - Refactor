@@ -3,7 +3,7 @@
 
 
 #python
-#Scrabble BG
+#Scrabble BH
 #Refactor
 
 
@@ -407,7 +407,9 @@ def draw_loading_indicator(scoreboard_x, scoreboard_y, scoreboard_width):
 
 
 
-def show_word_lookup_dialog():
+
+
+def show_word_lookup_dialog(state=None):
     """
     Displays a dialog for word lookup and anagramming.
     User types a word/letters, and its definition or anagrams are shown.
@@ -425,33 +427,8 @@ def show_word_lookup_dialog():
     error_message = None 
     definition_scroll_offset_y = 0
     
-    input_rect_rel_x, input_rect_rel_y, input_rect_w, input_rect_h = 20, 50, dialog_width - 40, 35
-    input_rect = pygame.Rect(dialog_x + input_rect_rel_x, dialog_y + input_rect_rel_y, input_rect_w, input_rect_h)
-
-    lookup_button_rel_x, lookup_button_rel_y = 20, input_rect_rel_y + input_rect_h + 10
-    lookup_button_rect = pygame.Rect(dialog_x + lookup_button_rel_x, dialog_y + lookup_button_rel_y, BUTTON_WIDTH, BUTTON_HEIGHT)
-    anagram_button_rect = pygame.Rect(lookup_button_rect.right + BUTTON_GAP, lookup_button_rect.top, BUTTON_WIDTH, BUTTON_HEIGHT)
-    
-    definition_area_padding = 5
-    scroll_button_width = 20
-    scroll_button_height = 20
-
-    definition_area_rel_x = 20
-    definition_area_rel_y = lookup_button_rel_y + BUTTON_HEIGHT + 10
-    definition_area_w = dialog_width - 40 - scroll_button_width - definition_area_padding 
-    definition_area_h = dialog_height - (definition_area_rel_y + BUTTON_HEIGHT + 40)
-    definition_display_rect = pygame.Rect(dialog_x + definition_area_rel_x, dialog_y + definition_area_rel_y, definition_area_w, definition_area_h)
-
-    scroll_up_arrow_rect = pygame.Rect(definition_display_rect.right + definition_area_padding, 
-                                      definition_display_rect.top, 
-                                      scroll_button_width, scroll_button_height)
-    scroll_down_arrow_rect = pygame.Rect(definition_display_rect.right + definition_area_padding, 
-                                        definition_display_rect.bottom - scroll_button_height, 
-                                        scroll_button_width, scroll_button_height)
-
-    close_button_rect = pygame.Rect(dialog_x + (dialog_width - BUTTON_WIDTH) // 2, 
-                                   dialog_y + dialog_height - BUTTON_HEIGHT - 20, 
-                                   BUTTON_WIDTH, BUTTON_HEIGHT)
+    dragging = False
+    drag_offset = (0, 0)
     
     dialog_running = True
 
@@ -495,7 +472,7 @@ def show_word_lookup_dialog():
             lines.append(current_line_text.rstrip())
         return lines
 
-    def perform_lookup(word_to_lookup):
+    def perform_lookup(word_to_lookup, definition_display_rect_width):
         nonlocal current_definition_lines, error_message, definition_scroll_offset_y
         error_message = None 
         definition_scroll_offset_y = 0
@@ -519,7 +496,7 @@ def show_word_lookup_dialog():
         if word_definitions_loading_status == 'loaded':
             definition_text = WORD_DEFINITIONS.get(word_to_lookup.upper())
             if definition_text:
-                wrapped_def_lines = wrap_text(definition_text, ui_font, definition_display_rect.width - 10)
+                wrapped_def_lines = wrap_text(definition_text, ui_font, definition_display_rect_width - 10)
                 current_definition_lines = prob_info_lines + wrapped_def_lines
             else:
                 error_message = f"'{word_to_lookup.upper()}' not found."
@@ -528,7 +505,7 @@ def show_word_lookup_dialog():
         else: 
             current_definition_lines = ["Definitions not available."]
 
-    def perform_anagram(letters_to_anagram):
+    def perform_anagram(letters_to_anagram, definition_display_rect_width):
         nonlocal current_definition_lines, error_message, definition_scroll_offset_y
         error_message = None 
         definition_scroll_offset_y = 0
@@ -566,13 +543,38 @@ def show_word_lookup_dialog():
                 current_definition_lines.append(header)
                 
                 words_line = "   ".join(words)
-                wrapped_word_lines = wrap_text(words_line, ui_font, definition_display_rect.width - 10, separator='   ')
+                wrapped_word_lines = wrap_text(words_line, ui_font, definition_display_rect_width - 10, separator='   ')
                 current_definition_lines.extend(wrapped_word_lines)
                 current_definition_lines.append("")
         else:
             error_message = f"No anagrams found for '{letters_to_anagram.upper()}'."
 
     while dialog_running:
+        # --- Calculate all rects based on current dialog_x, dialog_y ---
+        title_bar_rect = pygame.Rect(dialog_x, dialog_y, dialog_width, 40)
+        input_rect = pygame.Rect(dialog_x + 20, dialog_y + 50, dialog_width - 40, 35)
+        lookup_button_rect = pygame.Rect(dialog_x + 20, input_rect.bottom + 10, BUTTON_WIDTH, BUTTON_HEIGHT)
+        anagram_button_rect = pygame.Rect(lookup_button_rect.right + BUTTON_GAP, lookup_button_rect.top, BUTTON_WIDTH, BUTTON_HEIGHT)
+        
+        definition_area_padding = 5
+        scroll_button_width = 20
+        definition_display_rect = pygame.Rect(
+            dialog_x + 20,
+            lookup_button_rect.bottom + 10,
+            dialog_width - 40 - scroll_button_width - definition_area_padding,
+            dialog_height - (lookup_button_rect.bottom + 10 - dialog_y) - BUTTON_HEIGHT - 40
+        )
+        
+        scroll_up_arrow_rect = pygame.Rect(definition_display_rect.right + definition_area_padding, 
+                                          definition_display_rect.top, 
+                                          scroll_button_width, 20)
+        scroll_down_arrow_rect = pygame.Rect(definition_display_rect.right + definition_area_padding, 
+                                            definition_display_rect.bottom - 20, 
+                                            scroll_button_width, 20)
+        close_button_rect = pygame.Rect(dialog_x + (dialog_width - BUTTON_WIDTH) // 2, 
+                                       dialog_y + dialog_height - BUTTON_HEIGHT - 20, 
+                                       BUTTON_WIDTH, BUTTON_HEIGHT)
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
@@ -580,22 +582,26 @@ def show_word_lookup_dialog():
             
             if event.type == pygame.MOUSEBUTTONDOWN:
                 x_mouse, y_mouse = event.pos
-                input_active = input_rect.collidepoint(x_mouse, y_mouse)
                 
                 if event.button == 1:
-                    error_message = None
-                    if lookup_button_rect.collidepoint(x_mouse, y_mouse):
-                        perform_lookup(input_text)
-                    elif anagram_button_rect.collidepoint(x_mouse, y_mouse):
-                        perform_anagram(input_text)
-                    elif close_button_rect.collidepoint(x_mouse, y_mouse):
-                        dialog_running = False
-                    elif scroll_up_arrow_rect.collidepoint(x_mouse, y_mouse):
-                        definition_scroll_offset_y = max(0, definition_scroll_offset_y - 1)
-                    elif scroll_down_arrow_rect.collidepoint(x_mouse, y_mouse):
-                        max_scroll = len(current_definition_lines) - (definition_display_rect.height // ui_font.get_linesize())
-                        if max_scroll < 0: max_scroll = 0
-                        definition_scroll_offset_y = min(max_scroll, definition_scroll_offset_y + 1)
+                    if title_bar_rect.collidepoint(x_mouse, y_mouse):
+                        dragging = True
+                        drag_offset = (x_mouse - dialog_x, y_mouse - dialog_y)
+                    else:
+                        input_active = input_rect.collidepoint(x_mouse, y_mouse)
+                        error_message = None
+                        if lookup_button_rect.collidepoint(x_mouse, y_mouse):
+                            perform_lookup(input_text, definition_display_rect.width)
+                        elif anagram_button_rect.collidepoint(x_mouse, y_mouse):
+                            perform_anagram(input_text, definition_display_rect.width)
+                        elif close_button_rect.collidepoint(x_mouse, y_mouse):
+                            dialog_running = False
+                        elif scroll_up_arrow_rect.collidepoint(x_mouse, y_mouse):
+                            definition_scroll_offset_y = max(0, definition_scroll_offset_y - 1)
+                        elif scroll_down_arrow_rect.collidepoint(x_mouse, y_mouse):
+                            max_scroll = len(current_definition_lines) - (definition_display_rect.height // ui_font.get_linesize())
+                            if max_scroll < 0: max_scroll = 0
+                            definition_scroll_offset_y = min(max_scroll, definition_scroll_offset_y + 1)
                 
                 elif event.button == 4:
                     if definition_display_rect.collidepoint(x_mouse, y_mouse):
@@ -606,6 +612,18 @@ def show_word_lookup_dialog():
                         if max_scroll < 0 : max_scroll = 0
                         definition_scroll_offset_y = min(max_scroll, definition_scroll_offset_y + 1)
 
+            elif event.type == pygame.MOUSEBUTTONUP:
+                if event.button == 1:
+                    dragging = False
+
+            elif event.type == pygame.MOUSEMOTION:
+                if dragging:
+                    dialog_x = event.pos[0] - drag_offset[0]
+                    dialog_y = event.pos[1] - drag_offset[1]
+                    # Clamp to screen boundaries
+                    dialog_x = max(0, min(dialog_x, WINDOW_WIDTH - dialog_width))
+                    dialog_y = max(0, min(dialog_y, WINDOW_HEIGHT - dialog_height))
+
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     dialog_running = False
@@ -613,7 +631,7 @@ def show_word_lookup_dialog():
                 if input_active:
                     error_message = None
                     if event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
-                        perform_lookup(input_text)
+                        perform_lookup(input_text, definition_display_rect.width)
                     elif event.key == pygame.K_BACKSPACE:
                         input_text = input_text[:-1]
                     elif event.key == pygame.K_v and (pygame.key.get_mods() & pygame.KMOD_CTRL or pygame.key.get_mods() & pygame.KMOD_META) and pyperclip_available and pyperclip:
@@ -628,6 +646,13 @@ def show_word_lookup_dialog():
                     elif event.unicode.isalpha(): 
                         input_text += event.unicode.upper() 
         
+        # --- Drawing ---
+        if state:
+            draw_game_screen(screen, state)
+        else:
+            # Fallback if no state is available (e.g., called from mode select)
+            screen.fill(WHITE)
+
         pygame.draw.rect(screen, DIALOG_COLOR, (dialog_x, dialog_y, dialog_width, dialog_height))
         pygame.draw.rect(screen, BLACK, (dialog_x, dialog_y, dialog_width, dialog_height), 2)
 
@@ -2790,6 +2815,7 @@ def draw_action_buttons(screen, action_button_rects):
 
 
 
+
 def handle_action_button_events(event, action_button_rects, current_mode, player_names, human_player, use_endgame_solver, use_ai_sim, dev_cprofile, dev_visualize, ai_params):
     """Handles clicks on the main action buttons and returns game start data if applicable."""
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -2820,7 +2846,7 @@ def handle_action_button_events(event, action_button_rects, current_mode, player
                     return "BATCH_MODE", batch_data
             return "NO_ACTION", None
         elif action_button_rects['word_lookup'].collidepoint(x, y):
-            show_word_lookup_dialog()
+            show_word_lookup_dialog(None)
             return "DIALOG_SHOWN", None
         elif action_button_rects['dev_tools'].collidepoint(x, y):
             return "SHOW_DEV_TOOLS", None
@@ -6889,6 +6915,378 @@ def _setup_batch_run(game_mode_tuple, player_names_sel, human_player_sel, num_ga
 
 
 
+def _setup_practice_game(practice_mode, active_practice_state_data, game_mode, human_player, is_silent_run):
+    """Sets up the game state from practice mode data."""
+    if not is_silent_run:
+        print(f"--- _setup_practice_game: Initializing for practice mode: {practice_mode} ---")
+
+    # Default initializations
+    board_init, _, tiles_init = create_board()
+    racks_init = [[], []]
+    blanks_init = set()
+    bag_init = []
+    scores_init = [0, 0]
+    turn = 1
+    first_play = True
+    sgs_initial_bag = []
+    is_ai = [False, False]
+
+    if practice_mode == "endgame":
+        if not is_silent_run: print(f"Loading state from endgame puzzle data...")
+        
+        puzzle_filename = active_practice_state_data.get("filename")
+        puzzle_filepath = None
+
+        try:
+            home_dir = os.path.expanduser('~')
+            puzzle_dir = os.path.join(home_dir, 'Documents', 'Endgame Practice')
+
+            if not puzzle_filename:
+                if not os.path.isdir(puzzle_dir):
+                    raise FileNotFoundError("Endgame Practice directory not found.")
+                
+                sge_files = [f for f in os.listdir(puzzle_dir) if f.endswith('.sge')]
+                if not sge_files:
+                    raise FileNotFoundError("No .sge puzzle files found in the directory.")
+                
+                puzzle_filename = random.choice(sge_files)
+                if not is_silent_run:
+                    print(f"  Randomly selected puzzle: {puzzle_filename}")
+            
+            puzzle_filepath = os.path.join(puzzle_dir, puzzle_filename)
+            if not os.path.exists(puzzle_filepath):
+                raise FileNotFoundError(f"Specified puzzle file '{puzzle_filename}' not found.")
+
+            with open(puzzle_filepath, 'rb') as f_puzzle:
+                puzzle_data = pickle.load(f_puzzle)
+            active_practice_state_data["puzzle_data"] = puzzle_data
+
+        except (FileNotFoundError, pickle.UnpicklingError, Exception) as e:
+            show_message_dialog(f"Error loading endgame puzzle:\n{e}", "Puzzle Load Error")
+            return None # Signal failure
+
+        puzzle_data = active_practice_state_data.get("puzzle_data", {})
+        puzzle_state = puzzle_data.get("puzzle_state", {})
+        
+        board_init = puzzle_state.get("board", create_board()[0])
+        tiles_init = puzzle_state.get("tiles", [['' for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)])
+        blanks_init = puzzle_state.get("blanks", set())
+        scores_init = puzzle_state.get("scores", [0, 0])
+        turn = puzzle_state.get("player_to_move", 1)
+        
+        player_to_move_idx = turn - 1
+        opponent_idx = 1 - player_to_move_idx
+        racks_init[player_to_move_idx] = puzzle_state.get("rack_player_to_move", [])
+        racks_init[opponent_idx] = puzzle_state.get("rack_opponent", [])
+        
+        bag_init = [] 
+        first_play = False 
+        sgs_initial_bag = []
+        
+        is_ai = active_practice_state_data.get("is_ai", [False, True])
+
+    else: # Other practice modes (8-letter, BBB, etc.)
+        if not is_silent_run: print(f"Loading state from active_practice_state_data for mode: {practice_mode}...")
+        board_init = active_practice_state_data["board"]
+        tiles_init = active_practice_state_data["tiles"]
+        racks_init = active_practice_state_data["racks"]
+        blanks_init = active_practice_state_data["blanks"]
+        bag_init = active_practice_state_data["bag"]
+        scores_init = active_practice_state_data["scores"]
+        turn = active_practice_state_data["turn"]
+        first_play = active_practice_state_data["first_play"]
+        sgs_initial_bag = active_practice_state_data.get("sgs_initial_bag", bag_init[:])
+        
+        if practice_mode == "eight_letter": 
+            is_ai = [False, False]
+        else:
+            is_ai = [False, False]
+            if game_mode == MODE_HVA: is_ai[2 - human_player] = True
+            elif game_mode == MODE_AVA or practice_mode in ["power_tiles", "bingo_bango_bongo"]: is_ai = [True, True]
+
+    # Sort racks for display unless it's a silent run
+    if not is_silent_run:
+        if racks_init[0] is not None: racks_init[0].sort()
+        if racks_init[1] is not None: racks_init[1].sort()
+
+    return (board_init, tiles_init, racks_init, blanks_init, bag_init, scores_init, turn, first_play, sgs_initial_bag, is_ai)
+
+
+
+
+
+def _initialize_game_state_variables():
+    """Initializes a dictionary with all default game state variables."""
+    board_init, _, tiles_init = create_board()
+    return {
+        'game_mode': None,
+        'is_loaded_game': False,
+        'player_names': ["Player 1", "Player 2"],
+        'move_history': [],
+        'final_scores_at_init': None,
+        'replay_initial_shuffled_bag': None,
+        'sgs_initial_bag': None,
+        'sgs_loaded_game_data': None,
+        'board_init': board_init,
+        'tiles_init': tiles_init,
+        'scores_init': [0, 0],
+        'blanks_init': set(),
+        'racks_init': [[], []],
+        'bag_init': [],
+        'replay_mode': False,
+        'current_replay_turn': 0,
+        'practice_mode': None,
+        'is_ai': [False, False],
+        'human_player': 1,
+        'first_play': True,
+        'initial_racks_at_game_start': [[], []],
+        'number_checks': [True] * 6,
+        'letter_checks': [True] * 4,
+        'is_batch_running': False,
+        'total_batch_games': 0,
+        'current_batch_game_num': 0,
+        'batch_results': [],
+        'initial_game_config': {},
+        'practice_target_moves': [],
+        'practice_best_move': None,
+        'all_moves': [],
+        'turn': 1,
+        'pass_count': 0,
+        'exchange_count': 0,
+        'consecutive_zero_point_turns': 0,
+        'last_played_highlight_coords': set(),
+        'is_solving_endgame': False,
+        'active_practice_state_data': None,
+        'game_over_at_init': False,
+        'last_scoreboard_click_time_init': 0,
+        'last_scoreboard_click_idx_init': -1,
+        'insights_data_for_replay': [],
+        'rack_visibility': [False, False],
+        'ai_sim_num_candidates_init': DEFAULT_AI_CANDIDATES,
+        'ai_sim_num_opponent_sims_init': DEFAULT_OPPONENT_SIMULATIONS,
+        'ai_sim_num_post_sim_candidates_init': DEFAULT_POST_SIM_CANDIDATES,
+        'bbb_7l_max_prob_init': 1000,
+        'bbb_8l_max_prob_init': 1000,
+        'gaddag_loading_status': gaddag_loading_status,
+        'GADDAG_STRUCTURE': GADDAG_STRUCTURE,
+    }
+
+
+
+
+def _setup_new_game_or_practice(settings, is_silent_run):
+    """
+    Sets up the state for a new standard game or a new practice game.
+    This function orchestrates calls to _setup_practice_game or _setup_new_game.
+    """
+    # Unpack all settings needed
+    game_mode = settings['game_mode']
+    player_names = settings['player_names']
+    human_player = settings['human_player']
+    practice_mode = settings['practice_mode']
+    letter_checks = settings['letter_checks']
+    number_checks = settings['number_checks']
+    active_practice_state_data = settings['practice_state']
+    
+    # Initialize a dictionary to hold the setup results
+    new_game_state = {}
+
+    if not is_silent_run:
+        print(f"--- _setup_new_game_or_practice: Handling New Game Setup ({game_mode}) ---")
+
+    # Populate state with settings from mode selection
+    new_game_state['game_mode'] = game_mode
+    new_game_state['is_loaded_game'] = False
+    new_game_state['player_names'] = player_names
+    new_game_state['human_player'] = human_player
+    new_game_state['practice_mode'] = practice_mode
+    new_game_state['letter_checks'] = letter_checks
+    new_game_state['number_checks'] = number_checks
+    new_game_state['active_practice_state_data'] = active_practice_state_data
+    new_game_state['is_batch_running'] = False # This function is for non-batch setups
+    
+    if practice_mode or game_mode == MODE_AVA:
+        new_game_state['rack_visibility'] = [True, True]
+    else:
+        new_game_state['rack_visibility'] = [False, False]
+
+    if active_practice_state_data:
+        # Call the helper for practice modes
+        practice_setup_result = _setup_practice_game(
+            practice_mode, active_practice_state_data, game_mode, human_player, is_silent_run
+        )
+        if practice_setup_result is None:
+            return None # Propagate failure
+
+        (
+            new_game_state['board_init'], new_game_state['tiles_init'], new_game_state['racks_init'],
+            new_game_state['blanks_init'], new_game_state['bag_init'], new_game_state['scores_init'],
+            new_game_state['turn'], new_game_state['first_play'], new_game_state['sgs_initial_bag'],
+            new_game_state['is_ai']
+        ) = practice_setup_result
+
+        # Handle additional setup specific to certain practice modes
+        if practice_mode == "endgame":
+            puzzle_data = active_practice_state_data.get("puzzle_data", {})
+            raw_sequence = puzzle_data.get("solution_sequence", puzzle_data.get("solution", []))
+            new_game_state.setdefault('initial_game_config', {})['endgame_solution_sequence'] = raw_sequence
+            
+            formatted_solution = puzzle_data.get("formatted_solution", [])
+            if not formatted_solution and raw_sequence:
+                if not is_silent_run:
+                    print("  (Re-creating formatted solution string from raw sequence for display...)")
+                
+                puzzle_state = puzzle_data.get("puzzle_state", {})
+                temp_rack_p1 = puzzle_state.get("rack_player_to_move", [])
+                temp_rack_o2 = puzzle_state.get("rack_opponent", [])
+                sequence_str_parts = []
+                turn_counter = 1
+                move_idx_in_seq = 0
+                pass_count_for_print_sim = 0
+                
+                while move_idx_in_seq < len(raw_sequence):
+                    sequence_str_parts.append(f"{turn_counter}. ")
+                    p1_move_obj = raw_sequence[move_idx_in_seq]
+                    sequence_str_parts.append(ai_engine.format_single_move_for_print(p1_move_obj, True))
+                    sequence_str_parts.append(" ")
+
+                    if hasattr(p1_move_obj, 'get'):
+                        temp_rack_p1 = p1_move_obj.get('leave', [])
+                        pass_count_for_print_sim = 0
+                    else: # PASS
+                        pass_count_for_print_sim += 1
+                    move_idx_in_seq += 1
+                    
+                    if move_idx_in_seq < len(raw_sequence):
+                        p2_move_obj = raw_sequence[move_idx_in_seq]
+                        sequence_str_parts.append(ai_engine.format_single_move_for_print(p2_move_obj, True))
+                        sequence_str_parts.append(" ")
+                        
+                        if hasattr(p2_move_obj, 'get'):
+                            temp_rack_o2 = p2_move_obj.get('leave', [])
+                            pass_count_for_print_sim = 0
+                        else: # PASS
+                            pass_count_for_print_sim += 1
+                    
+                    move_idx_in_seq += 1
+                    
+                    turn_counter += 1
+
+                last_player_was_p1 = (len(raw_sequence) % 2 != 0)
+                end_state_str = ai_engine.format_end_state_for_print(
+                    temp_rack_p1, temp_rack_o2, last_player_was_p1, pass_count_for_print_sim
+                )
+                sequence_str_parts.append(end_state_str)
+                formatted_solution = ["".join(sequence_str_parts)]
+            new_game_state.setdefault('initial_game_config', {})['endgame_practice_solution'] = formatted_solution
+
+        elif practice_mode == "eight_letter":
+            practice_params = active_practice_state_data.get("practice_params", {})
+            new_game_state.setdefault('initial_game_config', {})['gamify_active'] = practice_params.get('gamify_active', False)
+            if new_game_state['initial_game_config']['gamify_active']:
+                gamified_params = practice_params.get('gamified_params', {})
+                new_game_state['initial_game_config']['gamify_min_prob'] = gamified_params.get('min', 500)
+                new_game_state['initial_game_config']['gamify_max_goal'] = gamified_params.get('max_goal', 3500)
+                new_game_state['initial_game_config']['gamify_increment'] = gamified_params.get('increment', 250)
+                new_game_state['initial_game_config']['gamify_current_max_prob'] = new_game_state['initial_game_config']['gamify_min_prob'] + new_game_state['initial_game_config']['gamify_increment']
+
+        elif practice_mode == "bingo_bango_bongo":
+            new_game_state['bbb_7l_max_prob_init'] = active_practice_state_data.get('bbb_7l_max_prob', 1000)
+            new_game_state['bbb_8l_max_prob_init'] = active_practice_state_data.get('bbb_8l_max_prob', 1000)
+
+    else: # Standard new game
+        (
+            new_game_state['bag_init'], new_game_state['racks_init'], new_game_state['scores_init'],
+            new_game_state['turn'], new_game_state['blanks_init'], new_game_state['first_play'],
+            new_game_state['is_ai'], new_game_state['sgs_initial_bag'],
+            new_game_state['initial_racks_at_game_start']
+        ) = _setup_new_game(game_mode, human_player, is_silent_run)
+
+    # Set final common state variables
+    if 'initial_racks_at_game_start' not in new_game_state or not new_game_state['initial_racks_at_game_start']:
+        new_game_state['initial_racks_at_game_start'] = [rack_item[:] for rack_item in new_game_state['racks_init']]
+    new_game_state['game_over_at_init'] = False
+    new_game_state['final_scores_at_init'] = None
+    new_game_state['insights_data_for_replay'] = []
+
+    return new_game_state
+
+
+
+def _perform_one_time_setup(selected_mode_result, return_data):
+    """
+    Performs all one-time setup tasks when the game is first launched.
+    This includes loading data files, initializing the Cython engine, and parsing settings.
+    """
+    global GADDAG_STRUCTURE, gaddag_loading_status, gaddag_load_thread
+    global WORD_DEFINITIONS, word_definitions_loading_status, word_definitions_load_thread
+    global DEV_CPROFILE_ENABLED_SESSION, DEV_VISUALIZE_BATCH_ENABLED_SESSION
+    global USE_AI_SIMULATION, USE_ENDGAME_SOLVER
+
+    if gaddag_loading_status == 'idle':
+        print("--- Main: Loading AI data synchronously... ---")
+        _load_gaddag_background()
+        _load_word_definitions_background()
+        print("--- Main: All data loaded. ---")
+
+    if gaddag_loading_status == 'loaded' and GADDAG_STRUCTURE is not None:
+        print("--- Initializing Cython AI Engine with game constants... ---")
+        ai_engine.init_ai_engine(
+            grid_size=GRID_SIZE,
+            center_square=CENTER_SQUARE,
+            dawg=DAWG,
+            gaddag_root=GADDAG_STRUCTURE.root,
+            tile_distribution=TILE_DISTRIBUTION,
+            gaddag_separator=Gaddag.SEPARATOR,
+            leave_lookup_table=LEAVE_LOOKUP_TABLE,
+            vc_valid=VC_VALID,
+            vc_invalid_words=VC_INVALID_WORDS,
+            vc_invalid_structure_placement=VC_INVALID_STRUCTURE_PLACEMENT,
+            vc_invalid_structure_no_words=VC_INVALID_STRUCTURE_NO_WORDS,
+            vc_invalid_structure_not_center=VC_INVALID_STRUCTURE_NOT_CENTER,
+            vc_invalid_structure_not_connected=VC_INVALID_STRUCTURE_NOT_CONNECTED,
+            vc_invalid_structure_empty_play=VC_INVALID_STRUCTURE_EMPTY_PLAY,
+            light_blue=LIGHT_BLUE,
+            blue=BLUE,
+            pink=PINK,
+            red=RED,
+            letters=LETTERS
+        )
+        print("--- Cython AI Engine Initialized. ---")
+
+        try:
+            print("--- Warming up AI Engine (one-time JIT compilation)... ---")
+            _ = ai_engine.generate_all_moves_gaddag(
+                ['A', 'B', 'C', 'D', 'E', 'F', 'G'],
+                [['' for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)],
+                create_board()[0],
+                set(),
+                is_silent_batch_run_param=True
+            )
+            print("--- AI Engine is ready. ---")
+        except Exception as e_warmup:
+            print(f"WARNING: AI Engine warm-up call failed: {e_warmup}")
+    else:
+        print("--- WARNING: GADDAG not loaded. AI Engine initialization skipped. AI will not function. ---")
+
+    settings = _parse_mode_selection_results(selected_mode_result, return_data)
+    
+    # Set session-wide global flags from the parsed settings
+    DEV_CPROFILE_ENABLED_SESSION = settings['dev_cprofile']
+    DEV_VISUALIZE_BATCH_ENABLED_SESSION = settings['dev_visualize']
+    USE_ENDGAME_SOLVER = settings['use_endgame_solver']
+    USE_AI_SIMULATION = settings['use_ai_simulation']
+
+    # Determine if this is a silent batch run for printing purposes
+    _is_potentially_silent_batch = (selected_mode_result == "BATCH_MODE" and not DEV_VISUALIZE_BATCH_ENABLED_SESSION)
+
+    if not _is_potentially_silent_batch:
+        print(f"--- _perform_one_time_setup(): Global DEV_CPROFILE_ENABLED_SESSION set to: {DEV_CPROFILE_ENABLED_SESSION} ---")
+        print(f"--- _perform_one_time_setup(): Global DEV_VISUALIZE_BATCH_ENABLED_SESSION set to: {DEV_VISUALIZE_BATCH_ENABLED_SESSION} ---")
+        print(f"--- _perform_one_time_setup(): AI Sim Params Initialized: Cands={settings['ai_sim_candidates']}, OppSims={settings['ai_sim_opp_sims']}, PostSimCands={settings['ai_sim_post_sim_candidates']} ---")
+        print(f"--- _perform_one_time_setup(): BBB Params Initialized: 7L Max Prob={settings['bbb_7l_max_prob']}, 8L Max Prob={settings['bbb_8l_max_prob']} ---")
+
+    return settings
 
 
 
@@ -6896,19 +7294,16 @@ def _setup_batch_run(game_mode_tuple, player_names_sel, human_player_sel, num_ga
 
 
 
-# In Scrabble Game.py
 
-# This is the full, complete function with no code omitted.
+
+
 
 def initialize_game(selected_mode_result, return_data, main_called_flag):
     """
     Initializes the game state based on the selected mode and data.
     Starts background GADDAG loading if not already loaded/loading.
     Sets global DEV_CPROFILE_ENABLED_SESSION and DEV_VISUALIZE_BATCH_ENABLED_SESSION.
-    Returns game state variables excluding the dev flags (as they are now global for the session).
-    Print statements are now conditional.
-    MODIFIED: Now directly sets global USE_AI_SIMULATION and USE_ENDGAME_SOLVER.
-    NO CODE OMITTED.
+    Returns a dictionary containing the complete initial game state.
     """
     global GADDAG_STRUCTURE
     global gaddag_loading_status
@@ -6920,106 +7315,33 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
     global screen, ui_font, RED, WHITE, BLACK, BLUE
     global TILE_DISTRIBUTION, LETTERS, GRID_SIZE 
 
-    # --- REFACTORED: Parameter parsing is now handled by a helper function ---
-    
-    # Determine if this is a silent batch run before printing anything
-    _is_potentially_silent_batch = False
-    if selected_mode_result == "BATCH_MODE":
-        # Check based on new signature with plaid mode
-        if len(return_data) >= 12 and not return_data[7]:
-            _is_potentially_silent_batch = True
-        # Check based on old signatures
-        elif len(return_data) == 11 and not return_data[7]:
-            _is_potentially_silent_batch = True
-        elif len(return_data) == 8 and not return_data[7]:
-            _is_potentially_silent_batch = True
-
-    if not _is_potentially_silent_batch:
-        print("--- initialize_game() entered ---")
-
     # This block only runs on the very first game launch to set session-wide globals
     if not main_called_flag:
-        # Call the new helper function to parse results from the mode selection screen
+        settings = _perform_one_time_setup(selected_mode_result, return_data)
+    else:
+        # If it's not the first run, we still need to parse the settings for the new game
         settings = _parse_mode_selection_results(selected_mode_result, return_data)
 
-        # Set session-wide global flags from the parsed settings
-        DEV_CPROFILE_ENABLED_SESSION = settings['dev_cprofile']
-        DEV_VISUALIZE_BATCH_ENABLED_SESSION = settings['dev_visualize']
-        USE_ENDGAME_SOLVER = settings['use_endgame_solver']
-        USE_AI_SIMULATION = settings['use_ai_simulation']
-        
-        # Unpack other settings into local variables for use in this function
-        sgs_loaded_game_data_from_param = settings['sgs_loaded_data']
-        game_mode_tuple = settings['game_mode_tuple']
-        player_names_sel = settings['player_names']
-        human_player_sel = settings['human_player']
-        practice_mode_sel = settings['practice_mode']
-        letter_checks_sel = settings['letter_checks']
-        number_checks_sel = settings['number_checks']
-        practice_state_from_mode_sel = settings['practice_state']
-        num_games = settings['batch_num_games']
-        plaid_mode_checked = settings['batch_plaid_mode']
-        generate_endgames_checked = settings['batch_generate_endgames']
-        ai_sim_num_candidates_init = settings['ai_sim_candidates']
-        ai_sim_num_opponent_sims_init = settings['ai_sim_opp_sims']
-        ai_sim_num_post_sim_candidates_init = settings['ai_sim_post_sim_candidates']
-        bbb_7l_max_prob_init = settings['bbb_7l_max_prob']
-        bbb_8l_max_prob_init = settings['bbb_8l_max_prob']
+    # Unpack settings into local variables for use in this function
+    sgs_loaded_game_data_from_param = settings['sgs_loaded_data']
+    game_mode_tuple = settings['game_mode_tuple']
+    player_names_sel = settings['player_names']
+    human_player_sel = settings['human_player']
+    practice_mode_sel = settings['practice_mode']
+    letter_checks_sel = settings['letter_checks']
+    number_checks_sel = settings['number_checks']
+    practice_state_from_mode_sel = settings['practice_state']
+    num_games = settings['batch_num_games']
+    plaid_mode_checked = settings['batch_plaid_mode']
+    generate_endgames_checked = settings['batch_generate_endgames']
+    ai_sim_num_candidates_init = settings['ai_sim_candidates']
+    ai_sim_num_opponent_sims_init = settings['ai_sim_opp_sims']
+    ai_sim_num_post_sim_candidates_init = settings['ai_sim_post_sim_candidates']
+    bbb_7l_max_prob_init = settings['bbb_7l_max_prob']
+    bbb_8l_max_prob_init = settings['bbb_8l_max_prob']
 
-        # This check needs to be repeated after parsing settings
-        _is_potentially_silent_batch = (selected_mode_result == "BATCH_MODE" and not DEV_VISUALIZE_BATCH_ENABLED_SESSION)
-
-        if not _is_potentially_silent_batch:
-            print(f"--- initialize_game(): Global DEV_CPROFILE_ENABLED_SESSION set to: {DEV_CPROFILE_ENABLED_SESSION} ---")
-            print(f"--- initialize_game(): Global DEV_VISUALIZE_BATCH_ENABLED_SESSION set to: {DEV_VISUALIZE_BATCH_ENABLED_SESSION} ---")
-            print(f"--- initialize_game(): AI Sim Params Initialized: Cands={ai_sim_num_candidates_init}, OppSims={ai_sim_num_opponent_sims_init}, PostSimCands={ai_sim_num_post_sim_candidates_init} ---")
-            print(f"--- initialize_game(): BBB Params Initialized: 7L Max Prob={bbb_7l_max_prob_init}, 8L Max Prob={bbb_8l_max_prob_init} ---")
-
-    # --- END REFACTORED BLOCK ---
-
-    game_mode = None
-    is_loaded_game = False
-    player_names = ["Player 1", "Player 2"]
-    move_history = []
-    final_scores = None
-    replay_initial_shuffled_bag = None
-    sgs_initial_bag = None
-    sgs_loaded_game_data = None
-    board_init, _, tiles_init = create_board()
-    scores_init = [0, 0]
-    blanks_init = set()
-    racks_init = [[], []]
-    bag_init = []
-    replay_mode = False
-    current_replay_turn = 0
-    practice_mode = None
-    is_ai = [False, False]
-    human_player = 1
-    first_play = True
-    initial_racks_at_game_start = [[], []]
-    number_checks = [True] * 6
-    letter_checks = [True] * 4
-    is_batch_running = False
-    total_batch_games = 0
-    current_batch_game_num = 0
-    batch_results = []
-    initial_game_config = {}
-    practice_target_moves = []
-    practice_best_move = None
-    all_moves = []
-    turn = 1
-    pass_count = 0
-    exchange_count = 0
-    consecutive_zero_point_turns = 0
-    last_played_highlight_coords = set()
-    is_solving_endgame = False
-    active_practice_state_data = None
-    game_over_at_init = False
-    final_scores_at_init = None
-    last_scoreboard_click_time_init = 0
-    last_scoreboard_click_idx_init = -1
-    insights_data_for_replay = [] 
-    rack_visibility = [True, True]
+    # --- Initialize state from helper function ---
+    state = _initialize_game_state_variables()
 
     is_silent_run_for_init = (selected_mode_result == "BATCH_MODE" and not DEV_VISUALIZE_BATCH_ENABLED_SESSION)
 
@@ -7031,244 +7353,61 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
             print("Error: No valid SGS data provided for loaded game.")
             return None
         
-        sgs_loaded_game_data = sgs_loaded_game_data_from_param
+        state['sgs_loaded_game_data'] = sgs_loaded_game_data_from_param
         (
-            game_mode, is_loaded_game, player_names, move_history, final_scores_at_init,
-            sgs_initial_bag, board_init, tiles_init, scores_init, blanks_init, racks_init, bag_init,
-            replay_mode, current_replay_turn, practice_mode, is_ai, human_player,
-            first_play, initial_racks_at_game_start, number_checks, letter_checks,
-            game_over_at_init, pass_count, exchange_count, consecutive_zero_point_turns,
-            last_played_highlight_coords, rack_visibility
-        ) = _setup_loaded_game(sgs_loaded_game_data, is_silent_run_for_init)
+            state['game_mode'], state['is_loaded_game'], state['player_names'], state['move_history'], state['final_scores_at_init'],
+            state['sgs_initial_bag'], state['board_init'], state['tiles_init'], state['scores_init'], state['blanks_init'], state['racks_init'], state['bag_init'],
+            state['replay_mode'], state['current_replay_turn'], state['practice_mode'], state['is_ai'], state['human_player'],
+            state['first_play'], state['initial_racks_at_game_start'], state['number_checks'], state['letter_checks'],
+            state['game_over_at_init'], state['pass_count'], state['exchange_count'], state['consecutive_zero_point_turns'],
+            state['last_played_highlight_coords'], state['rack_visibility']
+        ) = _setup_loaded_game(state['sgs_loaded_game_data'], is_silent_run_for_init)
 
     elif selected_mode_result == "BATCH_MODE":
         (
-            is_batch_running, rack_visibility, game_mode, total_batch_games, current_batch_game_num,
-            batch_results, practice_mode, letter_checks, number_checks, active_practice_state_data,
-            initial_game_config, player_names, human_player, is_ai,
-            board_init, tiles_init, racks_init, blanks_init, scores_init, turn, first_play, bag_init,
-            move_history, pass_count, exchange_count, consecutive_zero_point_turns,
-            last_played_highlight_coords, is_solving_endgame, sgs_initial_bag,
-            initial_racks_at_game_start, game_over_at_init, final_scores_at_init, insights_data_for_replay
+            state['is_batch_running'], state['rack_visibility'], state['game_mode'], state['total_batch_games'], state['current_batch_game_num'],
+            state['batch_results'], state['practice_mode'], state['letter_checks'], state['number_checks'], state['active_practice_state_data'],
+            state['initial_game_config'], state['player_names'], state['human_player'], state['is_ai'],
+            state['board_init'], state['tiles_init'], state['racks_init'], state['blanks_init'], state['scores_init'], state['turn'], state['first_play'], state['bag_init'],
+            state['move_history'], state['pass_count'], state['exchange_count'], state['consecutive_zero_point_turns'],
+            state['last_played_highlight_coords'], state['is_solving_endgame'], state['sgs_initial_bag'],
+            state['initial_racks_at_game_start'], state['game_over_at_init'], state['final_scores_at_init'], state['insights_data_for_replay']
         ) = _setup_batch_run(game_mode_tuple, player_names_sel, human_player_sel, num_games, plaid_mode_checked, generate_endgames_checked, is_silent_run_for_init)
 
     elif selected_mode_result is not None: 
-        is_batch_running = False
-        if not is_silent_run_for_init:
-            print(f"--- initialize_game(): Handling New Game Setup ({selected_mode_result}) ---")
-        game_mode = selected_mode_result
-        is_loaded_game = False
-        replay_initial_shuffled_bag = None 
-        player_names = player_names_sel
-        human_player = human_player_sel
-        practice_mode = practice_mode_sel
-        letter_checks = letter_checks_sel
-        number_checks = number_checks_sel
-        active_practice_state_data = practice_state_from_mode_sel
-        if practice_mode or game_mode == MODE_AVA:
-            rack_visibility = [True, True]
-        else:
-            rack_visibility = [False, False]
-        if not is_silent_run_for_init:
-            print(f"--- initialize_game(): Use Endgame Solver set to: {USE_ENDGAME_SOLVER} ---")
-            print(f"--- initialize_game(): Use AI Simulation set to: {USE_AI_SIMULATION} ---")
-            print(f"--- initialize_game(): AI Sim Params for this game: Cands={ai_sim_num_candidates_init}, OppSims={ai_sim_num_opponent_sims_init}, PostSimCands={ai_sim_num_post_sim_candidates_init} ---")
-            if practice_mode == "bingo_bango_bongo":
-                print(f"--- initialize_game(): BBB Params for this game: 7L Max Prob={bbb_7l_max_prob_init}, 8L Max Prob={bbb_8l_max_prob_init} ---")
-        if active_practice_state_data:
-            if practice_mode == "endgame":
-                if not is_silent_run_for_init: print(f"Loading state from endgame puzzle data...")
-                
-                # --- BUG FIX START: Handle random puzzle selection ---
-                puzzle_filename = active_practice_state_data.get("filename")
-                puzzle_filepath = None
-
-                try:
-                    home_dir = os.path.expanduser('~')
-                    puzzle_dir = os.path.join(home_dir, 'Documents', 'Endgame Practice')
-
-                    if not puzzle_filename: # Random selection
-                        if not os.path.isdir(puzzle_dir):
-                            raise FileNotFoundError("Endgame Practice directory not found.")
-                        
-                        sge_files = [f for f in os.listdir(puzzle_dir) if f.endswith('.sge')]
-                        if not sge_files:
-                            raise FileNotFoundError("No .sge puzzle files found in the directory.")
-                        
-                        puzzle_filename = random.choice(sge_files)
-                        if not is_silent_run_for_init:
-                            print(f"  Randomly selected puzzle: {puzzle_filename}")
-                    
-                    puzzle_filepath = os.path.join(puzzle_dir, puzzle_filename)
-                    if not os.path.exists(puzzle_filepath):
-                        raise FileNotFoundError(f"Specified puzzle file '{puzzle_filename}' not found.")
-
-                    with open(puzzle_filepath, 'rb') as f_puzzle:
-                        puzzle_data = pickle.load(f_puzzle)
-                    active_practice_state_data["puzzle_data"] = puzzle_data
-
-                except (FileNotFoundError, pickle.UnpicklingError, Exception) as e:
-                    show_message_dialog(f"Error loading endgame puzzle:\n{e}", "Puzzle Load Error")
-                    # Return None to signal a critical failure that should loop back to mode select
-                    return None
-                # --- BUG FIX END ---
-
-                puzzle_data = active_practice_state_data.get("puzzle_data", {})
-                puzzle_state = puzzle_data.get("puzzle_state", {})
-                
-                board_init = puzzle_state.get("board", create_board()[0])
-                tiles_init = puzzle_state.get("tiles", [['' for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)])
-                blanks_init = puzzle_state.get("blanks", set())
-                scores_init = puzzle_state.get("scores", [0, 0])
-                turn = puzzle_state.get("player_to_move", 1)
-                
-                player_to_move_idx = turn - 1
-                opponent_idx = 1 - player_to_move_idx
-                racks_init = [[], []]
-                racks_init[player_to_move_idx] = puzzle_state.get("rack_player_to_move", [])
-                racks_init[opponent_idx] = puzzle_state.get("rack_opponent", [])
-                
-                # --- MODIFICATION START: Sort the racks after loading ---
-                if racks_init[0] is not None:
-                    racks_init[0].sort()
-                if racks_init[1] is not None:
-                    racks_init[1].sort()
-                # --- MODIFICATION END ---
-
-                bag_init = [] 
-                first_play = False 
-                sgs_initial_bag = []
-                
-                # Get the raw sequence for validation. Prioritize new key, fallback to old key.
-                raw_sequence_for_validation = puzzle_data.get("solution_sequence")
-                if not raw_sequence_for_validation:
-                    raw_sequence_for_validation = puzzle_data.get("solution", []) # Fallback for very old files
-                initial_game_config['endgame_solution_sequence'] = raw_sequence_for_validation
-
-                # Get the formatted strings for display, re-creating them if necessary from raw data.
-                formatted_solution_for_display = puzzle_data.get("formatted_solution", [])
-                if not formatted_solution_for_display and raw_sequence_for_validation:
-                    if not is_silent_run_for_init:
-                        print("  (Re-creating formatted solution string from raw sequence for display...)")
-                    
-                    temp_rack_p1 = puzzle_state.get("rack_player_to_move", [])
-                    temp_rack_o2 = puzzle_state.get("rack_opponent", [])
-                    sequence_str_parts = []
-                    turn_counter = 1
-                    move_idx_in_seq = 0
-                    pass_count_for_print_sim = 0
-                    
-                    while move_idx_in_seq < len(raw_sequence_for_validation):
-                        sequence_str_parts.append(f"{turn_counter}. ")
-                        p1_move_obj = raw_sequence_for_validation[move_idx_in_seq]
-                        sequence_str_parts.append(ai_engine.format_single_move_for_print(p1_move_obj, True))
-                        sequence_str_parts.append(" ")
-
-                        if hasattr(p1_move_obj, 'get'):
-                            temp_rack_p1 = p1_move_obj.get('leave', [])
-                            pass_count_for_print_sim = 0
-                        else: # PASS
-                            pass_count_for_print_sim += 1
-                        move_idx_in_seq += 1
-                        
-                        if move_idx_in_seq < len(raw_sequence_for_validation):
-                            p2_move_obj = raw_sequence_for_validation[move_idx_in_seq]
-                            sequence_str_parts.append(ai_engine.format_single_move_for_print(p2_move_obj, True))
-                            sequence_str_parts.append(" ")
-                            
-                            if hasattr(p2_move_obj, 'get'):
-                                temp_rack_o2 = p2_move_obj.get('leave', [])
-                                pass_count_for_print_sim = 0
-                            else: # PASS
-                                pass_count_for_print_sim += 1
-                        
-                        move_idx_in_seq += 1
-                        
-                        turn_counter += 1
-
-                    last_player_was_p1 = (len(raw_sequence_for_validation) % 2 != 0)
-                    end_state_str = ai_engine.format_end_state_for_print(
-                        temp_rack_p1, temp_rack_o2, last_player_was_p1, pass_count_for_print_sim
-                    )
-                    sequence_str_parts.append(end_state_str)
-                    formatted_solution_for_display = ["".join(sequence_str_parts)]
-
-                initial_game_config['endgame_practice_solution'] = formatted_solution_for_display
-
-                is_ai = active_practice_state_data.get("is_ai", [False, True])
-            elif practice_mode: # Existing practice modes
-                if not is_silent_run_for_init: print(f"Loading state from practice_state for mode: {practice_mode}...")
-                board_init = active_practice_state_data["board"]
-                tiles_init = active_practice_state_data["tiles"]
-                racks_init = active_practice_state_data["racks"]
-                blanks_init = active_practice_state_data["blanks"]
-                bag_init = active_practice_state_data["bag"]
-                scores_init = active_practice_state_data["scores"]
-                turn = active_practice_state_data["turn"]
-                first_play = active_practice_state_data["first_play"]
-                sgs_initial_bag = active_practice_state_data.get("sgs_initial_bag", bag_init[:])
-                if practice_mode == "eight_letter":
-                    practice_params = active_practice_state_data.get("practice_params", {})
-                    initial_game_config['gamify_active'] = practice_params.get('gamify_active', False)
-                    if initial_game_config['gamify_active']:
-                        gamified_params = practice_params.get('gamified_params', {})
-                        initial_game_config['gamify_min_prob'] = gamified_params.get('min', 500)
-                        initial_game_config['gamify_max_goal'] = gamified_params.get('max_goal', 3500)
-                        initial_game_config['gamify_increment'] = gamified_params.get('increment', 250)
-                        # Set the starting dynamic range
-                        initial_game_config['gamify_current_max_prob'] = initial_game_config['gamify_min_prob'] + initial_game_config['gamify_increment']
-
-                
-                if practice_mode == "bingo_bango_bongo":
-                    bbb_7l_max_prob_init = active_practice_state_data.get('bbb_7l_max_prob', 1000)
-                    bbb_8l_max_prob_init = active_practice_state_data.get('bbb_8l_max_prob', 1000)
-                if practice_mode == "eight_letter": is_ai = [False, False]
-                else:
-                    is_ai = [False, False]
-                    if game_mode == MODE_HVA: is_ai[2 - human_player] = True
-                    elif game_mode == MODE_AVA or practice_mode == "power_tiles" or practice_mode == "bingo_bango_bongo": is_ai = [True, True]
-        else: 
-            # --- REFACTORED: Call the new helper function for new game setup ---
-            (
-                bag_init, racks_init, scores_init, turn, blanks_init, first_play,
-                is_ai, sgs_initial_bag, initial_racks_at_game_start
-            ) = _setup_new_game(game_mode, human_player_sel, is_silent_run_for_init)
-            # --- END REFACTORED BLOCK ---
+        new_game_settings = {
+            'game_mode': selected_mode_result,
+            'player_names': player_names_sel,
+            'human_player': human_player_sel,
+            'practice_mode': practice_mode_sel,
+            'letter_checks': letter_checks_sel,
+            'number_checks': number_checks_sel,
+            'practice_state': practice_state_from_mode_sel,
+        }
         
-        if 'initial_racks_at_game_start' not in locals():
-            initial_racks_at_game_start = [rack_item[:] for rack_item in racks_init] 
-        game_over_at_init = False; final_scores_at_init = None
-        insights_data_for_replay = []
+        new_game_state_updates = _setup_new_game_or_practice(new_game_settings, is_silent_run_for_init)
+        
+        if new_game_state_updates is None:
+            return None # Propagate failure
+        
+        state.update(new_game_state_updates)
+        
+        state['ai_sim_num_candidates_init'] = ai_sim_num_candidates_init
+        state['ai_sim_num_opponent_sims_init'] = ai_sim_num_opponent_sims_init
+        state['ai_sim_num_post_sim_candidates_init'] = ai_sim_num_post_sim_candidates_init
+        state['bbb_7l_max_prob_init'] = bbb_7l_max_prob_init
+        state['bbb_8l_max_prob_init'] = bbb_8l_max_prob_init
 
     elif selected_mode_result is None:
         print("--- initialize_game(): Mode selection returned None. Exiting. ---"); pygame.quit(); sys.exit()
 
-    board = board_init; tiles = tiles_init; scores = scores_init; blanks = blanks_init; racks = racks_init; bag = bag_init
-    initial_racks = initial_racks_at_game_start 
 
+    state['GADDAG_STRUCTURE'] = GADDAG_STRUCTURE
+    
     if not is_silent_run_for_init:
-        print("--- initialize_game(): Initialization complete. Returning state. ---")
+        print("--- initialize_game(): Initialization complete. Returning state dictionary. ---")
 
-    return (game_mode, is_loaded_game, player_names, move_history, final_scores_at_init, \
-            replay_initial_shuffled_bag, board, tiles, scores, blanks, racks, bag,\
-            replay_mode, current_replay_turn, practice_mode, is_ai, human_player,\
-            first_play, initial_racks, number_checks, \
-            is_batch_running, total_batch_games,\
-            current_batch_game_num, batch_results, initial_game_config,\
-            GADDAG_STRUCTURE, practice_target_moves, practice_best_move, all_moves,\
-            letter_checks, turn, pass_count, exchange_count, consecutive_zero_point_turns,\
-            last_played_highlight_coords, is_solving_endgame, gaddag_loading_status,\
-            sgs_initial_bag, sgs_loaded_game_data, active_practice_state_data,\
-            game_over_at_init, \
-            ai_sim_num_candidates_init, \
-            ai_sim_num_opponent_sims_init, \
-            ai_sim_num_post_sim_candidates_init, \
-            last_scoreboard_click_time_init, \
-            last_scoreboard_click_idx_init, \
-            bbb_7l_max_prob_init, \
-            bbb_8l_max_prob_init, \
-            rack_visibility \
-            )
+    return state
 
 
 
@@ -8010,6 +8149,7 @@ def get_power_tiles_dialog(initial_letter_checks, initial_number_checks):
 
 
 
+
 def process_game_events(state, drawn_rects):
     """
     Handles the main event loop, processing user input and system events.
@@ -8120,7 +8260,7 @@ def process_game_events(state, drawn_rects):
                  not state['is_batch_running'] and not state['game_over_state']:
                 if word_definitions_loading_status == 'loading': show_message_dialog("Word definitions are still loading. Please wait.", "Loading")
                 elif word_definitions_loading_status == 'error' or not WORD_DEFINITIONS: show_message_dialog("Word definitions are unavailable. Lookup feature disabled.", "Error")
-                elif word_definitions_loading_status == 'loaded': show_word_lookup_dialog()
+                elif word_definitions_loading_status == 'loaded': show_word_lookup_dialog(state)
                 else: show_message_dialog("Word definitions not yet loaded. Please try again shortly.", "Notice")
                 continue
             else: 
@@ -13861,7 +14001,8 @@ def populate_dummy_analyzer_data(move_history_list):
 
 
 
-def main(is_initialized_from_outer_loop_param): # Renamed for clarity
+
+def main(is_initialized_from_outer_loop_param):
     global GADDAG_STRUCTURE, gaddag_loading_status, gaddag_load_thread
     global DEV_CPROFILE_ENABLED_SESSION, DEV_VISUALIZE_BATCH_ENABLED_SESSION
     global ai_sim_num_candidates_global, ai_sim_num_opponent_sims_global, ai_sim_num_post_sim_candidates_global
@@ -13878,122 +14019,104 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
     global analyzer_data_for_replay
     global insights_data_for_replay, rack_visibility
 
-    # This flag will be set to True only if a batch run was just completed.
-    # This is the key to controlling when to print stats and exit.
     just_finished_a_batch = False
 
-    if not is_initialized_from_outer_loop_param:
-        if gaddag_loading_status == 'idle':
-            print("--- Main: Loading AI data synchronously... ---")
-            _load_gaddag_background() # Call directly, not in a thread
-            _load_word_definitions_background() # Call directly
-            print("--- Main: All data loaded. ---")
+    selected_mode_result, return_data_mode_sel = mode_selection_screen()
+    
+    if selected_mode_result == "SETUP_BOARD":
+        setup_result_tuple = board_setup_screen()
+        if setup_result_tuple is None:
+            return True, False
         
-        # This is done once to pass all necessary data to the Cython module,
-        # avoiding slow Python-to-C calls during move generation.
-        if gaddag_loading_status == 'loaded' and GADDAG_STRUCTURE is not None:
-            print("--- Initializing Cython AI Engine with game constants... ---")
-            ai_engine.init_ai_engine(
-                grid_size=GRID_SIZE,
-                center_square=CENTER_SQUARE,
-                dawg=DAWG,
-                gaddag_root=GADDAG_STRUCTURE.root,
-                tile_distribution=TILE_DISTRIBUTION,
-                gaddag_separator=Gaddag.SEPARATOR,
-                leave_lookup_table=LEAVE_LOOKUP_TABLE,
-                vc_valid=VC_VALID,
-                vc_invalid_words=VC_INVALID_WORDS,
-                vc_invalid_structure_placement=VC_INVALID_STRUCTURE_PLACEMENT,
-                vc_invalid_structure_no_words=VC_INVALID_STRUCTURE_NO_WORDS,
-                vc_invalid_structure_not_center=VC_INVALID_STRUCTURE_NOT_CENTER,
-                vc_invalid_structure_not_connected=VC_INVALID_STRUCTURE_NOT_CONNECTED,
-                vc_invalid_structure_empty_play=VC_INVALID_STRUCTURE_EMPTY_PLAY,
-                light_blue=LIGHT_BLUE,
-                blue=BLUE,
-                pink=PINK,
-                red=RED,
-                letters=LETTERS
-            )
-            print("--- Cython AI Engine Initialized. ---")
-
-        # This forces the JIT compilation of the Cython functions to happen now,
-        # preventing a long lag on the first AI turn.
-        try:
-            print("--- Warming up AI Engine (one-time JIT compilation)... ---")
-            # Use a dummy board state and rack for the warm-up.
-            # The results are discarded; the goal is just to trigger compilation.
-            _ = ai_engine.generate_all_moves_gaddag(
-                ['A', 'B', 'C', 'D', 'E', 'F', 'G'],
-                [['' for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)],
-                create_board()[0],
-                set(),
-                is_silent_batch_run_param=True
-            )
-            print("--- AI Engine is ready. ---")
-        except Exception as e_warmup:
-            print(f"WARNING: AI Engine warm-up call failed: {e_warmup}")
-
-
-
-            
-        else:
-            print("--- WARNING: GADDAG not loaded. AI Engine initialization skipped. AI will not function. ---")
-        
-        selected_mode_result, return_data_mode_sel = mode_selection_screen()
-        
-        # --- MODIFICATION START: Handle SETUP_BOARD mode ---
-        if selected_mode_result == "SETUP_BOARD":
-            # Call the new setup screen function. It returns a complete, ready-to-play game state tuple, or None.
-            init_result = board_setup_screen()
-            if init_result is None:
-                # User cancelled the setup screen, so we should loop back to the mode selection screen.
-                # We do this by returning (True, False) which tells the outer loop to re-run main()
-                # without the "is_initialized" flag set.
-                return True, False
-        else:
-            # For all other modes, use the existing initialize_game function.
-            init_result = initialize_game(selected_mode_result, return_data_mode_sel, False)
-        # --- MODIFICATION END ---
-
-        if init_result is None:
-            print("--- main(): Initialization failed. Exiting. ---")
-            return False, False
-
-        (game_mode, is_loaded_game, player_names, move_history, final_scores,
-         replay_initial_shuffled_bag, board, tiles, scores, blanks, racks, bag,
-         replay_mode, current_replay_turn, practice_mode, is_ai, human_player,
-         first_play, initial_racks, number_checks,
-         is_batch_running, total_batch_games,
-         current_batch_game_num, batch_results, initial_game_config,
-         GADDAG_STRUCTURE, practice_target_moves, practice_best_move, all_moves,
-         letter_checks, turn, pass_count, exchange_count, consecutive_zero_point_turns,
-         last_played_highlight_coords, is_solving_endgame, gaddag_loading_status,
-         sgs_initial_bag, sgs_loaded_game_data, active_practice_state_data,
-         game_over_at_init,
-         ai_sim_num_candidates_global,
-         ai_sim_num_opponent_sims_global,
-         ai_sim_num_post_sim_candidates_global,
-         last_scoreboard_click_time,
-         last_scoreboard_click_idx,
-         bbb_7l_max_prob_global,
-         bbb_8l_max_prob_global,
-         rack_visibility
-         ) = init_result
-
-        if replay_mode:
-            analyzer_data_for_replay = populate_dummy_analyzer_data(move_history)
-        else:
-            analyzer_data_for_replay = []
-
-        if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
-            print("--- main(): 'if not is_initialized_from_outer_loop_param' block completed (globals set by initialize_game) ---")
+        # Manually pack the tuple from board_setup_screen into a state dictionary
+        initial_state = {
+            'game_mode': setup_result_tuple[0], 'is_loaded_game': setup_result_tuple[1],
+            'player_names': setup_result_tuple[2], 'move_history': setup_result_tuple[3],
+            'final_scores_at_init': setup_result_tuple[4], 'replay_initial_shuffled_bag': setup_result_tuple[5],
+            'board_init': setup_result_tuple[6], 'tiles_init': setup_result_tuple[7],
+            'scores_init': setup_result_tuple[8], 'blanks_init': setup_result_tuple[9],
+            'racks_init': setup_result_tuple[10], 'bag_init': setup_result_tuple[11],
+            'replay_mode': setup_result_tuple[12], 'current_replay_turn': setup_result_tuple[13],
+            'practice_mode': setup_result_tuple[14], 'is_ai': setup_result_tuple[15],
+            'human_player': setup_result_tuple[16], 'first_play': setup_result_tuple[17],
+            'initial_racks_at_game_start': setup_result_tuple[18], 'number_checks': setup_result_tuple[19],
+            'is_batch_running': setup_result_tuple[20], 'total_batch_games': setup_result_tuple[21],
+            'current_batch_game_num': setup_result_tuple[22], 'batch_results': setup_result_tuple[23],
+            'initial_game_config': setup_result_tuple[24], 'GADDAG_STRUCTURE': setup_result_tuple[25],
+            'practice_target_moves': setup_result_tuple[26], 'practice_best_move': setup_result_tuple[27],
+            'all_moves': setup_result_tuple[28], 'letter_checks': setup_result_tuple[29],
+            'turn': setup_result_tuple[30], 'pass_count': setup_result_tuple[31],
+            'exchange_count': setup_result_tuple[32], 'consecutive_zero_point_turns': setup_result_tuple[33],
+            'last_played_highlight_coords': setup_result_tuple[34], 'is_solving_endgame': setup_result_tuple[35],
+            'gaddag_loading_status': setup_result_tuple[36], 'sgs_initial_bag': setup_result_tuple[37],
+            'sgs_loaded_game_data': setup_result_tuple[38], 'active_practice_state_data': setup_result_tuple[39],
+            'game_over_at_init': setup_result_tuple[40], 'ai_sim_num_candidates_init': setup_result_tuple[41],
+            'ai_sim_num_opponent_sims_init': setup_result_tuple[42], 'ai_sim_num_post_sim_candidates_init': setup_result_tuple[43],
+            'last_scoreboard_click_time_init': setup_result_tuple[44], 'last_scoreboard_click_idx_init': setup_result_tuple[45],
+            'bbb_7l_max_prob_init': setup_result_tuple[46], 'bbb_8l_max_prob_init': setup_result_tuple[47],
+            'rack_visibility': setup_result_tuple[48]
+        }
     else:
-        if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
-            print("--- main(): 'is_initialized_from_outer_loop_param' is True (Play Again) ---")
-        if replay_mode:
-            analyzer_data_for_replay = populate_dummy_analyzer_data(move_history)
-        else:
-            analyzer_data_for_replay = []
+        initial_state = initialize_game(selected_mode_result, return_data_mode_sel, is_initialized_from_outer_loop_param)
+
+    if initial_state is None:
+        print("--- main(): Initialization failed. Exiting. ---")
+        return False, False
+    
+    game_mode = initial_state['game_mode']
+    is_loaded_game = initial_state['is_loaded_game']
+    player_names = initial_state['player_names']
+    move_history = initial_state['move_history']
+    final_scores = initial_state['final_scores_at_init']
+    replay_initial_shuffled_bag = initial_state['replay_initial_shuffled_bag']
+    board = initial_state['board_init']
+    tiles = initial_state['tiles_init']
+    scores = initial_state['scores_init']
+    blanks = initial_state['blanks_init']
+    racks = initial_state['racks_init']
+    bag = initial_state['bag_init']
+    replay_mode = initial_state['replay_mode']
+    current_replay_turn = initial_state['current_replay_turn']
+    practice_mode = initial_state['practice_mode']
+    is_ai = initial_state['is_ai']
+    human_player = initial_state['human_player']
+    first_play = initial_state['first_play']
+    initial_racks = initial_state['initial_racks_at_game_start']
+    number_checks = initial_state['number_checks']
+    is_batch_running = initial_state['is_batch_running']
+    total_batch_games = initial_state['total_batch_games']
+    current_batch_game_num = initial_state['current_batch_game_num']
+    batch_results = initial_state['batch_results']
+    initial_game_config = initial_state['initial_game_config']
+    GADDAG_STRUCTURE = initial_state['GADDAG_STRUCTURE']
+    practice_target_moves = initial_state['practice_target_moves']
+    practice_best_move = initial_state['practice_best_move']
+    all_moves = initial_state['all_moves']
+    letter_checks = initial_state['letter_checks']
+    turn = initial_state['turn']
+    pass_count = initial_state['pass_count']
+    exchange_count = initial_state['exchange_count']
+    consecutive_zero_point_turns = initial_state['consecutive_zero_point_turns']
+    last_played_highlight_coords = initial_state['last_played_highlight_coords']
+    is_solving_endgame = initial_state['is_solving_endgame']
+    gaddag_loading_status = initial_state['gaddag_loading_status']
+    sgs_initial_bag = initial_state['sgs_initial_bag']
+    sgs_loaded_game_data = initial_state['sgs_loaded_game_data']
+    active_practice_state_data = initial_state['active_practice_state_data']
+    game_over_state = initial_state['game_over_at_init']
+    ai_sim_num_candidates_global = initial_state['ai_sim_num_candidates_init']
+    ai_sim_num_opponent_sims_global = initial_state['ai_sim_num_opponent_sims_init']
+    ai_sim_num_post_sim_candidates_global = initial_state['ai_sim_num_post_sim_candidates_init']
+    last_scoreboard_click_time = initial_state['last_scoreboard_click_time_init']
+    last_scoreboard_click_idx = initial_state['last_scoreboard_click_idx_init']
+    bbb_7l_max_prob_global = initial_state['bbb_7l_max_prob_init']
+    bbb_8l_max_prob_global = initial_state['bbb_8l_max_prob_init']
+    rack_visibility = initial_state['rack_visibility']
+    
+    if replay_mode:
+        insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data)
+    else:
+        insights_data_for_replay = []
 
     session_flags = {}
     if DEV_CPROFILE_ENABLED_SESSION:
@@ -14017,9 +14140,10 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
         if is_batch_running:
             just_finished_a_batch = True
     else:
-        
         session_flags = execute_game_session(is_initialized_from_outer_loop_param)
         
+    if is_batch_running:
+        just_finished_a_batch = True
 
     if just_finished_a_batch:
         return False, False 
@@ -14032,13 +14156,13 @@ def main(is_initialized_from_outer_loop_param): # Renamed for clarity
         print(f"--- main(): execute_game_session returned: stop_batch={_module_level_batch_stop_requested_main}, play_again={_local_start_new_game_same_mode_main}, mode_select={_return_to_mode_selection_main} ---")
 
     if _return_to_mode_selection_main:
-        analyzer_data_for_replay = []
+        insights_data_for_replay = []
         return True, False
     elif _local_start_new_game_same_mode_main:
-        analyzer_data_for_replay = []
+        insights_data_for_replay = []
         return True, True
     else:
-        analyzer_data_for_replay = []
+        insights_data_for_replay = []
         return False, False
 
 
