@@ -3,13 +3,12 @@
 
 
 #python
-#Scrabble BE
+#Scrabble BF
 #Refactor
-#Still working on Only Fives bug
 
 
 
-#25JUN25
+#26JUN25
 
 
 
@@ -6403,10 +6402,7 @@ def ai_turn(state):
             if not is_silent_batch_run_param:
                 print(f"AI turn PAUSING for Bingo, Bango, Bongo.")
         
-        # --- THIS IS THE FIX ---
-        # Signal that an action (pausing) has been taken for this turn.
-        #state['human_played'] = True 
-        # --- END FIX ---
+        
 
         return state # Return early, turn does not advance
 
@@ -6492,6 +6488,10 @@ def ai_turn(state):
     state['move_history'].append(details)
     state['current_replay_turn'] = len(state['move_history'])
     
+    # Reset human_played flag after AI has taken its turn.
+    # This is crucial for both standard AI and practice mode AI.
+    state['human_played'] = False
+
     return state
 
 
@@ -6504,6 +6504,7 @@ def ai_turn(state):
 # In Scrabble Game.py
 
 # This is the full, complete function with no code omitted.
+
 def initialize_game(selected_mode_result, return_data, main_called_flag):
     """
     Initializes the game state based on the selected mode and data.
@@ -6912,6 +6913,41 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
         if active_practice_state_data:
             if practice_mode == "endgame":
                 if not is_silent_run_for_init: print(f"Loading state from endgame puzzle data...")
+                
+                # --- BUG FIX START: Handle random puzzle selection ---
+                puzzle_filename = active_practice_state_data.get("filename")
+                puzzle_filepath = None
+
+                try:
+                    home_dir = os.path.expanduser('~')
+                    puzzle_dir = os.path.join(home_dir, 'Documents', 'Endgame Practice')
+
+                    if not puzzle_filename: # Random selection
+                        if not os.path.isdir(puzzle_dir):
+                            raise FileNotFoundError("Endgame Practice directory not found.")
+                        
+                        sge_files = [f for f in os.listdir(puzzle_dir) if f.endswith('.sge')]
+                        if not sge_files:
+                            raise FileNotFoundError("No .sge puzzle files found in the directory.")
+                        
+                        puzzle_filename = random.choice(sge_files)
+                        if not is_silent_run_for_init:
+                            print(f"  Randomly selected puzzle: {puzzle_filename}")
+                    
+                    puzzle_filepath = os.path.join(puzzle_dir, puzzle_filename)
+                    if not os.path.exists(puzzle_filepath):
+                        raise FileNotFoundError(f"Specified puzzle file '{puzzle_filename}' not found.")
+
+                    with open(puzzle_filepath, 'rb') as f_puzzle:
+                        puzzle_data = pickle.load(f_puzzle)
+                    active_practice_state_data["puzzle_data"] = puzzle_data
+
+                except (FileNotFoundError, pickle.UnpicklingError, Exception) as e:
+                    show_message_dialog(f"Error loading endgame puzzle:\n{e}", "Puzzle Load Error")
+                    # Return None to signal a critical failure that should loop back to mode select
+                    return None
+                # --- BUG FIX END ---
+
                 puzzle_data = active_practice_state_data.get("puzzle_data", {})
                 puzzle_state = puzzle_data.get("puzzle_state", {})
                 
@@ -8384,14 +8420,7 @@ def _handle_mouse_down_exchange_dialog(event, state, drawn_rects):
     racks = state['racks']
     turn = state['turn']
     bag = state['bag']
-    # current_turn_pool_quality_score = state['current_turn_pool_quality_score'] # For luck factor
-    # pass_count = state['pass_count'] # Modified on successful exchange
-    # exchange_count = state['exchange_count'] # Modified on successful exchange
-    # consecutive_zero_point_turns = state['consecutive_zero_point_turns'] # Modified on successful exchange
-    # human_played = state['human_played'] # Set on successful exchange
-    # paused_for_power_tile = state['paused_for_power_tile'] # Reset on successful exchange
-    # paused_for_bingo_practice = state['paused_for_bingo_practice'] # Reset on successful exchange
-    # last_played_highlight_coords = state['last_played_highlight_coords'] # Reset on successful exchange
+    
 
     # Unpack drawn rectangles for the exchange dialog
     tile_rects_exchange = drawn_rects.get('tile_rects', []) # These are from draw_exchange_dialog
@@ -8425,7 +8454,6 @@ def _handle_mouse_down_exchange_dialog(event, state, drawn_rects):
                     
                     leave_for_history = new_rack_after_exchange[:]
                     
-                    # --- MODIFICATION START: Corrected exchange order of operations ---
                     bag.extend(tiles_to_exchange_list)
                     random.shuffle(bag)
 
@@ -8444,7 +8472,6 @@ def _handle_mouse_down_exchange_dialog(event, state, drawn_rects):
                             new_rack_after_exchange.sort()
                     
                     racks[turn-1] = new_rack_after_exchange
-                    # --- MODIFICATION END ---
                     
                     luck_factor_exchange = 0.0
                     if drawn_tiles_exchange:
@@ -8479,6 +8506,11 @@ def _handle_mouse_down_exchange_dialog(event, state, drawn_rects):
                     state['paused_for_power_tile'] = False
                     state['paused_for_bingo_practice'] = False
                     state['turn'] = 3 - turn
+                    
+                    # If in Only Fives mode, immediately trigger the AI's turn.
+                    if state.get('practice_mode') == 'only_fives' and state.get('turn') == 2:
+                        state = ai_turn(state)
+
                     state['last_played_highlight_coords'] = set()
                     state = clear_current_preview(state) # Clear any preview
                 else:
@@ -9073,7 +9105,6 @@ def _handle_mouse_down_options_dropdown(event, state, drawn_rects):
                 clicked_dropdown_item = True
                 state['dropdown_open'] = False # Close dropdown after selection
 
-                # --- MODIFIED SAVE PROMPT LOGIC ---
                 is_live_game_for_save = not replay_mode and not game_over_state and not practice_mode and not is_batch_running_local
                 
                 if selected_option in ["Main", "Quit"] and is_live_game_for_save:
@@ -9084,7 +9115,6 @@ def _handle_mouse_down_options_dropdown(event, state, drawn_rects):
                     elif save_choice == "cancel":
                         return state # Do nothing, stay in game
                     # If "no", just proceed
-                # --- END MODIFIED SAVE PROMPT LOGIC ---
 
 
                 if selected_option == "Stop Batch":
@@ -9117,6 +9147,11 @@ def _handle_mouse_down_options_dropdown(event, state, drawn_rects):
                     state['move_history'].append(pass_move_data)
                     state['current_replay_turn'] = len(state['move_history'])
                     state['turn'] = 3 - state['turn']
+                    
+                    # If in Only Fives mode, immediately trigger the AI's turn.
+                    if state.get('practice_mode') == 'only_fives' and state.get('turn') == 2:
+                        state = ai_turn(state)
+
                     state['last_played_highlight_coords'] = set()
                 elif selected_option == "Exchange":
                     if bag_count >= 7:
@@ -10454,6 +10489,11 @@ def _handle_keydown_typing_on_board(event, state):
                     
                     if not (state['practice_mode'] == "eight_letter" and state['practice_solved']): 
                         state['turn'] = 3 - state['turn']
+                    
+                    # If in Only Fives mode, immediately trigger the AI's turn.
+                    # This bypasses the normal trigger mechanism which is not set up for an AI in HvH mode.
+                    if state.get('practice_mode') == 'only_fives' and state.get('turn') == 2:
+                        state = ai_turn(state)
                 
                 state['typing'] = False
                 state['word_positions'] = []
@@ -12015,8 +12055,7 @@ def handle_ai_turn_trigger(state):
        not state['paused_for_power_tile'] and \
        not state['paused_for_bingo_practice'] and \
        state['practice_mode'] != "eight_letter" and \
-       (is_standard_ai_turn or is_ai_turn_in_practice_mode) and \
-       not state['human_played'] and \
+       ((is_standard_ai_turn and not state['human_played']) or is_ai_turn_in_practice_mode) and \
        not state['is_solving_endgame']:
         
         # Call the main AI turn processing function
