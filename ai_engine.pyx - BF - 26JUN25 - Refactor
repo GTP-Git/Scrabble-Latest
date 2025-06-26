@@ -1,9 +1,8 @@
 
 # ai_engine.pyx
 
-#ai_engine_pyx - BE - 25JUN25
+#ai_engine_pyx - BF - 26JUN25
 #Refactor
-#Still working on Only Fives bug
 
 
 
@@ -2058,41 +2057,49 @@ cpdef list run_ai_simulation(list initial_ai_moves_list, list ai_rack, int oppon
 
 
 
-# In ai_engine.pyx
 
-cdef bint _does_move_form_five_letter_word_cython(dict move, list current_tiles):
+cdef bint _does_move_form_five_letter_word_cython(dict move, list tiles):
     """
     Checks if a given move forms at least one 5-letter word.
     This is a Cython-internal helper for the "Only Fives" practice mode.
+    MODIFIED: Avoids creating a board copy by modifying the board in-place and reverting.
     """
-    cdef list newly_placed_details, temp_tiles, words_formed_details, word_detail
+    cdef list newly_placed_details, words_formed_details, word_detail
     cdef str word_str
     cdef int r, c
     cdef str letter
+    cdef bint found_five = False
 
     newly_placed_details = move.get('newly_placed', [])
     if not newly_placed_details:
         return False
 
-    # Create a temporary board state with the move applied
-    temp_tiles = [row[:] for row in current_tiles]
-    for r, c, letter in newly_placed_details:
-        if 0 <= r < GRID_SIZE_C and 0 <= c < GRID_SIZE_C:
-            temp_tiles[r][c] = letter
-        else:
-            return False # Invalid move data
+    # Temporarily apply the move to the actual board
+    try:
+        for r, c, letter in newly_placed_details:
+            if 0 <= r < GRID_SIZE_C and 0 <= c < GRID_SIZE_C:
+                # Assuming the original square was empty, which it must be for a new tile
+                tiles[r][c] = letter
+            else:
+                return False # Invalid move data
 
-    # Use the existing validation helper to find all words formed
-    # This returns (isValid, invalidWords, validWordDetails)
-    _, _, words_formed_details = _validate_and_get_words_formed(newly_placed_details, temp_tiles)
+        # Use the existing validation helper to find all words formed
+        _, _, words_formed_details = _validate_and_get_words_formed(newly_placed_details, tiles)
 
-    # Check if any of the formed words have a length of 5
-    for word_detail in words_formed_details:
-        word_str = "".join(t[2] for t in word_detail)
-        if len(word_str) == 5:
-            return True
+        # Check if any of the formed words have a length of 5
+        for word_detail in words_formed_details:
+            word_str = "".join(t[2] for t in word_detail)
+            if len(word_str) == 5:
+                found_five = True
+                break # Found one, no need to check further
+    
+    finally:
+        # ALWAYS revert the board to its original state
+        for r, c, letter in newly_placed_details:
+            if 0 <= r < GRID_SIZE_C and 0 <= c < GRID_SIZE_C:
+                tiles[r][c] = '' # Set back to empty
 
-    return False
+    return found_five
 
 
 
