@@ -1,9 +1,9 @@
+I
 
-# ai_engine.pyx
+#ai_engine.pyx
 
-#ai_engine_pyx - BI - 26JUN25
-#Added blank functionality to Lookup feature
-#Endgame practice crashing program
+#ai_engine_pyx - BI - 27JUN25
+#Lookup
 
 
 
@@ -2104,65 +2104,78 @@ cdef bint _does_move_form_five_letter_word_cython(dict move, list tiles):
 
 
 
-
-
-cdef tuple _get_endgame_action(list rack, list tiles, set blanks, list board, int current_score_diff, int pass_count):
-    """Handles the decision logic when the endgame solver is active."""
-    cdef object best_first_move_endgame
-    best_first_move_endgame, _, _ = solve_endgame(
-        rack, [], tiles, blanks, board, current_score_diff, pass_count, True
-    )
-    if best_first_move_endgame == "PASS":
-        return 'pass', None
-    elif isinstance(best_first_move_endgame, dict):
-        return 'play', best_first_move_endgame
-    else:
-        # Fallback if solver returns something unexpected
-        return 'pass', None
-
-
-
-cdef tuple _get_plaid_action(list rack, list tiles, list board, set blanks, int bag_count):
-    """Handles the decision logic for Plaid Mode (highest score only)."""
-    cdef object best_plaid_move
-    cdef list best_exchange_tiles
-    best_plaid_move = find_best_move_gaddag(rack, tiles, board, blanks, None)
-    if best_plaid_move:
-        return 'play', best_plaid_move
-    else:
-        best_exchange_tiles, _ = find_best_exchange_option(rack, tiles, blanks, bag_count, True)
-        if best_exchange_tiles:
-            return 'exchange', best_exchange_tiles
-        else:
-            return 'pass', None
-
-
-
-cdef tuple _get_practice_action(str practice_mode, list rack, list tiles, list all_moves, list letter_checks, object bbb_thresholds):
-    """Handles decision logic for all practice modes."""
-    cdef list power_tiles_on_rack, power_tile_letters, bingo_plays, word_list_to_check
-    cdef object checked_power_tiles, bingo_move
-    cdef str word_str
+cpdef tuple determine_best_action(
+    list rack, list tiles, list board, set blanks, list bag, bint first_play,
+    bint use_simulation, bint use_endgame_solver, bint is_plaid_mode,
+    int opponent_rack_len, int num_ai_candidates, int num_opponent_sims, int num_post_sim_candidates,
+    int current_score_diff_for_endgame, int pass_count,
+    str practice_mode, list letter_checks, object bbb_thresholds, # New practice mode params
+    bint is_silent_batch_run_param=False
+):
+    """
+    The consolidated AI brain, fully in Cython. It handles all modes and determines
+    the best action (play, exchange, pass, or pause for practice).
+    Returns: tuple (action_chosen_str, move_details_obj_or_metadata)
+    """
+    cdef list all_moves, best_exchange_tiles, bingo_plays, power_tiles_on_rack, power_tile_letters
+    cdef object best_raw_plus_leave_play_candidate, best_simulated_play_candidate, best_first_move_endgame, best_plaid_move
+    cdef float best_raw_plus_leave_evaluation, best_exchange_evaluation, best_simulated_play_final_score
+    cdef bint can_play, can_exchange
+    cdef int bag_count, total_tiles_on_racks, player_rack_len, i
+    cdef float raw_score, leave_value, current_move_raw_plus_leave_eval
+    cdef object move, sim_results, checked_power_tiles, bingo_move, word_list_to_check
+    cdef str word_str, tile
     cdef int word_len, current_index, most_probable_playable_bingo_index, threshold_to_use, bingo_len
     cdef dict most_probable_bingo_details
-    
+
+    # --- Initial Checks (Endgame, Plaid) that might not need full move list ---
+    bag_count = len(bag)
+    player_rack_len = len(rack)
+    total_tiles_on_racks = player_rack_len + opponent_rack_len
+
+
+
+
+    if use_endgame_solver and bag_count == 0:
+        # Unpack the tuple, ignoring the formatted lines and full sequence for this function's purpose
+        best_first_move_endgame, _, _ = solve_endgame(
+            rack, [], tiles, blanks, board, current_score_diff_for_endgame, pass_count, True
+        )
+        if best_first_move_endgame == "PASS": return 'pass', None
+        elif isinstance(best_first_move_endgame, dict): return 'play', best_first_move_endgame
+        else: return 'pass', None
+
+    if is_plaid_mode:
+        best_plaid_move = find_best_move_gaddag(rack, tiles, board, blanks, None)
+        if best_plaid_move:
+            return 'play', best_plaid_move
+        else:
+            best_exchange_tiles, _ = find_best_exchange_option(rack, tiles, blanks, bag_count, True)
+            if best_exchange_tiles: return 'exchange', best_exchange_tiles
+            else: return 'pass', None
+
+    # --- Practice Mode Checks ---
     if practice_mode == "power_tiles":
         power_tile_letters = ['J', 'Q', 'X', 'Z']
         checked_power_tiles = {power_tile_letters[i] for i in range(4) if letter_checks[i]}
         power_tiles_on_rack = [tile for tile in rack if tile in checked_power_tiles]
         if power_tiles_on_rack:
+            # Return a PAUSE action with the specific tile to practice
             return 'PAUSE', {'type': 'power_tile', 'tile': power_tiles_on_rack[0]}
 
-    elif practice_mode == "only_fives":
-        # This mode filters moves but doesn't decide an action on its own.
-        # It proceeds to standard evaluation with the filtered list.
+    # --- Generate moves ONCE for standard and BBB modes ---
+    all_moves = generate_all_moves_gaddag(rack, tiles, board, blanks, None, is_silent_batch_run_param)
+    if all_moves is None: all_moves = []
+
+    # --- NEW: Filter for "Only Fives" practice mode ---
+    if practice_mode == "only_fives":
         all_moves = [
             move for move in all_moves 
             if _does_move_form_five_letter_word_cython(move, tiles)
         ]
-        return None, all_moves # Return filtered list in the 'details' part of the tuple
+    # --- END NEW ---
 
-    elif practice_mode == "bingo_bango_bongo":
+    if practice_mode == "bingo_bango_bongo":
         bingo_plays = []
         for m in all_moves:
             if m.get('is_bingo', False):
@@ -2192,47 +2205,32 @@ cdef tuple _get_practice_action(str practice_mode, list rack, list tiles, list a
                 if most_probable_playable_bingo_index <= threshold_to_use:
                     return 'PAUSE', {'type': 'bingo_bango_bongo', 'moves': all_moves}
 
-    # If no specific practice action was taken, return None to proceed to standard logic
-    return None, all_moves
-
-
-
-cdef tuple _get_standard_action(
-    list all_moves, list rack, list tiles, set blanks, list board, list bag,
-    bint use_simulation, int opponent_rack_len, int num_ai_candidates,
-    int num_opponent_sims, int num_post_sim_candidates
-):
-    """Handles the standard AI decision logic (equity, simulation, exchange)."""
-    cdef object best_raw_plus_leave_play_candidate, best_simulated_play_candidate, sim_results
-    cdef float best_raw_plus_leave_evaluation, best_exchange_evaluation
-    cdef list best_exchange_tiles
-    cdef bint can_play, can_exchange
-    cdef int bag_count
-    cdef float raw_score, leave_value
-    cdef object move
-
+    # --- Standard AI Logic (Equity & Simulation) ---
     best_raw_plus_leave_play_candidate = None
     best_raw_plus_leave_evaluation = -1000000.0
     best_simulated_play_candidate = None
     best_exchange_tiles = []
     best_exchange_evaluation = -1000000.0
 
-    bag_count = len(bag)
     can_play = bool(all_moves)
     can_exchange = bag_count > 0
 
     if can_play:
+        # Calculate preliminary equity (score + leave) for all moves once.
         for move in all_moves:
             raw_score = move.get('score', 0)
             leave_value = evaluate_leave(move.get('leave', []), True)
             move['prelim_equity'] = raw_score + leave_value
         
+        # Sort all moves by this equity.
         all_moves.sort(key=_sort_key_prelim_equity, reverse=True)
         
+        # The best non-simulation move is now the first in the list.
         best_raw_plus_leave_play_candidate = all_moves[0]
         best_raw_plus_leave_evaluation = best_raw_plus_leave_play_candidate.get('prelim_equity', -1000000.0)
 
     if use_simulation and can_play:
+        # Pass the pre-sorted list to the simulation function.
         sim_results = run_ai_simulation(
             all_moves, rack, opponent_rack_len, tiles, blanks, board, bag,
             num_ai_candidates, num_opponent_sims, num_post_sim_candidates, True
@@ -2257,59 +2255,6 @@ cdef tuple _get_standard_action(
         return 'exchange', best_exchange_tiles
     else:
         return 'pass', None
-
-
-
-
-cpdef tuple determine_best_action(
-    list rack, list tiles, list board, set blanks, list bag, bint first_play,
-    bint use_simulation, bint use_endgame_solver, bint is_plaid_mode,
-    int opponent_rack_len, int num_ai_candidates, int num_opponent_sims, int num_post_sim_candidates,
-    int current_score_diff_for_endgame, int pass_count,
-    str practice_mode, list letter_checks, object bbb_thresholds,
-    bint is_silent_batch_run_param=False
-):
-    """
-    The consolidated AI brain, fully in Cython. It dispatches to helper functions
-    based on the game mode to determine the best action.
-    Returns: tuple (action_chosen_str, move_details_obj_or_metadata)
-    """
-    cdef list all_moves
-    cdef int bag_count
-    cdef object action_details
-    cdef str action_type
-
-    bag_count = len(bag)
-
-    # --- High-priority checks that can bypass full move generation ---
-    if use_endgame_solver and bag_count == 0:
-        return _get_endgame_action(rack, tiles, blanks, board, current_score_diff_for_endgame, pass_count)
-
-    if is_plaid_mode:
-        return _get_plaid_action(rack, tiles, board, blanks, bag_count)
-
-    # --- Generate moves once, as it's needed by practice and standard modes ---
-    all_moves = generate_all_moves_gaddag(rack, tiles, board, blanks, None, is_silent_batch_run_param)
-    if all_moves is None:
-        all_moves = []
-
-    # --- Handle practice modes ---
-    if practice_mode:
-        action_type, action_details = _get_practice_action(
-            practice_mode, rack, tiles, all_moves, letter_checks, bbb_thresholds
-        )
-        # If the practice helper returned a specific action (like PAUSE), execute it.
-        if action_type is not None:
-            return action_type, action_details
-        # Otherwise, the helper may have filtered the moves (e.g., for "only_fives").
-        # The filtered list is in action_details.
-        all_moves = action_details
-
-    # --- Default to standard AI logic ---
-    return _get_standard_action(
-        all_moves, rack, tiles, blanks, board, bag, use_simulation,
-        opponent_rack_len, num_ai_candidates, num_opponent_sims, num_post_sim_candidates
-    )
 
 
 
