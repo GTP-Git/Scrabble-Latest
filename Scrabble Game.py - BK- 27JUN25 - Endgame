@@ -3,8 +3,8 @@
 
 
 #python
-#Scrabble BJ
-#Endgame Practice mode is broke
+#Scrabble BK
+#Fixed Endgame practice mode bugs
 
 
 
@@ -7016,9 +7016,8 @@ def _setup_batch_run(game_mode_tuple, player_names_sel, human_player_sel, num_ga
 
 
 
-def _setup_practice_game(active_practice_state_data, game_mode, human_player, is_silent_run):
+def _setup_practice_game(active_practice_state_data, practice_mode, game_mode, human_player, is_silent_run):
     """Sets up the game state from practice mode data."""
-    practice_mode = active_practice_state_data.get("practice_mode")
     if not is_silent_run:
         print(f"--- _setup_practice_game: Initializing for practice mode: {practice_mode} ---")
 
@@ -7113,7 +7112,6 @@ def _setup_practice_game(active_practice_state_data, game_mode, human_player, is
         if racks_init[1] is not None: racks_init[1].sort()
 
     return (board_init, tiles_init, racks_init, blanks_init, bag_init, scores_init, turn, first_play, sgs_initial_bag, is_ai)
-
 
 
 
@@ -7218,11 +7216,11 @@ def _setup_new_game_or_practice(settings, is_silent_run):
     if active_practice_state_data:
         # Call the helper for practice modes
         practice_setup_result = _setup_practice_game(
-            active_practice_state_data, game_mode, human_player, is_silent_run
+            active_practice_state_data, practice_mode, game_mode, human_player, is_silent_run
         )
         if practice_setup_result is None:
             return None # Propagate failure
-
+        
         (
             new_game_state['board_init'], new_game_state['tiles_init'], new_game_state['racks_init'],
             new_game_state['blanks_init'], new_game_state['bag_init'], new_game_state['scores_init'],
@@ -11715,7 +11713,7 @@ def _draw_base_game_ui(screen, state, drawn_rects):
     This is a helper function for the main draw_game_screen orchestrator.
     """
     global GRID_SIZE, SQUARE_SIZE, OPTIONS_WIDTH, BUTTON_HEIGHT, BUTTON_GAP, LETTERS
-    global WHITE, BLACK, PALE_YELLOW, YELLOW, GREEN, FONT_SIZE, ui_font, button_font
+    global WHITE, BLACK, PALE_YELLOW, YELLOW, GREEN, FONT_SIZE, ui_font, button_font, BLUE
     global WINDOW_WIDTH, WINDOW_HEIGHT, DIALOG_WIDTH, DIALOG_HEIGHT
     
     # Unpack state variables needed for drawing the base UI
@@ -11829,6 +11827,23 @@ def _draw_base_game_ui(screen, state, drawn_rects):
     if sb_w < 150: sb_x = WINDOW_WIDTH - 160; sb_w = 150
     scoreboard_display_rect = pygame.Rect(sb_x, sb_y, sb_w, sb_h)
     drawn_rects['scoreboard_rect'] = scoreboard_display_rect
+    
+    #Draw Endgame Puzzle Filename
+    if practice_mode == 'endgame':
+        puzzle_filename = state.get('active_practice_state_data', {}).get('filename', 'Unknown Puzzle')
+        if puzzle_filename:
+            puzzle_font = ui_font # Use the standard UI font
+            puzzle_text_surf = puzzle_font.render(puzzle_filename, True, BLUE) # Use a distinct color
+            
+            # Position it above the scoreboard
+            puzzle_text_rect = puzzle_text_surf.get_rect(centerx=scoreboard_display_rect.centerx, bottom=scoreboard_display_rect.top - 5)
+            
+            # Ensure it doesn't go off the top of the screen
+            if puzzle_text_rect.top < 5:
+                puzzle_text_rect.top = 5
+            
+            screen.blit(puzzle_text_surf, puzzle_text_rect)
+
     returned_scroll_offset = draw_scoreboard(screen, history_to_draw_func, state['scroll_offset'], scores_to_display_func, is_ai, player_names, final_scores=final_scores_state, game_over_state=(game_over_state or is_final_turn_in_replay_func))
     state['scroll_offset'] = returned_scroll_offset
 
@@ -12518,7 +12533,7 @@ def handle_practice_restart(state):
             new_practice_state_data = {'filename': new_puzzle_filename}
             
             # Use the setup helper to load the puzzle and reset the game state
-            setup_result = _setup_practice_game("endgame", new_practice_state_data, state['game_mode'], state['human_player'], is_silent_run=not can_print_practice_info)
+            setup_result = _setup_practice_game(new_practice_state_data, "endgame", state['game_mode'], state['human_player'], is_silent_run=not can_print_practice_info)
             
             if setup_result:
                 (
