@@ -1,12 +1,17 @@
 To-Do List
 
 
+-- With the refactoring, Mode Selection screen shows before it's ready to be used.
+Start up should show a landing screen, maybe with Scrabble quotes running across it, so that the user
+knows to wait for the game to be ready.
+
+
 
 -- Add a Scenario Batch feature where I can set up a board and then batch from there.
 for example, Josh Sokol likes to play bingos on the first move that take an ess and place them
 one square away from the TWS. I want to set that up and then batch through those scenarios to see what the data says.
 
--- I should be able to load game from GCG or Woogles format. Seriously.
+-- I should be able to load game from GCG or Woogles format. Seriously. amirite??
 
 
 -- When an Endgame Puzzle is solved, it should be removed from the Endgame Practice folder and placed in the Solved Endgames folder
@@ -47,8 +52,6 @@ dynamics, like Openness score (35%).
 -- Wouldn't ai_turn and def handle_ai_turn_trigger be faster if in Cython?
 
 -- Replay/Loaded game should start with both initial racks shown...now it shows the racks at the end of the game when Replay is first started.
-
--- Start up should show a landing screen, maybe with Scrabble quotes running across it?
 
 -- Allow what-if scenarios, where the main_branch_game_state is saved, but players can make different plays, choose different racks, explore endgames, etc., Have a reset button that backs the main_branch_game_state to continue play. 
 
@@ -293,6 +296,23 @@ Endgame Practice mode is chosen, load one of the already solved endgames for the
 -- User should be able to select which endgame they want for Endgame Practice Mode
 
 -- Racks should be auto-alphabetized in Batch Endgame mode
+
+-- Refactor Lookup word function
+
+-- Make Lookup dialog movable
+
+-- Add pattern matching for Lookup feature
+
+-- Add blank support for Lookup feature
+
+-- Bring back default 2-5 on Power Tiles menu
+
+-- Changed Remaining Tiles to Tiles In Bag.
+
+
+
+
+
 
 
 
