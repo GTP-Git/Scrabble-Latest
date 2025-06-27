@@ -89,16 +89,24 @@ CENTER_SQUARE = (7, 7)
 OPTIONS_WIDTH = 100
 OPTIONS_HEIGHT = 30
 DROPDOWN_HEIGHT = 90
-OPTIONS_Y = BOARD_SIZE + 60  # Adjusted from +40 to align with shifted UI
-DOUBLE_CLICK_TIME = 300
-SECOND_CLICK_TIME = 500  # Time window for second click
+OPTIONS_Y = BOARD_SIZE + 60
+DOUBLE_CLICK_TIME = 100
+SECOND_CLICK_TIME = 500
 ALL_WORDS_DIALOG_WIDTH = 750
 ALL_WORDS_DIALOG_HEIGHT = 600
 SCROLL_SPEED = 20
 
 STATS_LABEL_X_OFFSET = 10
-STATS_P1_VAL_X_OFFSET = 160 # Increased from 120
-STATS_P2_VAL_X_OFFSET = 270 # Increased from 230
+STATS_P1_VAL_X_OFFSET = 160
+STATS_P2_VAL_X_OFFSET = 270
+
+MODE_HVH = "Human vs Human"
+MODE_HVA = "Human vs AI"
+MODE_AVA = "AI vs AI"
+
+REPLAY_BUTTON_WIDTH = 50
+REPLAY_BUTTON_HEIGHT = 30
+REPLAY_BUTTON_GAP = 10
 
 
 LEAVE_LOOKUP_TABLE = {}
@@ -122,7 +130,7 @@ VC_INVALID_STRUCTURE_EMPTY_PLAY = "INVALID_STRUCTURE_EMPTY_PLAY"
 
 
 # --- Simulation Defaults ---
-DEFAULT_PLY_DEPTH = 2 # Not currently used by run_ai_simulation, but good practice
+DEFAULT_PLY_DEPTH = 2
 DEFAULT_AI_CANDIDATES = 10
 DEFAULT_OPPONENT_SIMULATIONS = 50
 DEFAULT_POST_SIM_CANDIDATES = 10
@@ -130,7 +138,7 @@ DEFAULT_POST_SIM_CANDIDATES = 10
 # Dialog dimensions for game over dialog
 DIALOG_WIDTH = 480
 DIALOG_HEIGHT = 250
-LETTERS = "ABCDEFGHIJKLMNO"  # For column labels
+LETTERS = "ABCDEFGHIJKLMNO"
 
 # Set fixed window size for consistency across environments
 WINDOW_WIDTH = 1400
@@ -141,7 +149,7 @@ WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 RED = (255, 100, 100)
 PINK = (255, 182, 193)
-BLUE = (0, 102, 204)  # Darkened from (173, 216, 230) for TL
+BLUE = (0, 102, 204)
 LIGHT_BLUE = (135, 206, 250)
 HIGHLIGHT_BLUE = (191, 238, 255)
 YELLOW = (255, 255, 153)
@@ -177,7 +185,7 @@ TILE_DISTRIBUTION = {
     'S': (4, 1), 'T': (6, 1), 'U': (4, 1), 'V': (2, 4), 'W': (2, 4), 'X': (1, 8),
     'Y': (2, 4), 'Z': (1, 10), ' ': (2, 0)
 }
-# Global bag - initialized properly in main() or practice setup
+
 bag = []
 
 POWER_TILES = {'J', 'Q', 'X', 'Z'}
@@ -192,7 +200,7 @@ turn = 1
 first_play = True
 game_mode = None
 is_ai = None
-practice_mode = None # Added to track practice modes like "eight_letter", "power_tiles"
+practice_mode = None
 move_history = []
 replay_mode = False
 current_replay_turn = 0
@@ -200,16 +208,16 @@ last_word = ""
 last_score = 0
 last_start = None
 last_direction = None
-gaddag_loading_status = 'idle' # Tracks status: 'idle', 'loading', 'loaded', 'error'
-gaddag_load_thread = None # Holds the thread object
+gaddag_loading_status = 'idle'
+gaddag_load_thread = None
 insights_data_for_replay = []
 
-is_solving_endgame = False # Flag to indicate AI is in endgame calculation
-endgame_start_time = 0 # To track duration if needed
+is_solving_endgame = False
+endgame_start_time = 0
 scroll_offset = 0
 
 WORD_DEFINITIONS = {}
-word_definitions_loading_status = 'idle' # 'idle', 'loading', 'loaded', 'error'
+word_definitions_loading_status = 'idle'
 word_definitions_load_thread = None
 
 
@@ -225,7 +233,7 @@ def _load_word_definitions_background():
         print(f"Background Thread: Attempting to load Word Definitions from {definitions_file}...")
         load_start_time = time.time()
         temp_definitions = {}
-        with open(definitions_file, "r", encoding="utf-8") as f: # Added encoding
+        with open(definitions_file, "r", encoding="utf-8") as f:
             for line_number, line in enumerate(f):
                 parts = line.strip().split("\t", 1) # Split only on the first tab
                 if len(parts) == 2:
@@ -254,7 +262,7 @@ def _load_word_definitions_background():
 
 
 # Load the DAWG with words from "All Words 2023.txt"
-DAWG = ai_engine.Dawg() # Use the Cythonized Dawg class
+DAWG = ai_engine.Dawg()
 try:
     # Ensure the path is correct or adjust as needed
     with open("All Words 2023.txt", "r") as f:
@@ -267,13 +275,11 @@ try:
         print("DAWG loaded successfully.")
 
 except FileNotFoundError:
-    # Critical error, always print
     print("Error: 'All Words 2023.txt' not found. Word validation will not work.")
 
 
 
 
-# --- Load Word Lists by Length for Probability ---
 WORD_LISTS_BY_LENGTH = {}
 try:
     print("Loading word lists by length for probability lookup...")
@@ -292,7 +298,6 @@ except FileNotFoundError:
     print("Warning: All Words 2023.txt not found. Word probability lookup will be disabled.")
 except Exception as e:
     print(f"Error loading word lists by length: {e}")
-# --- End Load ---
 
 
 
@@ -318,13 +323,11 @@ def _load_gaddag_background():
         print(f"\n--- BACKGROUND LOAD FATAL ERROR: {e} ---")
         GADDAG_STRUCTURE = None
         gaddag_loading_status = 'error'
-        # Optionally: sys.exit() or raise an exception if this is critical even in background
 
 
 
 
-# --- Load Leave Lookup Table ---
-LEAVE_LOOKUP_TABLE = {} # Global dictionary
+LEAVE_LOOKUP_TABLE = {}
 try:
     print("Loading leave evaluation table...")
     load_start = time.time()
@@ -333,16 +336,13 @@ try:
     print(f"Leave table loaded with {len(LEAVE_LOOKUP_TABLE)} entries in {time.time() - load_start:.2f} seconds.")
 except FileNotFoundError:
     print("Warning: leave_table.pkl not found. Leave evaluation might be slower or inaccurate.")
-    # Optionally, add fallback to load from CSV here if desired
 except Exception as e:
     print(f"Error loading leave_table.pkl: {e}")
-# --- End Load ---
 
 
 
 
 
-# --- Load Word Lists for Practice Modes ---
 seven_letter_words = []
 eight_letter_words = []
 try:
@@ -366,7 +366,6 @@ except FileNotFoundError:
     print("Warning: 8-letter-list.txt not found. BBB practice mode may not function correctly.")
 
 
-# --- Mode Selection Constants ---
 
 
 
@@ -375,30 +374,24 @@ def draw_loading_indicator(scoreboard_x, scoreboard_y, scoreboard_width):
     Draws a message indicating that the GADDAG is loading,
     positioned above the scoreboard area.
     """
-    global gaddag_loading_status, screen, ui_font, RED # Ensure necessary globals are accessible
+    global gaddag_loading_status, screen, ui_font, RED
 
     if gaddag_loading_status == 'loading':
         loading_text = "Loading AI Data..."
-        loading_surf = ui_font.render(loading_text, True, RED) # Use UI font, red color
+        loading_surf = ui_font.render(loading_text, True, RED) #
 
-        # Calculate position centered above the scoreboard
         target_center_x = scoreboard_x + scoreboard_width // 2
-        # Position the BOTTOM of the text slightly above the scoreboard's top
-        target_bottom_y = scoreboard_y - 10 # 10 pixels padding above scoreboard
+        target_bottom_y = scoreboard_y - 10
 
-        # Ensure the text doesn't go off the top edge (e.g., y=5 minimum)
         target_top_y = max(5, target_bottom_y - loading_surf.get_height())
 
-        # Use the calculated top position and center x
         loading_rect = loading_surf.get_rect(centerx=target_center_x, top=target_top_y)
 
-        # Optional: Add a semi-transparent background for better visibility
-        bg_rect = loading_rect.inflate(20, 10) # Add padding
-        bg_surf = pygame.Surface(bg_rect.size, pygame.SRCALPHA) # Surface with alpha
-        bg_surf.fill((200, 200, 200, 180)) # Semi-transparent gray
+        bg_rect = loading_rect.inflate(20, 10)
+        bg_surf = pygame.Surface(bg_rect.size, pygame.SRCALPHA)
+        bg_surf.fill((200, 200, 200, 180))
         screen.blit(bg_surf, bg_rect)
 
-        # Draw the text on top
         screen.blit(loading_surf, loading_rect)
 
 
@@ -575,7 +568,6 @@ class WordLookupDialog:
         anagrams_by_length = {}
         total_found = 0
 
-        # Iterate through all possible word lengths, from 2 up to the total number of tiles (letters + blanks)
         for length in range(2, len(letters_to_anagram) + 1):
             word_list = WORD_LISTS_BY_LENGTH.get(length, [])
             if not word_list:
@@ -585,11 +577,9 @@ class WordLookupDialog:
             for word in word_list:
                 word_counts = Counter(word)
                 
-                # Check if the letters on our "rack" can form this word, using blanks if necessary.
-                # We start by seeing what letters the word needs that we don't have on our rack.
+                
                 letters_needed = word_counts - rack_counts
                 
-                # The number of letters we need but don't have must be less than or equal to the number of blanks we have.
                 if sum(letters_needed.values()) <= num_blanks:
                     found_for_this_length.append(word)
             
@@ -598,7 +588,6 @@ class WordLookupDialog:
                 anagrams_by_length[length] = found_for_this_length
                 total_found += len(found_for_this_length)
 
-        # --- Common display logic ---
         if total_found > 0:
             self.output_lines.append(f"Total words found: ({total_found})")
             self.output_lines.append("")
@@ -840,7 +829,6 @@ def show_save_game_prompt_dialog():
     no_button_rect = pygame.Rect(dialog_x + 30 + BUTTON_WIDTH + BUTTON_GAP, dialog_y + dialog_height - BUTTON_HEIGHT - 20, BUTTON_WIDTH, BUTTON_HEIGHT)
     cancel_button_rect = pygame.Rect(dialog_x + 30 + 2 * (BUTTON_WIDTH + BUTTON_GAP), dialog_y + dialog_height - BUTTON_HEIGHT - 20, BUTTON_WIDTH, BUTTON_HEIGHT)
     
-    # Adjust button positions if they overflow
     total_buttons_width = 3 * BUTTON_WIDTH + 2 * BUTTON_GAP
     if total_buttons_width > dialog_width - 60 : # 30px padding on each side
         # Simple horizontal stack if too wide, or could do 2 rows
@@ -878,21 +866,18 @@ def show_save_game_prompt_dialog():
         prompt_rect = prompt_surf.get_rect(center=(dialog_x + dialog_width // 2, dialog_y + 40))
         screen.blit(prompt_surf, prompt_rect)
 
-        # Yes Button
         hover_yes = yes_button_rect.collidepoint(pygame.mouse.get_pos())
         color_yes = BUTTON_HOVER if hover_yes else BUTTON_COLOR
         pygame.draw.rect(screen, color_yes, yes_button_rect)
         yes_text_surf = button_font.render("Yes (Y)", True, BLACK)
         screen.blit(yes_text_surf, yes_text_surf.get_rect(center=yes_button_rect.center))
 
-        # No Button
         hover_no = no_button_rect.collidepoint(pygame.mouse.get_pos())
         color_no = BUTTON_HOVER if hover_no else BUTTON_COLOR
         pygame.draw.rect(screen, color_no, no_button_rect)
         no_text_surf = button_font.render("No (N)", True, BLACK)
         screen.blit(no_text_surf, no_text_surf.get_rect(center=no_button_rect.center))
         
-        # Cancel Button
         hover_cancel = cancel_button_rect.collidepoint(pygame.mouse.get_pos())
         color_cancel = BUTTON_HOVER if hover_cancel else BUTTON_COLOR
         pygame.draw.rect(screen, color_cancel, cancel_button_rect)
@@ -901,7 +886,7 @@ def show_save_game_prompt_dialog():
 
         pygame.display.flip()
         pygame.time.Clock().tick(30)
-    return "cancel" # Should be unreachable
+    return "cancel"
 
 
 
@@ -925,16 +910,15 @@ def trigger_save_game_in_progress(current_game_state_dict):
         print("--- Triggering Save Game In Progress ---")
 
     try:
-        # Essential game state components
         game_data_to_save = {
-            'sgs_version': "1.1", # New version to indicate in-progress save capability
+            'sgs_version': "1.1",
             'player_names': current_game_state_dict.get('player_names', ["P1", "P2"]),
             'sgs_initial_bag': current_game_state_dict.get('sgs_initial_bag', []),
             'initial_racks_sgs': current_game_state_dict.get('initial_racks', [[], []]),
             'full_move_history': current_game_state_dict.get('move_history', []),
             
             'current_game_state_snapshot': {
-                'board_layout_multipliers': current_game_state_dict.get('board'), # The multiplier board
+                'board_layout_multipliers': current_game_state_dict.get('board'),
                 'tiles_on_board': current_game_state_dict.get('tiles'),
                 'blanks_on_board': current_game_state_dict.get('blanks'),
                 'current_racks': current_game_state_dict.get('racks'),
@@ -968,7 +952,6 @@ def trigger_save_game_in_progress(current_game_state_dict):
                 'bbb_8l_max_prob': current_game_state_dict.get('bbb_8l_max_prob_global', 1000)
             }
         }
-        # Remove final_scores_adjusted if it somehow sneaked in, to mark as in-progress
         if 'final_scores_adjusted' in game_data_to_save:
             del game_data_to_save['final_scores_adjusted']
 
@@ -988,7 +971,6 @@ def trigger_save_game_in_progress(current_game_state_dict):
             seq_num = max_existing_num + 1
         except OSError as e_os_err:
             print(f"Error listing directory for SGS save sequence number: {e_os_err}")
-            # Fallback, seq_num remains 1
         
         save_filename_sgs = f"{date_str}-{time_str}-SGSGAME-{seq_num}.sgs"
         
@@ -1039,7 +1021,7 @@ def show_allow_invalid_word_dialog(invalid_words_list):
     max_word_line_width = base_dialog_width - padding * 2 - 10 # for the words list
     temp_line = ""
     if words_str: # Only wrap if there are words
-        for word_item in words_str.split(', '): # Split by comma-space to handle individual words better
+        for word_item in words_str.split(', '):
             if not temp_line:
                 temp_line = word_item
             elif ui_font.size(temp_line + ", " + word_item)[0] < max_word_line_width:
@@ -1050,10 +1032,10 @@ def show_allow_invalid_word_dialog(invalid_words_list):
         if temp_line:
             wrapped_words_lines.append(temp_line)
     
-    text_height = (ui_font.get_linesize() + # For intro
+    text_height = (ui_font.get_linesize() +
                    (len(wrapped_words_lines) * ui_font.get_linesize() + max(0, len(wrapped_words_lines) -1) * line_spacing) + # For words
-                   ui_font.get_linesize() + # For query
-                   line_spacing * 2) # Extra spacing around words list
+                   ui_font.get_linesize() +
+                   line_spacing * 2)
 
     title_height_val = dialog_font.get_linesize()
     required_height = title_height_val + text_height + button_area_height + padding * 3
@@ -1087,9 +1069,9 @@ def show_allow_invalid_word_dialog(invalid_words_list):
                     return False
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
-                    return False # Default to Cancel on Enter
+                    return False
                 elif event.key == pygame.K_ESCAPE:
-                    return False # Cancel on Escape
+                    return False
 
         # --- Drawing ---
         pygame.draw.rect(screen, DIALOG_COLOR, (dialog_x, dialog_y, dialog_width, dialog_height))
@@ -1105,11 +1087,11 @@ def show_allow_invalid_word_dialog(invalid_words_list):
         y_offset += intro_surf.get_height() + line_spacing
 
         for line in wrapped_words_lines:
-            word_line_surf = ui_font.render(line, True, RED) # Show invalid words in red
+            word_line_surf = ui_font.render(line, True, RED)
             screen.blit(word_line_surf, (dialog_x + padding + 10, y_offset)) # Indent word list slightly
             y_offset += word_line_surf.get_height() + line_spacing
         
-        y_offset += line_spacing # Extra space before query
+        y_offset += line_spacing
 
         query_surf = ui_font.render(message_query, True, BLACK)
         screen.blit(query_surf, (dialog_x + padding, y_offset))
@@ -1130,7 +1112,7 @@ def show_allow_invalid_word_dialog(invalid_words_list):
 
         pygame.display.flip()
         pygame.time.Clock().tick(30)
-    return False # Should be unreachable if loop exits via return
+    return False
 
 
 
@@ -1388,9 +1370,6 @@ def load_game_sgs(filename, is_silent_batch_run_param=False): # Added is_silent_
 
 
 
-# In Scrabble Game.py
-
-# This is the full, complete function with no code omitted.
 
 def save_endgame_puzzle(puzzle_state, formatted_solution_lines, raw_solution_sequence, batch_prefix, game_num):
     """
@@ -1603,7 +1582,6 @@ def show_save_success_dialog(message, title, filename_to_copy):
 
 
 
-# In Scrabble Game.py
 
 def get_sgs_replay_state(sgs_full_data, target_turn_idx_from_main, is_silent_batch_run_param=False, get_scores_only=False):
     """
@@ -1726,7 +1704,6 @@ def get_sgs_replay_state(sgs_full_data, target_turn_idx_from_main, is_silent_bat
 
 
 
-# New helper function to create a standard Scrabble bag
 def create_standard_bag():
     """Creates and returns a standard Scrabble tile bag list."""
     bag = [letter for letter, (count, _) in TILE_DISTRIBUTION.items() for _ in range(count)]
@@ -1743,20 +1720,6 @@ def create_standard_bag():
 
 
 
-# --- Mode Selection Constants ---
-MODE_HVH = "Human vs Human"
-MODE_HVA = "Human vs AI"
-MODE_AVA = "AI vs AI"
-
-# --- Replay Button Positions ---
-#REPLAY_BUTTON_Y = OPTIONS_Y + OPTIONS_HEIGHT + 10
-REPLAY_BUTTON_WIDTH = 50
-REPLAY_BUTTON_HEIGHT = 30
-REPLAY_BUTTON_GAP = 10
-#replay_start_rect = pygame.Rect(10, REPLAY_BUTTON_Y, REPLAY_BUTTON_WIDTH, REPLAY_BUTTON_HEIGHT)
-#replay_prev_rect = pygame.Rect(10 + REPLAY_BUTTON_WIDTH + REPLAY_BUTTON_GAP, REPLAY_BUTTON_Y, REPLAY_BUTTON_WIDTH, REPLAY_BUTTON_HEIGHT)
-#replay_next_rect = pygame.Rect(10 + 2 * (REPLAY_BUTTON_WIDTH + REPLAY_BUTTON_GAP), REPLAY_BUTTON_Y, REPLAY_BUTTON_WIDTH, REPLAY_BUTTON_HEIGHT)
-#replay_end_rect = pygame.Rect(10 + 3 * (REPLAY_BUTTON_WIDTH + REPLAY_BUTTON_GAP), REPLAY_BUTTON_Y, REPLAY_BUTTON_WIDTH, REPLAY_BUTTON_HEIGHT)
 
 
 
@@ -1765,7 +1728,7 @@ REPLAY_BUTTON_GAP = 10
 
 
 
-# --- Board Creation ---
+
 def create_board():
     """Initialize the Scrabble board with special squares and labels."""
     board = [[WHITE for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
