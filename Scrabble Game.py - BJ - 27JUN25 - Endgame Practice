@@ -3,8 +3,8 @@
 
 
 #python
-#Scrabble BI
-#Lookup
+#Scrabble BJ
+#Endgame Practice mode is broke
 
 
 
@@ -2016,14 +2016,15 @@ def draw_rack(player, rack, scores, turn, player_names, dragged_tile=None, drag_
     rand_text = button_font.render("Randomize", True, BLACK); rand_rect = rand_text.get_rect(center=rand_button_rect.center); screen.blit(rand_text, rand_rect)
 
     player_idx = player - 1
-    if 0 <= player_idx < len(player_names) and 0 <= player_idx < len(display_scores):
+    if player_names is not None and display_scores is not None and \
+       0 <= player_idx < len(player_names) and 0 <= player_idx < len(display_scores):
         player_name_display = player_names[player_idx] if player_names[player_idx] else f"Player {player}"
         score_text_content = f"{player_name_display} Score: {int(display_scores[player_idx])}"
         score_text_surface = ui_font.render(score_text_content, True, BLACK)
         score_text_y_position = rack_y - 24 
         screen.blit(score_text_surface, (start_x, score_text_y_position))
     else: 
-        print(f"Warning: Invalid player index {player} for score display.")
+        print(f"Warning: Invalid player index {player} or missing score/name data for score display.")
         
     return alpha_button_rect, rand_button_rect, eye_icon_rect
 
@@ -4701,7 +4702,7 @@ def get_words_played(word_positions, tiles):
 
     
 
-def draw_remaining_tiles(unseen_tiles_dict, turn):
+def draw_remaining_tiles(unseen_tiles_dict, turn, bag_count):
     """Draw the list of remaining tiles by repeating letters."""
     global practice_mode
     if practice_mode == "eight_letter": return # Don't draw remaining tiles in this mode
@@ -4724,7 +4725,6 @@ def draw_remaining_tiles(unseen_tiles_dict, turn):
     last_drawn_y = 40 
     last_drawn_col_x = remaining_x 
 
-    # --- MODIFICATION START: Pre-render surfaces to optimize blitting ---
     surfaces_to_blit = []
     for letter in sorted_letters:
         count = unseen_tiles_dict.get(letter, 0)
@@ -4748,17 +4748,15 @@ def draw_remaining_tiles(unseen_tiles_dict, turn):
     # Now blit all at once
     for surf, pos in surfaces_to_blit:
         screen.blit(surf, pos)
-    # --- MODIFICATION END ---
 
     summary_y_start = last_drawn_y + 20 + 5
     summary_y_start = min(summary_y_start, max_y + 40) 
 
-    total_tiles = sum(unseen_tiles_dict.values())
     vowels = sum(unseen_tiles_dict.get(letter, 0) for letter in 'AEIOU')
     consonants = sum(unseen_tiles_dict.get(letter, 0) for letter in unseen_tiles_dict if letter.isalpha() and letter not in 'AEIOU ')
     blanks_rem = unseen_tiles_dict.get(' ', 0)
     
-    text1 = tile_count_font.render(f"Tiles remaining: {total_tiles}", True, BLACK)
+    text1 = tile_count_font.render(f"Tiles In Bag: {bag_count}", True, BLACK)
     text2 = tile_count_font.render(f"V: {vowels}  C: {consonants}  B: {blanks_rem}", True, BLACK)
 
     summary_x = remaining_x
@@ -7018,8 +7016,9 @@ def _setup_batch_run(game_mode_tuple, player_names_sel, human_player_sel, num_ga
 
 
 
-def _setup_practice_game(practice_mode, active_practice_state_data, game_mode, human_player, is_silent_run):
+def _setup_practice_game(active_practice_state_data, game_mode, human_player, is_silent_run):
     """Sets up the game state from practice mode data."""
+    practice_mode = active_practice_state_data.get("practice_mode")
     if not is_silent_run:
         print(f"--- _setup_practice_game: Initializing for practice mode: {practice_mode} ---")
 
@@ -7053,6 +7052,7 @@ def _setup_practice_game(practice_mode, active_practice_state_data, game_mode, h
                     raise FileNotFoundError("No .sge puzzle files found in the directory.")
                 
                 puzzle_filename = random.choice(sge_files)
+                active_practice_state_data['filename'] = puzzle_filename # THIS IS THE FIX
                 if not is_silent_run:
                     print(f"  Randomly selected puzzle: {puzzle_filename}")
             
@@ -7113,6 +7113,8 @@ def _setup_practice_game(practice_mode, active_practice_state_data, game_mode, h
         if racks_init[1] is not None: racks_init[1].sort()
 
     return (board_init, tiles_init, racks_init, blanks_init, bag_init, scores_init, turn, first_play, sgs_initial_bag, is_ai)
+
+
 
 
 
@@ -7216,7 +7218,7 @@ def _setup_new_game_or_practice(settings, is_silent_run):
     if active_practice_state_data:
         # Call the helper for practice modes
         practice_setup_result = _setup_practice_game(
-            practice_mode, active_practice_state_data, game_mode, human_player, is_silent_run
+            active_practice_state_data, game_mode, human_player, is_silent_run
         )
         if practice_setup_result is None:
             return None # Propagate failure
@@ -8108,7 +8110,7 @@ def get_power_tiles_dialog(initial_letter_checks, initial_number_checks):
     dialog_y = (WINDOW_HEIGHT - dialog_height) // 2
 
     letter_checks = list(initial_letter_checks)
-    number_checks = list(initial_number_checks)
+    number_checks = [True, True, True, True, False, False]
     
     power_tile_labels = ['J', 'Q', 'X', 'Z']
     length_labels = ['2s', '3s', '4s', '5s', '6s', '7s+']
@@ -11817,7 +11819,7 @@ def _draw_base_game_ui(screen, state, drawn_rects):
     drawn_rects['p2_eye_rect'] = p2_eye_rect
 
     if practice_mode != "eight_letter":
-        draw_remaining_tiles(unseen_tiles_for_display_dict_func, turn_to_display_for_ui_func)
+        draw_remaining_tiles(unseen_tiles_for_display_dict_func, turn_to_display_for_ui_func, bag_count_live)
 
     sb_x = BOARD_SIZE + 275
     sb_y = 40
@@ -12504,14 +12506,65 @@ def handle_practice_restart(state):
     restart_practice_mode_flag = state['restart_practice_mode']
     current_practice_mode = state.get('practice_mode')
 
-    if restart_practice_mode_flag and current_practice_mode == "eight_letter":
+    if restart_practice_mode_flag and current_practice_mode == "endgame":
+        if can_print_practice_info:
+            print("--- Restarting Endgame Practice ---")
+        
+        # Ask user for the next puzzle
+        new_puzzle_filename = show_endgame_puzzle_selection_dialog()
+        
+        if new_puzzle_filename is not None: # User selected a puzzle or random
+            # Create a new practice state dictionary for the setup function
+            new_practice_state_data = {'filename': new_puzzle_filename}
+            
+            # Use the setup helper to load the puzzle and reset the game state
+            setup_result = _setup_practice_game("endgame", new_practice_state_data, state['game_mode'], state['human_player'], is_silent_run=not can_print_practice_info)
+            
+            if setup_result:
+                (
+                    state['board'], state['tiles'], state['racks'],
+                    state['blanks'], state['bag'], state['scores'],
+                    state['turn'], state['first_play'], state['sgs_initial_bag'],
+                    state['is_ai']
+                ) = setup_result
+                
+                # Store the new active practice data
+                state['active_practice_state_data'] = new_practice_state_data
+                
+                # Reset all other relevant per-game variables
+                ui_resets = reset_per_game_variables()
+                for key, value in ui_resets.items():
+                    # Preserve essential settings from the original state
+                    if key not in ['game_mode', 'is_ai', 'practice_mode', 'active_practice_state_data',
+                                   'board', 'tiles', 'scores', 'blanks', 'bag', 'racks',
+                                   'first_play', 'turn', 'sgs_initial_bag']:
+                        state[key] = value
+                
+                # Explicitly reset history and turn tracking
+                state['move_history'] = []
+                state['previous_turn'] = 0
+                state['initial_game_config']['endgame_solution_sequence'] = new_practice_state_data.get("puzzle_data", {}).get("solution_sequence", [])
+                state['initial_game_config']['endgame_practice_solution'] = new_practice_state_data.get("puzzle_data", {}).get("formatted_solution", [])
+
+                if can_print_practice_info:
+                    print("--- Endgame Practice Restarted Successfully ---")
+            else:
+                print("--- Error restarting Endgame Practice. Returning to menu. ---")
+                state['running_inner'] = False
+                state['return_to_mode_selection'] = True
+        else: # User cancelled the puzzle selection dialog
+            if can_print_practice_info:
+                print("--- Endgame Practice restart cancelled by user. ---")
+
+        state['restart_practice_mode'] = False # Reset the flag
+
+    elif restart_practice_mode_flag and current_practice_mode == "eight_letter":
         gamify_active = state.get('initial_game_config', {}).get('gamify_active', False)
 
         if gamify_active:
             if can_print_practice_info:
                 print("--- Restarting Gamified 8-Letter Bingo Practice ---")
             
-            # --- MODIFICATION START: Adjust parameters based on outcome ---
             outcome = state.get('gamify_puzzle_outcome', 'failure')
             min_p = state['initial_game_config'].get('gamify_min_prob', 500)
             current_max_p = state['initial_game_config'].get('gamify_current_max_prob', 750)
@@ -12541,7 +12594,6 @@ def handle_practice_restart(state):
                     new_max_p = min_p + increment
             
             state['initial_game_config']['gamify_current_max_prob'] = new_max_p
-            # --- MODIFICATION END ---
 
             board_setup, tiles_setup, player_rack, _, _, _ = _setup_next_8lb_puzzle(min_p, new_max_p)
             
@@ -13564,9 +13616,39 @@ def handle_endgame_practice_flow(state):
                 state['move_history'].append(pass_move_data)
                 state['turn'] = 3 - ai_player_turn_pass # Advance turn
         
-        # Reset flags
-        state['paused_for_endgame_feedback'] = False
-        state['human_played'] = False
+        # Check if the puzzle is now complete
+        if len(state.get('move_history', [])) >= len(solution_sequence):
+            # Puzzle is complete. Move the file.
+            puzzle_filename = state.get('active_practice_state_data', {}).get('filename')
+            if puzzle_filename:
+                try:
+                    home_dir = os.path.expanduser('~')
+                    source_dir = os.path.join(home_dir, 'Documents', 'Endgame Practice')
+                    dest_dir = os.path.join(home_dir, 'Documents', 'Solved Endgames')
+                    
+                    source_path = os.path.join(source_dir, puzzle_filename)
+                    dest_path = os.path.join(dest_dir, puzzle_filename)
+
+                    if os.path.exists(source_path):
+                        os.makedirs(dest_dir, exist_ok=True)
+                        os.rename(source_path, dest_path)
+                        print(f"--- Puzzle Solved! Moved '{puzzle_filename}' to Solved Endgames folder. ---")
+                    else:
+                        print(f"Warning: Could not find puzzle file to move: {source_path}")
+
+                except Exception as e:
+                    print(f"Error moving solved puzzle file: {e}")
+            
+            # Now trigger the end dialog
+            state['showing_practice_end_dialog'] = True
+            state['practice_end_message'] = "Endgame Puzzle Solved!"
+            state['game_over_state'] = True # Mark game as over to stop further turns
+            state['practice_solved'] = True
+            state['paused_for_endgame_feedback'] = False # Ensure this is reset
+        else:
+            # Reset flags for the next human turn if puzzle is not over
+            state['paused_for_endgame_feedback'] = False
+            state['human_played'] = False
 
     return state
 
