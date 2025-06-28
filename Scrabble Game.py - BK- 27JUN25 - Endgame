@@ -6470,7 +6470,7 @@ def ai_turn(state):
 
     # Call the unified Cython AI brain
     action_chosen, details = ai_engine.determine_best_action(
-        current_rack, state['tiles'], state['board'], state['blanks'], state['bag'], state['first_play'],
+        current_rack, state['tiles'], state['board'], state['blanks'], state['bag'][:], state['first_play'],
         USE_AI_SIMULATION, USE_ENDGAME_SOLVER, is_plaid_mode,
         opponent_rack_len, state.get('ai_sim_num_candidates_cfg', DEFAULT_AI_CANDIDATES),
         state.get('ai_sim_num_opponent_sims_cfg', DEFAULT_OPPONENT_SIMULATIONS),
