@@ -3,12 +3,12 @@
 
 
 #python
-#Scrabble BK
-#Fixed Endgame practice mode bugs
+#Scrabble BL
+#Implementing clocks, not yet working
 
 
 
-#27JUN25
+#30JUN25
 
 
 
@@ -338,6 +338,10 @@ except FileNotFoundError:
     print("Warning: leave_table.pkl not found. Leave evaluation might be slower or inaccurate.")
 except Exception as e:
     print(f"Error loading leave_table.pkl: {e}")
+
+
+
+
 
 
 
@@ -6591,6 +6595,7 @@ def _parse_mode_selection_results(selected_mode, return_data):
     """Parses the results from the mode_selection_screen into a structured dictionary."""
     # Default settings
     settings = {
+        'game_mode': selected_mode,
         'dev_cprofile': False,
         'dev_visualize': False,
         'use_endgame_solver': False,
@@ -6642,7 +6647,7 @@ def _parse_mode_selection_results(selected_mode, return_data):
             settings['dev_cprofile'] = return_data[1]
             settings['dev_visualize'] = return_data[2]
             if isinstance(settings['sgs_loaded_data'], dict): 
-                game_settings_load = settings['sgs_loaded_data'].get('game_settings', {})
+                game_settings_load = settings['sgs_loaded_game_data'].get('game_settings', {})
                 settings['use_endgame_solver'] = game_settings_load.get('use_endgame_solver', False)
                 settings['use_ai_simulation'] = game_settings_load.get('use_ai_simulation', False)
                 ai_sim_config_sgs = game_settings_load.get('ai_simulation_parameters') 
@@ -6659,6 +6664,7 @@ def _parse_mode_selection_results(selected_mode, return_data):
                 settings['dev_cprofile'] = return_data[1]
 
     elif selected_mode == "BATCH_MODE":
+        settings['game_mode'] = return_data[0] # Set the underlying game mode
         if len(return_data) == 13:
             settings['game_mode_tuple'], settings['player_names'], settings['human_player'], settings['use_endgame_solver'], \
             settings['use_ai_simulation'], settings['batch_num_games'], settings['dev_cprofile'], settings['dev_visualize'], \
@@ -7128,6 +7134,7 @@ def _initialize_game_state_variables():
         'last_scoreboard_click_idx_init': -1,
         'insights_data_for_replay': [],
         'rack_visibility': [False, False],
+        'game_clock': None,
         'ai_sim_num_candidates_init': DEFAULT_AI_CANDIDATES,
         'ai_sim_num_opponent_sims_init': DEFAULT_OPPONENT_SIMULATIONS,
         'ai_sim_num_post_sim_candidates_init': DEFAULT_POST_SIM_CANDIDATES,
@@ -7420,6 +7427,13 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
     elif selected_mode_result is None:
         print("--- initialize_game(): Mode selection returned None. Exiting. ---"); pygame.quit(); sys.exit()
 
+    # Create the GameClock instance for relevant modes.
+    # This is done after all state setup to ensure game_mode is final.
+    # Clocks are not used for batch runs, replays, or pure AI vs AI games.
+    if state.get('game_mode') in [MODE_HVH, MODE_HVA] and \
+       not state.get('is_batch_running') and \
+       not state.get('replay_mode'):
+        state['game_clock'] = GameClock()
 
     state['GADDAG_STRUCTURE'] = GADDAG_STRUCTURE
     
@@ -11959,6 +11973,10 @@ def _draw_base_game_ui(screen, state, drawn_rects):
         drawn_rects['analyzer_checkbox_rect'] = insights_checkbox_rect_val
         drawn_rects['insights_item_rects'] = insights_item_rects_val
 
+    # Draw Clocks
+    if not replay_mode and not game_over_state:
+        _draw_clocks(screen, state, drawn_rects)
+
     # Draw Options Menu (if open)
     if not showing_practice_end_dialog and not is_batch_running_local_draw:
         options_rect_base_draw, dropdown_rects_base_draw = draw_options_menu(turn_to_display_for_ui_func, dropdown_open, bag_count_live, is_batch_running_local_draw, replay_mode, game_over_state)
@@ -12199,6 +12217,10 @@ def check_and_handle_game_over(state):
             reason = "Six Consecutive Zero-Point Turns"
 
         if game_ended:
+            game_clock = state.get('game_clock')
+            if game_clock:
+                game_clock.stop()
+
             if not is_silent_run:
                 print(f"DEBUG check_and_handle_game_over: game_ended is TRUE. Reason: {reason}")
             final_scores_calc = calculate_final_scores(scores, racks, bag, is_silent_batch_run_param=is_silent_run)
@@ -12297,6 +12319,10 @@ def handle_turn_start_updates(state):
 
 
     if turn != previous_turn and not replay_mode and not game_over_state:
+        game_clock = state.get('game_clock')
+        if game_clock:
+            game_clock.switch_player(turn - 1)
+
         state['turn_start_time'] = time.perf_counter() 
         
         if not is_solving_endgame:
@@ -13761,13 +13787,18 @@ def execute_game_session(is_initialized_from_outer_loop_param):
             current_state_dict['ai_sim_num_opponent_sims_cfg'] = ai_sim_num_opponent_sims_global
             current_state_dict['ai_sim_num_post_sim_candidates_cfg'] = ai_sim_num_post_sim_candidates_global
 
-            
+            game_clock_instance = current_state_dict.get('game_clock')
+            if game_clock_instance and not current_state_dict.get('replay_mode') and not current_state_dict.get('game_over_state'):
+                game_clock_instance.start(current_state_dict['turn'] - 1)
 
             while current_state_dict['running_inner']:
                 if _module_level_batch_stop_requested_internal:
                     current_state_dict['running_inner'] = False
                     break
                 
+                game_clock_instance = current_state_dict.get('game_clock')
+                if game_clock_instance:
+                    game_clock_instance.update()
                 
                 current_state_dict['gaddag_loading_status'] = gaddag_loading_status 
                 current_state_dict['GADDAG_STRUCTURE'] = GADDAG_STRUCTURE
@@ -14183,6 +14214,125 @@ def startup_initialization():
 
 
 
+class GameClock:
+    """Manages the game clock for two players."""
+    def __init__(self, total_time_seconds=25*60):
+        self.initial_time = total_time_seconds
+        self.player_times = [self.initial_time, self.initial_time]
+        self.current_player_idx = None # 0 for P1, 1 for P2
+        self.last_update_time = None
+        self.is_running = False
+
+    def start(self, player_index):
+        """Starts the clock for the given player if it's not already running."""
+        if not self.is_running:
+            self.is_running = True
+            self.current_player_idx = player_index
+            self.last_update_time = time.perf_counter()
+
+    def stop(self):
+        """Stops the clock and performs a final time update."""
+        if self.is_running:
+            self.update() # Final update before stopping
+            self.is_running = False
+            self.last_update_time = None
+
+    def switch_player(self, next_player_index):
+        """Stops the current player's clock and starts the next player's."""
+        self.stop()
+        self.start(next_player_index)
+
+    def update(self):
+        """Updates the time for the currently active player."""
+        if self.is_running and self.last_update_time is not None:
+            current_time = time.perf_counter()
+            delta_time = current_time - self.last_update_time
+            self.last_update_time = current_time
+            
+            if self.current_player_idx is not None:
+                self.player_times[self.current_player_idx] -= delta_time
+                if self.player_times[self.current_player_idx] < 0:
+                    self.player_times[self.current_player_idx] = 0
+                    # In the future, you could add logic here for flagging or ending the game on time out.
+                    self.stop()
+
+    def get_time_str(self, player_index):
+        """Returns the player's time formatted as MM:SS."""
+        total_seconds = self.player_times[player_index]
+        if total_seconds < 0:
+            total_seconds = 0
+        minutes = int(total_seconds // 60)
+        seconds = int(total_seconds % 60)
+        return f"{minutes:02d}:{seconds:02d}"
+
+    def reset(self):
+        """Resets the clock to its initial state."""
+        self.player_times = [self.initial_time, self.initial_time]
+        self.current_player_idx = None
+        self.last_update_time = None
+        self.is_running = False
+
+
+
+
+def _draw_clocks(screen, state, drawn_rects):
+    """Draws the player clocks below Player 2's rack area."""
+    game_clock = state.get('game_clock')
+    if not game_clock:
+        return
+
+    # Position under Player 2's rack area
+    rack_y_p2 = BOARD_SIZE + 150
+    clock_y = rack_y_p2 + TILE_HEIGHT + 15 # A bit of padding
+
+    # Align horizontally with the racks
+    rack_width = 7 * (TILE_WIDTH + TILE_GAP) - TILE_GAP
+    replay_area_end_x = 10 + 4 * (REPLAY_BUTTON_WIDTH + REPLAY_BUTTON_GAP)
+    min_rack_start_x = replay_area_end_x + BUTTON_GAP + 20
+    rack_start_x = max(min_rack_start_x, (BOARD_SIZE - rack_width) // 2)
+
+    clock_width = 150
+    clock_height = 50
+    clock_gap = 20
+    
+    p1_clock_x = rack_start_x
+    p2_clock_x = p1_clock_x + clock_width + clock_gap
+
+    player_names = state.get('player_names', ["P1", "P2"])
+    turn = state.get('turn')
+
+    # Draw P1 Clock
+    p1_time_str = game_clock.get_time_str(0)
+    p1_name = player_names[0] if player_names and player_names[0] else "Player 1"
+    p1_box_color = GRAY if turn != 1 else WHITE
+    p1_border_color = BLACK if turn == 1 else GRAY
+    pygame.draw.rect(screen, p1_box_color, (p1_clock_x, clock_y, clock_width, clock_height))
+    pygame.draw.rect(screen, p1_border_color, (p1_clock_x, clock_y, clock_width, clock_height), 2)
+    
+    p1_name_surf = ui_font.render(p1_name, True, BLACK)
+    screen.blit(p1_name_surf, (p1_clock_x + 5, clock_y + 5))
+    
+    p1_time_surf = dialog_font.render(p1_time_str, True, BLACK)
+    p1_time_rect = p1_time_surf.get_rect(centerx=p1_clock_x + clock_width / 2, bottom=clock_y + clock_height - 5)
+    screen.blit(p1_time_surf, p1_time_rect)
+
+    # Draw P2 Clock
+    p2_time_str = game_clock.get_time_str(1)
+    p2_name = player_names[1] if len(player_names) > 1 and player_names[1] else "Player 2"
+    p2_box_color = GRAY if turn != 2 else WHITE
+    p2_border_color = BLACK if turn == 2 else GRAY
+    pygame.draw.rect(screen, p2_box_color, (p2_clock_x, clock_y, clock_width, clock_height))
+    pygame.draw.rect(screen, p2_border_color, (p2_clock_x, clock_y, clock_width, clock_height), 2)
+
+    p2_name_surf = ui_font.render(p2_name, True, BLACK)
+    screen.blit(p2_name_surf, (p2_clock_x + 5, clock_y + 5))
+
+    p2_time_surf = dialog_font.render(p2_time_str, True, BLACK)
+    p2_time_rect = p2_time_surf.get_rect(centerx=p2_clock_x + clock_width / 2, bottom=clock_y + clock_height - 5)
+    screen.blit(p2_time_surf, p2_time_rect)
+
+
+        
 
 
 
