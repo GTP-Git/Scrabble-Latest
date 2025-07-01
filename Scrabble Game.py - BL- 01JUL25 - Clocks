@@ -7,11 +7,11 @@
 #Implementing clocks
 #Only in live games so far
 #No additional clock features yet (pause, different time)
-#Needs to start upon P1 revealing their tiels
+#Added clock start upon P1 revealing their tiles
 
 
 
-#30JUN25
+#01JUL25
 
 
 
@@ -8676,10 +8676,13 @@ def _handle_mouse_down_live_game_ui(event, state, drawn_rects):
     p2_eye_rect = drawn_rects.get('p2_eye_rect')
     if p1_eye_rect and p1_eye_rect.collidepoint(x, y):
         state['rack_visibility'][0] = not state['rack_visibility'][0]
-        return
+        game_clock = state.get('game_clock')
+        if game_clock and not game_clock.is_running:
+            game_clock.start(0) # Start clock for Player 1 (index 0)
+        return True
     if p2_eye_rect and p2_eye_rect.collidepoint(x, y):
         state['rack_visibility'][1] = not state['rack_visibility'][1]
-        return
+        return True
 
     # Handle rack sorting and tile dragging initiation
     if _handle_mouse_down_rack_ui_elements(event, state, drawn_rects):
@@ -12322,7 +12325,7 @@ def handle_turn_start_updates(state):
 
     if turn != previous_turn and not replay_mode and not game_over_state:
         game_clock = state.get('game_clock')
-        if game_clock:
+        if game_clock and game_clock.is_running:
             game_clock.switch_player(turn - 1)
 
         state['turn_start_time'] = time.perf_counter() 
@@ -12417,6 +12420,12 @@ def handle_ai_turn_trigger(state):
        ((is_standard_ai_turn and not state['human_played']) or is_ai_turn_in_practice_mode) and \
        not state['is_solving_endgame']:
         
+        # --- MODIFICATION START: Start clock for AI turn ---
+        game_clock = state.get('game_clock')
+        if game_clock and not game_clock.is_running:
+            game_clock.start(state['turn'] - 1)
+        # --- MODIFICATION END ---
+
         # Call the main AI turn processing function
         state = ai_turn(state)
 
@@ -13789,10 +13798,6 @@ def execute_game_session(is_initialized_from_outer_loop_param, game_clock_obj):
             current_state_dict['ai_sim_num_candidates_cfg'] = ai_sim_num_candidates_global
             current_state_dict['ai_sim_num_opponent_sims_cfg'] = ai_sim_num_opponent_sims_global
             current_state_dict['ai_sim_num_post_sim_candidates_cfg'] = ai_sim_num_post_sim_candidates_global
-
-            game_clock_instance = current_state_dict.get('game_clock')
-            if game_clock_instance and not current_state_dict.get('replay_mode') and not current_state_dict.get('game_over_state'):
-                game_clock_instance.start(current_state_dict['turn'] - 1)
 
             while current_state_dict['running_inner']:
                 if _module_level_batch_stop_requested_internal:
