@@ -2,11 +2,11 @@
 
 #ai_engine.pyx
 
-#ai_engine_pyx - BL - 30JUN25
+#ai_engine_pyx - BL - 01JUL25
 #Implementing clocks
 #Only in live games so far
 #No additional clock features yet (pause, different time)
-#Needs to start upon P1 revealing their tiels
+#Added clock start upon P1 revealing their tiles
 
 
 
