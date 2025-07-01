@@ -3,11 +3,9 @@
 
 
 #python
-#Scrabble BL
-#Implementing clocks
-#Only in live games so far
-#No additional clock features yet (pause, different time)
-#Added clock start upon P1 revealing their tiles
+#Scrabble BM
+#Added pause button to clocks
+#Added set time feature to clocks
 
 
 
@@ -8663,15 +8661,12 @@ def _handle_mouse_down_live_game_ui(event, state, drawn_rects):
     """
     x, y = event.pos
 
-    # Handle Suggest button click
     if _handle_mouse_down_suggest_button(event, state, drawn_rects):
         return
 
-    # Handle Simulate button click
     if _handle_mouse_down_simulate_button(event, state, drawn_rects):
         return
 
-    # Handle rack visibility icons
     p1_eye_rect = drawn_rects.get('p1_eye_rect')
     p2_eye_rect = drawn_rects.get('p2_eye_rect')
     if p1_eye_rect and p1_eye_rect.collidepoint(x, y):
@@ -8682,6 +8677,53 @@ def _handle_mouse_down_live_game_ui(event, state, drawn_rects):
         return True
     if p2_eye_rect and p2_eye_rect.collidepoint(x, y):
         state['rack_visibility'][1] = not state['rack_visibility'][1]
+        return True
+
+    clock_pause_button_rect = drawn_rects.get('clock_pause_button_rect')
+    if clock_pause_button_rect and clock_pause_button_rect.collidepoint(x, y):
+        game_clock = state.get('game_clock')
+        if game_clock:
+            if game_clock.is_running:
+                game_clock.stop()
+            else:
+                if game_clock.current_player_idx is not None:
+                    game_clock.start(game_clock.current_player_idx)
+                else:
+                    game_clock.start(state['turn'] - 1)
+        return True
+
+    # Handle clock options button
+    clock_options_button_rect = drawn_rects.get('clock_options_button_rect')
+    if clock_options_button_rect and clock_options_button_rect.collidepoint(x, y):
+        game_clock = state.get('game_clock')
+        if game_clock:
+            was_running = game_clock.is_running
+            if was_running:
+                game_clock.stop()
+
+            current_p1_time_str = game_clock.get_time_str(0)
+            current_p2_time_str = game_clock.get_time_str(1)
+            new_times = show_clock_options_dialog(current_p1_time_str, current_p2_time_str)
+
+            if new_times:
+                p1_time_str, p2_time_str = new_times
+                p1_seconds = _parse_time_str_to_seconds(p1_time_str)
+                p2_seconds = _parse_time_str_to_seconds(p2_time_str)
+
+                if p1_seconds is not None:
+                    game_clock.set_time(0, p1_seconds)
+                else:
+                    show_message_dialog(f"Invalid time format for Player 1: '{p1_time_str}'.\nPlease use MM:SS.", "Input Error")
+
+                if p2_seconds is not None:
+                    game_clock.set_time(1, p2_seconds)
+                else:
+                    show_message_dialog(f"Invalid time format for Player 2: '{p2_time_str}'.\nPlease use MM:SS.", "Input Error")
+            
+            # Resume clock if it was running before dialog
+            if was_running:
+                if game_clock.current_player_idx is not None:
+                    game_clock.start(game_clock.current_player_idx)
         return True
 
     # Handle rack sorting and tile dragging initiation
@@ -10010,7 +10052,8 @@ def _handle_mouse_down_all_words_dialog(event, state, drawn_rects):
     if practice_mode == "eight_letter": current_moves_for_all_words = practice_target_moves
     elif practice_mode == "power_tiles" and paused_for_power_tile: current_moves_for_all_words = sorted([m for m in all_moves_list if any(letter_aw2 == current_power_tile for _, _, letter_aw2 in m.get('newly_placed',[])) and is_word_length_allowed(len(m.get('word','')), number_checks)], key=lambda m: m['score'], reverse=True)
     elif practice_mode == "bingo_bango_bongo" and paused_for_bingo_practice: current_moves_for_all_words = sorted([m for m in all_moves_list if m.get('is_bingo', False)], key=lambda m: m['score'], reverse=True)
-    else: current_moves_for_all_words = all_moves_list
+    else:
+        current_moves_for_all_words = sorted(all_moves_list, key=lambda m: m.get('score', 0), reverse=True)
 
     is_simulation_result_aw = bool(hint_moves and isinstance(hint_moves[0], dict) and 'final_score' in hint_moves[0])
     is_play_disabled_in_all_words = state['replay_mode'] and is_simulation_result_aw
@@ -12055,7 +12098,8 @@ def _draw_dialogs_and_overlays(screen, state, drawn_rects):
         if state['practice_mode'] == "eight_letter": moves_for_all = state['practice_target_moves']
         elif state['practice_mode'] == "power_tiles" and state['paused_for_power_tile']: moves_for_all = sorted([m for m in state['all_moves'] if any(letter_aw_ds == state['current_power_tile'] for _, _, letter_aw_ds in m.get('newly_placed',[])) and is_word_length_allowed(len(m.get('word','')), state['number_checks'])], key=lambda m: m['score'], reverse=True)
         elif state['practice_mode'] == "bingo_bango_bongo" and state['paused_for_bingo_practice']: moves_for_all = sorted([m for m in state['all_moves'] if m.get('is_bingo', False)], key=lambda m: m['score'], reverse=True)
-        else: moves_for_all = state['all_moves']
+        else:
+            moves_for_all = sorted(state.get('all_moves', []), key=lambda m: m.get('score', 0), reverse=True)
         is_simulation_result_aw = bool(state['hint_moves'] and isinstance(state['hint_moves'][0], dict) and 'final_score' in state['hint_moves'][0])
         is_play_disabled_in_all_words = state['replay_mode'] and is_simulation_result_aw
         is_loaded_or_replay = state.get('replay_mode', False)
@@ -13264,9 +13308,8 @@ def update_preview_score(state):
     Returns:
         int: The calculated preview score (0 if not applicable).
     """
-    global DEV_VISUALIZE_BATCH_ENABLED_SESSION # Access global flag
+    global DEV_VISUALIZE_BATCH_ENABLED_SESSION
 
-    # Determine if this is a silent batch run for printing purposes
     is_silent_run = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
 
     typing = state.get('typing', False)
@@ -13279,28 +13322,24 @@ def update_preview_score(state):
     preview_score = 0
     if typing and preview_score_enabled and word_positions and board and tiles:
         if blanks is None: 
-            if not is_silent_run: # Conditional print for warning
+            if not is_silent_run:
                 print("Warning: Blanks set is None during preview score calculation.")
             blanks_to_pass = set()
         else:
             blanks_to_pass = blanks
 
         try:
-            # --- MODIFICATION START: Get all word structures first ---
-            # This function finds all words formed by the placement, without validation.
             words_formed_details_preview = ai_engine.get_all_formed_word_structures(word_positions, tiles)
             
-            # Now call calculate_score with the correct 5 arguments
             preview_score = ai_engine.calculate_score(
                 word_positions, 
                 board, 
                 tiles, 
                 blanks_to_pass, 
-                words_formed_details_preview  # Pass the list of formed words
+                words_formed_details_preview
             )
-            # --- MODIFICATION END ---
         except Exception as e:
-            if not is_silent_run: # Conditional print for error
+            if not is_silent_run:
                 print(f"Error calculating preview score: {e}")
             preview_score = 0 
 
@@ -13406,21 +13445,23 @@ def reset_per_game_variables():
         'all_words_dialog_y': (WINDOW_HEIGHT - ALL_WORDS_DIALOG_HEIGHT) // 2,
         'all_words_dialog_dragging': False,
         'all_words_dialog_drag_offset': (0,0),
-        'rack_visibility': [False, False], # Default to hidden
+        'rack_visibility': [False, False],
         'replay_start_rect': None,
         'replay_prev_rect': None,
         'replay_next_rect': None,
         'replay_end_rect': None,
-        'analyzer_show': False, # Controls visibility of analyzer content
+        'analyzer_show': False,
         'analyzer_scroll_offset': 0,
-        'analyzer_selected_move_index': None, # Index of the selected move within the current turn's analysis list
-        'analyzer_window_rect_store': None, # To store the calculated rect of the analyzer window
-        'analyzer_checkbox_rect_store': None, # To store the rect of the "Show Analysis" checkbox
-        'last_turn_end_time': time.perf_counter(), # Initialize with current high-res time
+        'analyzer_selected_move_index': None,
+        'analyzer_window_rect_store': None,
+        'analyzer_checkbox_rect_store': None,
+        'last_turn_end_time': time.perf_counter(),
         'practice_dialog_x': (WINDOW_WIDTH - 400) // 2,
         'practice_dialog_y': (WINDOW_HEIGHT - 180) // 2,
         'practice_dialog_dragging': False,
         'practice_dialog_drag_offset': (0, 0),
+        'clock_pause_button_rect': None,
+        'clock_options_button_rect': None,
     }
     return reset_values
 
@@ -14238,10 +14279,25 @@ class GameClock:
             self.current_player_idx = player_index
             self.last_update_time = time.perf_counter()
 
+    def _calculate_time_delta(self):
+        """
+        Calculates and applies the time delta since the last update.
+        Returns True if time ran out, False otherwise.
+        """
+        if self.is_running and self.last_update_time is not None and self.current_player_idx is not None:
+            current_time = time.perf_counter()
+            delta_time = current_time - self.last_update_time
+            self.last_update_time = current_time
+            self.player_times[self.current_player_idx] -= delta_time
+            if self.player_times[self.current_player_idx] <= 0:
+                self.player_times[self.current_player_idx] = 0
+                return True # Time ran out
+        return False # Time has not run out
+
     def stop(self):
         """Stops the clock and performs a final time update."""
         if self.is_running:
-            self.update() # Final update before stopping
+            self._calculate_time_delta() # Final update
             self.is_running = False
             self.last_update_time = None
 
@@ -14252,17 +14308,10 @@ class GameClock:
 
     def update(self):
         """Updates the time for the currently active player."""
-        if self.is_running and self.last_update_time is not None:
-            current_time = time.perf_counter()
-            delta_time = current_time - self.last_update_time
-            self.last_update_time = current_time
-            
-            if self.current_player_idx is not None:
-                self.player_times[self.current_player_idx] -= delta_time
-                if self.player_times[self.current_player_idx] < 0:
-                    self.player_times[self.current_player_idx] = 0
-                    # In the future, you could add logic here for flagging or ending the game on time out.
-                    self.stop()
+        time_ran_out = self._calculate_time_delta()
+        if time_ran_out:
+            self.is_running = False
+            self.last_update_time = None
 
     def get_time_str(self, player_index):
         """Returns the player's time formatted as MM:SS."""
@@ -14280,6 +14329,13 @@ class GameClock:
         self.last_update_time = None
         self.is_running = False
 
+    def set_time(self, player_index, total_seconds):
+        """Directly sets the time for a specific player."""
+        if 0 <= player_index < len(self.player_times):
+            self.player_times[player_index] = float(total_seconds)
+
+        
+
 
 
 
@@ -14289,11 +14345,9 @@ def _draw_clocks(screen, state, drawn_rects):
     if not game_clock:
         return
 
-    # Position under Player 2's rack area
     rack_y_p2 = BOARD_SIZE + 150
-    clock_y = rack_y_p2 + TILE_HEIGHT + 15 # A bit of padding
+    clock_y = rack_y_p2 + TILE_HEIGHT + 15 #
 
-    # Align horizontally with the racks
     rack_width = 7 * (TILE_WIDTH + TILE_GAP) - TILE_GAP
     replay_area_end_x = 10 + 4 * (REPLAY_BUTTON_WIDTH + REPLAY_BUTTON_GAP)
     min_rack_start_x = replay_area_end_x + BUTTON_GAP + 20
@@ -14301,10 +14355,21 @@ def _draw_clocks(screen, state, drawn_rects):
 
     clock_width = 150
     clock_height = 50
-    clock_gap = 20
+    
+    clock_button_size = 30
+    clock_button_gap = 10
     
     p1_clock_x = rack_start_x
-    p2_clock_x = p1_clock_x + clock_width + clock_gap
+    
+    pause_button_x = p1_clock_x + clock_width + clock_button_gap
+    pause_button_y = clock_y + (clock_height - clock_button_size) // 2
+    pause_button_rect = pygame.Rect(pause_button_x, pause_button_y, clock_button_size, clock_button_size)
+    
+    options_button_x = pause_button_x + clock_button_size + clock_button_gap
+    options_button_y = pause_button_y
+    options_button_rect = pygame.Rect(options_button_x, options_button_y, clock_button_size, clock_button_size)
+
+    p2_clock_x = options_button_x + clock_button_size + clock_button_gap
 
     player_names = state.get('player_names', ["P1", "P2"])
     turn = state.get('turn')
@@ -14324,6 +14389,42 @@ def _draw_clocks(screen, state, drawn_rects):
     p1_time_rect = p1_time_surf.get_rect(centerx=p1_clock_x + clock_width / 2, bottom=clock_y + clock_height - 5)
     screen.blit(p1_time_surf, p1_time_rect)
 
+    # NEW: Draw Pause/Play Button
+    hover_pause = pause_button_rect.collidepoint(pygame.mouse.get_pos())
+    color_pause = BUTTON_HOVER if hover_pause else BUTTON_COLOR
+    pygame.draw.rect(screen, color_pause, pause_button_rect)
+    if game_clock.is_running:
+        # Draw pause icon ||
+        bar_width = 4
+        bar_height = 16
+        bar_gap = 6
+        bar1_x = pause_button_rect.centerx - bar_gap // 2 - bar_width
+        bar2_x = pause_button_rect.centerx + bar_gap // 2
+        bar_y = pause_button_rect.centery - bar_height // 2
+        pygame.draw.rect(screen, BLACK, (bar1_x, bar_y, bar_width, bar_height))
+        pygame.draw.rect(screen, BLACK, (bar2_x, bar_y, bar_width, bar_height))
+    else:
+        # Draw play icon >
+        point1 = (pause_button_rect.centerx + 8, pause_button_rect.centery)
+        point2 = (pause_button_rect.centerx - 4, pause_button_rect.centery - 8)
+        point3 = (pause_button_rect.centerx - 4, pause_button_rect.centery + 8)
+        pygame.draw.polygon(screen, BLACK, [point1, point2, point3])
+    drawn_rects['clock_pause_button_rect'] = pause_button_rect
+
+    hover_options = options_button_rect.collidepoint(pygame.mouse.get_pos())
+    color_options = BUTTON_HOVER if hover_options else BUTTON_COLOR
+    pygame.draw.rect(screen, color_options, options_button_rect)
+    # Draw a simple gear icon
+    gear_center = options_button_rect.center
+    gear_radius = clock_button_size // 3
+    pygame.draw.circle(screen, BLACK, gear_center, gear_radius, 2)
+    for i in range(6):
+        angle = i * (math.pi / 3)
+        start_pos = (gear_center[0] + gear_radius * math.cos(angle), gear_center[1] + gear_radius * math.sin(angle))
+        end_pos = (gear_center[0] + (gear_radius + 4) * math.cos(angle), gear_center[1] + (gear_radius + 4) * math.sin(angle))
+        pygame.draw.line(screen, BLACK, start_pos, end_pos, 3)
+    drawn_rects['clock_options_button_rect'] = options_button_rect
+
     # Draw P2 Clock
     p2_time_str = game_clock.get_time_str(1)
     p2_name = player_names[1] if len(player_names) > 1 and player_names[1] else "Player 2"
@@ -14338,6 +14439,122 @@ def _draw_clocks(screen, state, drawn_rects):
     p2_time_surf = dialog_font.render(p2_time_str, True, BLACK)
     p2_time_rect = p2_time_surf.get_rect(centerx=p2_clock_x + clock_width / 2, bottom=clock_y + clock_height - 5)
     screen.blit(p2_time_surf, p2_time_rect)
+
+
+
+
+def _parse_time_str_to_seconds(time_str):
+    """Parses MM:SS string to total seconds. Returns None on error."""
+    try:
+        parts = time_str.split(':')
+        if len(parts) != 2:
+            return None
+        minutes = int(parts[0])
+        seconds = int(parts[1])
+        if not (0 <= minutes and 0 <= seconds < 60):
+            return None # Seconds must be less than 60
+        return minutes * 60 + seconds
+    except (ValueError, TypeError):
+        return None
+
+
+
+def show_clock_options_dialog(current_p1_time, current_p2_time):
+    """
+    Displays a dialog to set the time for each player's clock.
+    Returns a tuple (p1_time_str, p2_time_str) or None if cancelled.
+    """
+    global screen, dialog_font, ui_font, button_font, DIALOG_COLOR, BLACK, WHITE, BUTTON_COLOR, BUTTON_HOVER
+
+    dialog_width, dialog_height = 400, 220
+    dialog_x = (WINDOW_WIDTH - dialog_width) // 2
+    dialog_y = (WINDOW_HEIGHT - dialog_height) // 2
+
+    p1_input_text = current_p1_time
+    p2_input_text = current_p2_time
+    active_input_idx = None  # 0 for P1, 1 for P2
+
+    dialog_running = True
+    while dialog_running:
+        # --- UI Element Rects ---
+        p1_input_rect = pygame.Rect(dialog_x + 200, dialog_y + 50, 150, 35)
+        p2_input_rect = pygame.Rect(dialog_x + 200, dialog_y + 100, 150, 35)
+        ok_button_rect = pygame.Rect(dialog_x + (dialog_width // 2) - BUTTON_WIDTH - 10, dialog_y + dialog_height - BUTTON_HEIGHT - 20, BUTTON_WIDTH, BUTTON_HEIGHT)
+        cancel_button_rect = pygame.Rect(dialog_x + (dialog_width // 2) + 10, dialog_y + dialog_height - BUTTON_HEIGHT - 20, BUTTON_WIDTH, BUTTON_HEIGHT)
+
+        # --- Event Loop ---
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if p1_input_rect.collidepoint(event.pos):
+                    active_input_idx = 0
+                elif p2_input_rect.collidepoint(event.pos):
+                    active_input_idx = 1
+                elif ok_button_rect.collidepoint(event.pos):
+                    return p1_input_text, p2_input_text
+                elif cancel_button_rect.collidepoint(event.pos):
+                    return None
+                else:
+                    active_input_idx = None
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    return None
+                if event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
+                    return p1_input_text, p2_input_text
+                if event.key == pygame.K_TAB:
+                    active_input_idx = 1 if active_input_idx == 0 else 0
+
+                if active_input_idx == 0:
+                    if event.key == pygame.K_BACKSPACE:
+                        p1_input_text = p1_input_text[:-1]
+                    elif event.unicode.isdigit() or event.unicode == ':':
+                        if len(p1_input_text) < 5:
+                            p1_input_text += event.unicode
+                elif active_input_idx == 1:
+                    if event.key == pygame.K_BACKSPACE:
+                        p2_input_text = p2_input_text[:-1]
+                    elif event.unicode.isdigit() or event.unicode == ':':
+                        if len(p2_input_text) < 5:
+                            p2_input_text += event.unicode
+
+        # --- Drawing ---
+        pygame.draw.rect(screen, DIALOG_COLOR, (dialog_x, dialog_y, dialog_width, dialog_height))
+        pygame.draw.rect(screen, BLACK, (dialog_x, dialog_y, dialog_width, dialog_height), 2)
+        title_surf = dialog_font.render("Set Clock Times", True, BLACK)
+        screen.blit(title_surf, (dialog_x + 10, dialog_y + 10))
+
+        # P1 Input
+        p1_label_surf = ui_font.render("Player 1 Time (MM:SS):", True, BLACK)
+        screen.blit(p1_label_surf, (dialog_x + 20, p1_input_rect.centery - p1_label_surf.get_height() // 2))
+        pygame.draw.rect(screen, WHITE, p1_input_rect)
+        pygame.draw.rect(screen, BLACK, p1_input_rect, 2 if active_input_idx == 0 else 1)
+        p1_text_surf = ui_font.render(p1_input_text, True, BLACK)
+        screen.blit(p1_text_surf, (p1_input_rect.x + 5, p1_input_rect.y + 5))
+
+        # P2 Input
+        p2_label_surf = ui_font.render("Player 2 Time (MM:SS):", True, BLACK)
+        screen.blit(p2_label_surf, (dialog_x + 20, p2_input_rect.centery - p2_label_surf.get_height() // 2))
+        pygame.draw.rect(screen, WHITE, p2_input_rect)
+        pygame.draw.rect(screen, BLACK, p2_input_rect, 2 if active_input_idx == 1 else 1)
+        p2_text_surf = ui_font.render(p2_input_text, True, BLACK)
+        screen.blit(p2_text_surf, (p2_input_rect.x + 5, p2_input_rect.y + 5))
+
+        # Buttons
+        hover_ok = ok_button_rect.collidepoint(pygame.mouse.get_pos())
+        pygame.draw.rect(screen, BUTTON_HOVER if hover_ok else BUTTON_COLOR, ok_button_rect)
+        ok_text_surf = button_font.render("OK", True, BLACK)
+        screen.blit(ok_text_surf, ok_text_surf.get_rect(center=ok_button_rect.center))
+
+        hover_cancel = cancel_button_rect.collidepoint(pygame.mouse.get_pos())
+        pygame.draw.rect(screen, BUTTON_HOVER if hover_cancel else BUTTON_COLOR, cancel_button_rect)
+        cancel_text_surf = button_font.render("Cancel", True, BLACK)
+        screen.blit(cancel_text_surf, cancel_text_surf.get_rect(center=cancel_button_rect.center))
+
+        pygame.display.flip()
+        pygame.time.Clock().tick(30)
+    return None
 
 
         
