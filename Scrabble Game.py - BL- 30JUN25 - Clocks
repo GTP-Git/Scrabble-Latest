@@ -4,7 +4,10 @@
 
 #python
 #Scrabble BL
-#Implementing clocks, not yet working
+#Implementing clocks
+#Only in live games so far
+#No additional clock features yet (pause, different time)
+#Needs to start upon P1 revealing their tiels
 
 
 
@@ -7134,7 +7137,6 @@ def _initialize_game_state_variables():
         'last_scoreboard_click_idx_init': -1,
         'insights_data_for_replay': [],
         'rack_visibility': [False, False],
-        'game_clock': None,
         'ai_sim_num_candidates_init': DEFAULT_AI_CANDIDATES,
         'ai_sim_num_opponent_sims_init': DEFAULT_OPPONENT_SIMULATIONS,
         'ai_sim_num_post_sim_candidates_init': DEFAULT_POST_SIM_CANDIDATES,
@@ -13662,7 +13664,7 @@ def handle_endgame_practice_flow(state):
 
 
 
-def execute_game_session(is_initialized_from_outer_loop_param):
+def execute_game_session(is_initialized_from_outer_loop_param, game_clock_obj):
     global USE_AI_SIMULATION, USE_ENDGAME_SOLVER
     global turn, previous_turn, game_over_state, final_scores
     global turn, previous_turn, game_over_state, final_scores
@@ -13705,7 +13707,7 @@ def execute_game_session(is_initialized_from_outer_loop_param):
     global DEV_CPROFILE_ENABLED_SESSION, DEV_VISUALIZE_BATCH_ENABLED_SESSION
     global ai_sim_num_candidates_global, ai_sim_num_opponent_sims_global, ai_sim_num_post_sim_candidates_global
     global last_scoreboard_click_time, last_scoreboard_click_idx
-    global insights_data_for_replay, rack_visibility
+    global insights_data_for_replay, rack_visibility, game_clock
 
 
     _module_level_batch_stop_requested_internal = False
@@ -13779,7 +13781,8 @@ def execute_game_session(is_initialized_from_outer_loop_param):
 
 
             reset_vars_ui_local = reset_per_game_variables()
-            current_state_dict = {**globals(), **reset_vars_ui_local} 
+            current_state_dict = {**globals(), **reset_vars_ui_local}
+            current_state_dict['game_clock'] = game_clock_obj
             current_state_dict['running_inner'] = True 
             current_state_dict['visual_batch_esc_stop_pending'] = _visual_batch_esc_stop_pending_internal 
 
@@ -14450,6 +14453,7 @@ def main(is_initialized_from_outer_loop_param):
     bbb_7l_max_prob_global = initial_state['bbb_7l_max_prob_init']
     bbb_8l_max_prob_global = initial_state['bbb_8l_max_prob_init']
     rack_visibility = initial_state['rack_visibility']
+    game_clock = initial_state.get('game_clock')
     
     if replay_mode:
         insights_data_for_replay = generate_turn_insights_data(sgs_loaded_game_data)
@@ -14457,6 +14461,7 @@ def main(is_initialized_from_outer_loop_param):
         insights_data_for_replay = []
 
     session_flags = {}
+
     if DEV_CPROFILE_ENABLED_SESSION:
         if not (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION):
             print("--- Profiling game session ---")
@@ -14464,10 +14469,12 @@ def main(is_initialized_from_outer_loop_param):
         profiler = cProfile.Profile()
         
         temp_namespace = {}
-        profiler.runctx('temp_namespace["result"] = execute_game_session(is_initialized_from_outer_loop_param)',
+        # Pass game_clock into the execution context for the profiler
+        profiler.runctx('temp_namespace["result"] = execute_game_session(is_initialized_from_outer_loop_param, game_clock)',
                         globals(),
                         {'execute_game_session': execute_game_session,
                          'is_initialized_from_outer_loop_param': is_initialized_from_outer_loop_param,
+                         'game_clock': game_clock,
                          'temp_namespace': temp_namespace})
         session_flags = temp_namespace.get("result", {})
 
@@ -14478,7 +14485,8 @@ def main(is_initialized_from_outer_loop_param):
         if is_batch_running:
             just_finished_a_batch = True
     else:
-        session_flags = execute_game_session(is_initialized_from_outer_loop_param)
+        # Pass game_clock as an argument in the standard call
+        session_flags = execute_game_session(is_initialized_from_outer_loop_param, game_clock)
         
     if is_batch_running:
         just_finished_a_batch = True
