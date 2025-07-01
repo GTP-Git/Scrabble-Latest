@@ -3,7 +3,10 @@
 #ai_engine.pyx
 
 #ai_engine_pyx - BL - 30JUN25
-#Implementing clocks, not yet working
+#Implementing clocks
+#Only in live games so far
+#No additional clock features yet (pause, different time)
+#Needs to start upon P1 revealing their tiels
 
 
 
