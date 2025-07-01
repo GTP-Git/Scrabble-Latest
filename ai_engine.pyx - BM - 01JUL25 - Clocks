@@ -2,11 +2,9 @@
 
 #ai_engine.pyx
 
-#ai_engine_pyx - BL - 01JUL25
-#Implementing clocks
-#Only in live games so far
-#No additional clock features yet (pause, different time)
-#Added clock start upon P1 revealing their tiles
+#ai_engine_pyx - BM - 01JUL25
+#Added pause button to clocks
+#Added set time feature to clocks
 
 
 
@@ -1227,6 +1225,8 @@ cpdef list generate_all_moves_gaddag(
         if sig_tuple not in seen_final_signatures:
             final_unique_moves.append(move)
             seen_final_signatures.add(sig_tuple)
+
+    final_unique_moves.sort(key=_sort_key_raw_score, reverse=True)
 
     return final_unique_moves
 
