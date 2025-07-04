@@ -1,10 +1,9 @@
 
 
 #ai_engine.pyx
+#ai_engine_pyx - BN - 04JUL25
+#Added score adjustments to overtime
 
-#ai_engine_pyx - BM - 01JUL25
-#Added pause button to clocks
-#Added set time feature to clocks
 
 
 
@@ -1873,7 +1872,6 @@ cpdef list run_ai_simulation(list initial_ai_moves_list, list ai_rack, int oppon
     cdef object temp_drawn_ai_counts
     cdef int best_opponent_score
 
-    # C-level variables for high-speed simulation
     cdef int[27] unseen_pool_counts_c, opponent_pool_counts_c, temp_opp_pool_counts
     cdef int total_unseen_tiles, total_opponent_tiles, temp_total_opp_tiles
     cdef int rand_idx, tile_idx, cumulative_count, k
@@ -1897,7 +1895,6 @@ cpdef list run_ai_simulation(list initial_ai_moves_list, list ai_rack, int oppon
         unseen_pool_counts_c[tile_idx] = count
         total_unseen_tiles += count
 
-    # --- OPTIMIZATION: Pre-calculate the cross-check sets for the ORIGINAL board state just ONCE. ---
     initial_cross_check_sets = {}
     for r in range(GRID_SIZE_C):
         for c in range(GRID_SIZE_C):
@@ -1934,8 +1931,6 @@ cpdef list run_ai_simulation(list initial_ai_moves_list, list ai_rack, int oppon
         move_blanks = ai_move.get('blanks', set())
         valid_placement = True
         
-        # --- NEW, SIMPLER INCREMENTAL UPDATE LOGIC ---
-        # 1. Identify only the squares adjacent to the new tiles
         affected_squares_for_cross_check = set()
         for r, c, letter in ai_move.get('newly_placed', []):
             if 0 <= r < GRID_SIZE_C and 0 <= c < GRID_SIZE_C:
@@ -1948,7 +1943,6 @@ cpdef list run_ai_simulation(list initial_ai_moves_list, list ai_rack, int oppon
                     if letter in sim_rack_after_ai: sim_rack_after_ai.remove(letter)
                     else: valid_placement = False; break
                 
-                # Add adjacent squares to the set of squares to update
                 for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
                     nr, nc = r + dr, c + dc
                     if 0 <= nr < GRID_SIZE_C and 0 <= nc < GRID_SIZE_C:
@@ -1959,7 +1953,6 @@ cpdef list run_ai_simulation(list initial_ai_moves_list, list ai_rack, int oppon
         if not valid_placement:
             continue
 
-        # 2. Create a copy and only update the affected squares
         sim_cross_check_sets = initial_cross_check_sets.copy()
         for r, c in affected_squares_for_cross_check:
             if not sim_tiles_after_ai[r][c]: # Only update for empty squares
@@ -1985,14 +1978,16 @@ cpdef list run_ai_simulation(list initial_ai_moves_list, list ai_rack, int oppon
                         if DAWG_C.search(left_word + letter_char + right_word): allowed_letters_h.add(letter_char)
                     if allowed_letters_h: allowed_letters_h.add(' ')
                 sim_cross_check_sets[(r, c)] = {'V': allowed_letters_v, 'H': allowed_letters_h}
-        # --- END OF OPTIMIZED UPDATE LOGIC ---
 
         opponent_pool_counts_c = unseen_pool_counts_c[:]
         total_opponent_tiles = total_unseen_tiles
         
         drawn_ai = []
-        for _ in range(len(ai_move.get('newly_placed', []))):
-            if bag: drawn_ai.append(bag[-(_ + 1)])
+        num_to_draw = len(ai_move.get('newly_placed', []))
+        num_actually_drawn = min(num_to_draw, len(bag))
+        if num_actually_drawn > 0:
+            # Simulate drawing from the end of the bag without modifying it
+            drawn_ai = bag[-num_actually_drawn:]
 
         temp_drawn_ai_counts = Counter(drawn_ai)
         for tile, count in temp_drawn_ai_counts.items():
