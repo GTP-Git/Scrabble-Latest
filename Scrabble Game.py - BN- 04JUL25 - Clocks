@@ -3,13 +3,12 @@
 
 
 #python
-#Scrabble BM
-#Added pause button to clocks
-#Added set time feature to clocks
+#Scrabble BN
+#Added score adjustments to overtime
 
 
 
-#01JUL25
+#04JUL25
 
 
 
@@ -1014,14 +1013,12 @@ def show_allow_invalid_word_dialog(invalid_words_list):
     words_str = ", ".join(invalid_words_list)
     message_query = "Allow this play anyway?"
 
-    # Dynamically adjust dialog height based on content
     base_dialog_width = 450
     min_dialog_height = 180
     padding = 15
     line_spacing = 5
     button_area_height = BUTTON_HEIGHT + padding * 2
 
-    # Wrap the words_str for display
     wrapped_words_lines = []
     max_word_line_width = base_dialog_width - padding * 2 - 10 # for the words list
     temp_line = ""
@@ -1078,7 +1075,6 @@ def show_allow_invalid_word_dialog(invalid_words_list):
                 elif event.key == pygame.K_ESCAPE:
                     return False
 
-        # --- Drawing ---
         pygame.draw.rect(screen, DIALOG_COLOR, (dialog_x, dialog_y, dialog_width, dialog_height))
         pygame.draw.rect(screen, BLACK, (dialog_x, dialog_y, dialog_width, dialog_height), 2)
 
@@ -1137,12 +1133,12 @@ def show_load_game_dialog():
     global screen, dialog_font, ui_font, button_font, pyperclip_available, pyperclip
     global DIALOG_COLOR, BLACK, WHITE, BUTTON_COLOR, BUTTON_HOVER, RED # Colors
 
-    dialog_width, dialog_height = 450, 200  # Adjusted size
+    dialog_width, dialog_height = 450, 200
     dialog_x = (WINDOW_WIDTH - dialog_width) // 2
     dialog_y = (WINDOW_HEIGHT - dialog_height) // 2
 
     filename_input = ""
-    input_active = True  # Start with input active
+    input_active = True
     error_message = None
     dialog_running = True
 
@@ -1163,7 +1159,7 @@ def show_load_game_dialog():
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 x_mouse, y_mouse = event.pos
                 input_active = input_rect.collidepoint(x_mouse, y_mouse)
-                error_message = None # Clear error on click
+                error_message = None
 
                 if load_button_rect.collidepoint(x_mouse, y_mouse):
                     if filename_input.strip():
@@ -1171,14 +1167,14 @@ def show_load_game_dialog():
                     else:
                         error_message = "Filename cannot be empty."
                 elif cancel_button_rect.collidepoint(x_mouse, y_mouse):
-                    return None # User cancelled
+                    return None
 
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    return None # User cancelled with Escape
+                    return None
 
                 if input_active:
-                    error_message = None # Clear error on key press
+                    error_message = None
                     if event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
                         if filename_input.strip():
                             return filename_input.strip()
@@ -1186,64 +1182,53 @@ def show_load_game_dialog():
                             error_message = "Filename cannot be empty."
                     elif event.key == pygame.K_BACKSPACE:
                         filename_input = filename_input[:-1]
-                    elif event.key == pygame.K_v: # Paste
+                    elif event.key == pygame.K_v:
                         mods = pygame.key.get_mods()
                         if (mods & pygame.KMOD_CTRL or mods & pygame.KMOD_META) and pyperclip_available and pyperclip:
                             try:
                                 pasted_text = pyperclip.paste()
                                 if pasted_text:
-                                    # Sanitize pasted text a bit (optional, depends on expected filenames)
-                                    # For now, just append. Consider filtering non-filename chars.
+                                    
                                     filename_input += pasted_text.replace('\\n', '').replace('\\r', '')
                             except Exception as e:
                                 print(f"Error pasting from clipboard: {e}")
                                 error_message = "Paste error."
-                    elif event.unicode.isprintable(): # Allow most printable characters
+                    elif event.unicode.isprintable():
                         filename_input += event.unicode
 
-        # --- Drawing ---
-        screen.fill(WHITE) # Redraw background (or mode selection screen if not fully modal)
-                           # For true modal, just draw dialog on top
+        screen.fill(WHITE)
 
-        # Dialog Box
         pygame.draw.rect(screen, DIALOG_COLOR, (dialog_x, dialog_y, dialog_width, dialog_height))
         pygame.draw.rect(screen, BLACK, (dialog_x, dialog_y, dialog_width, dialog_height), 2)
 
-        # Title
         title_surf = dialog_font.render("Load SGS Game", True, BLACK)
         screen.blit(title_surf, (dialog_x + (dialog_width - title_surf.get_width()) // 2, dialog_y + 20))
 
-        # Prompt
         prompt_surf = ui_font.render("Enter filename (e.g., game.sgs):", True, BLACK)
         screen.blit(prompt_surf, (dialog_x + 20, dialog_y + 55))
 
-        # Input Text Box
         pygame.draw.rect(screen, WHITE, input_rect)
         pygame.draw.rect(screen, BLACK, input_rect, 1 if not input_active else 2)
         input_text_surf = ui_font.render(filename_input, True, BLACK)
         screen.blit(input_text_surf, (input_rect.x + 5, input_rect.y + (input_rect.height - input_text_surf.get_height()) // 2))
 
-        # Blinking Cursor
         if input_active and int(time.time() * 2) % 2 == 0:
             cursor_x = input_rect.x + 5 + input_text_surf.get_width()
             cursor_y1 = input_rect.y + 5
             cursor_y2 = input_rect.y + input_rect.height - 5
             pygame.draw.line(screen, BLACK, (cursor_x, cursor_y1), (cursor_x, cursor_y2), 1)
 
-        # Error Message
         if error_message:
             error_surf = ui_font.render(error_message, True, RED)
             screen.blit(error_surf, (dialog_x + 20, dialog_y + 120))
 
-        # Buttons
-        # Load Button
+       
         hover_load = load_button_rect.collidepoint(pygame.mouse.get_pos())
         color_load = BUTTON_HOVER if hover_load else BUTTON_COLOR
         pygame.draw.rect(screen, color_load, load_button_rect)
         load_text_surf = button_font.render("Load", True, BLACK)
         screen.blit(load_text_surf, load_text_surf.get_rect(center=load_button_rect.center))
 
-        # Cancel Button
         hover_cancel = cancel_button_rect.collidepoint(pygame.mouse.get_pos())
         color_cancel = BUTTON_HOVER if hover_cancel else BUTTON_COLOR
         pygame.draw.rect(screen, color_cancel, cancel_button_rect)
@@ -1253,7 +1238,7 @@ def show_load_game_dialog():
         pygame.display.flip()
         pygame.time.Clock().tick(30)
 
-    return None # Should not be reached if loop exits via return
+    return None
 
 
         
@@ -1293,9 +1278,8 @@ def save_game_sgs(filename, game_data_to_save, show_success_dialog=True, is_sile
             print(f"Game state saved successfully to {filename}")
 
         if show_success_dialog:
-            # MODIFIED: Call new dialog function
             message = f"Game saved successfully as:\n\n{filename}\n\n(You can find this file in the same directory as the game.)"
-            show_save_success_dialog(message, "SGS Game Saved", filename) # Pass filename for copying
+            show_save_success_dialog(message, "SGS Game Saved", filename)
         return True
     except IOError as e:
         print(f"Error saving game to {filename}: {e}")
@@ -1317,7 +1301,7 @@ def save_game_sgs(filename, game_data_to_save, show_success_dialog=True, is_sile
 
 
 
-def load_game_sgs(filename, is_silent_batch_run_param=False): # Added is_silent_batch_run_param
+def load_game_sgs(filename, is_silent_batch_run_param=False):
     """
     Loads a complete game state from an .sgs file using pickle.
     Searches for the file in the current directory and all subdirectories.
@@ -1332,41 +1316,33 @@ def load_game_sgs(filename, is_silent_batch_run_param=False): # Added is_silent_
     """
     filepath_to_load = None
     
-    # Search for the file in the current directory and all subdirectories
     for root, dirs, files in os.walk('.'):
         if filename in files:
             filepath_to_load = os.path.join(root, filename)
-            break # Found it, stop searching
+            break
 
     if not filepath_to_load:
-        # If not found after searching, raise the error to be caught by the caller
         print(f"Error: SGS file not found '{filename}' in current directory or subdirectories.")
         raise FileNotFoundError
 
     try:
         with open(filepath_to_load, 'rb') as f_load:
             loaded_data = pickle.load(f_load)
-        if not is_silent_batch_run_param: # Conditional print for success
+        if not is_silent_batch_run_param:
             print(f"Game state loaded successfully from {filepath_to_load}")
 
         if not isinstance(loaded_data, dict) or 'sgs_version' not in loaded_data:
-            # Error messages should always print
             print(f"Error: {filepath_to_load} is not a valid SGS file or is corrupted (missing version).")
             show_message_dialog(f"Error: Not a valid SGS file or corrupted:\n{filepath_to_load}", "SGS Load Error")
             return None
 
-        # Version check print can also be conditional if desired, or kept for info
-        # if loaded_data['sgs_version'] != "1.0":
-        #     if not is_silent_batch_run_param:
-        #         print(f"Warning: SGS file version mismatch. Expected 1.0, got {loaded_data['sgs_version']}")
+        
         return loaded_data
     except (pickle.UnpicklingError, EOFError) as e:
-        # Error messages should always print
         print(f"Error unpickling game data from {filepath_to_load}: {e}")
         show_message_dialog(f"Error reading SGS file (corrupted or invalid format):\n{filepath_to_load}\n\nDetails: {e}", "SGS Load Error")
         return None
     except Exception as e:
-        # Error messages should always print
         print(f"An unexpected error occurred while loading {filepath_to_load}: {e}")
         show_message_dialog(f"Unexpected error loading SGS file:\n{filepath_to_load}\n\nDetails: {e}", "SGS Load Error")
         return None
@@ -1389,12 +1365,9 @@ def save_endgame_puzzle(puzzle_state, formatted_solution_lines, raw_solution_seq
         game_num (int): The number of the game in the batch.
     """
     try:
-        # Get the user's home directory in a cross-platform way
         home_dir = os.path.expanduser('~')
-        # Construct the target directory path
         puzzle_dir = os.path.join(home_dir, 'Documents', 'Endgame Practice')
 
-        # Use exist_ok=True to avoid an error if the directory already exists
         os.makedirs(puzzle_dir, exist_ok=True)
         
         puzzle_data = {
@@ -1403,7 +1376,6 @@ def save_endgame_puzzle(puzzle_state, formatted_solution_lines, raw_solution_seq
             'solution_sequence': raw_solution_sequence
         }
 
-        # Generate a unique filename
         filename = f"{batch_prefix}-GAME-{game_num}-ENDGAME.sge"
         filepath = os.path.join(puzzle_dir, filename)
 
@@ -1414,7 +1386,6 @@ def save_endgame_puzzle(puzzle_state, formatted_solution_lines, raw_solution_seq
         return True
 
     except IOError as e:
-        # This will catch permission errors if Documents isn't writable
         print(f"  -> IO ERROR saving endgame puzzle to {puzzle_dir}: {e}")
         return False
     except Exception as e:
@@ -1435,22 +1406,21 @@ def show_save_success_dialog(message, title, filename_to_copy):
         filename_to_copy (str): The filename that will be copied to the clipboard.
     """
     global screen, dialog_font, ui_font, button_font, pyperclip_available, pyperclip
-    global DIALOG_COLOR, BLACK, WHITE, BUTTON_COLOR, BUTTON_HOVER, GREEN # Colors
+    global DIALOG_COLOR, BLACK, WHITE, BUTTON_COLOR, BUTTON_HOVER, GREEN
 
-    base_dialog_width = 450 # Slightly wider to accommodate two buttons comfortably
-    min_dialog_height = 180 # Minimum height
+    base_dialog_width = 450
+    min_dialog_height = 180
     padding = 15
     line_spacing = 5
     button_area_height = BUTTON_HEIGHT + padding * 2
 
-    # 1. Wrap text
     words = message.split(' ')
     lines = []
     current_line = ''
     max_line_width = base_dialog_width - padding * 2 - 10
 
     for word in words:
-        if '\n' in word: # Handle explicit newlines
+        if '\n' in word:
             parts = word.split('\n')
             for i, part in enumerate(parts):
                 if not part:
@@ -1486,7 +1456,6 @@ def show_save_success_dialog(message, title, filename_to_copy):
     if current_line:
         lines.append(current_line.strip())
 
-    # 2. Calculate required height
     title_height_val = dialog_font.get_linesize()
     text_height_val = len(lines) * ui_font.get_linesize() + max(0, len(lines) - 1) * line_spacing
     required_height = title_height_val + text_height_val + button_area_height + padding * 3
@@ -1496,8 +1465,7 @@ def show_save_success_dialog(message, title, filename_to_copy):
     dialog_x = (WINDOW_WIDTH - dialog_width) // 2
     dialog_y = (WINDOW_HEIGHT - dialog_height) // 2
 
-    # Button Setup
-    copy_button_width = 150 # Wider for "Copy File Name"
+    copy_button_width = 150
     ok_button_rect = pygame.Rect(
         dialog_x + (dialog_width // 2) + (BUTTON_GAP // 2),
         dialog_y + dialog_height - BUTTON_HEIGHT - padding,
@@ -1509,7 +1477,7 @@ def show_save_success_dialog(message, title, filename_to_copy):
         copy_button_width, BUTTON_HEIGHT
     )
     copy_button_text_str = "Copy File Name"
-    copy_button_feedback_timer = 0 # For "Copied!" message
+    copy_button_feedback_timer = 0
 
     dialog_running = True
     while dialog_running:
@@ -1526,7 +1494,7 @@ def show_save_success_dialog(message, title, filename_to_copy):
                         try:
                             pyperclip.copy(filename_to_copy)
                             copy_button_text_str = "Copied!"
-                            copy_button_feedback_timer = current_time + 1000 # Show for 1 second
+                            copy_button_feedback_timer = current_time + 1000
                             print(f"Filename '{filename_to_copy}' copied to clipboard.")
                         except Exception as e:
                             print(f"Error copying to clipboard: {e}")
@@ -1541,12 +1509,10 @@ def show_save_success_dialog(message, title, filename_to_copy):
                 if event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER or event.key == pygame.K_ESCAPE:
                     dialog_running = False
 
-        # Reset copy button text after feedback timer
         if copy_button_feedback_timer > 0 and current_time > copy_button_feedback_timer:
             copy_button_text_str = "Copy File Name"
             copy_button_feedback_timer = 0
 
-        # --- Drawing ---
         pygame.draw.rect(screen, DIALOG_COLOR, (dialog_x, dialog_y, dialog_width, dialog_height))
         pygame.draw.rect(screen, BLACK, (dialog_x, dialog_y, dialog_width, dialog_height), 2)
 
@@ -1559,18 +1525,16 @@ def show_save_success_dialog(message, title, filename_to_copy):
             screen.blit(text_surf, (dialog_x + padding, y_offset))
             y_offset += ui_font.get_linesize() + line_spacing
 
-        # OK Button
         hover_ok = ok_button_rect.collidepoint(pygame.mouse.get_pos())
         color_ok = BUTTON_HOVER if hover_ok else BUTTON_COLOR
         pygame.draw.rect(screen, color_ok, ok_button_rect)
         ok_text_surf = button_font.render("OK", True, BLACK)
         screen.blit(ok_text_surf, ok_text_surf.get_rect(center=ok_button_rect.center))
 
-        # Copy File Name Button
         hover_copy = copy_button_rect.collidepoint(pygame.mouse.get_pos())
         color_copy_bg = BUTTON_COLOR
         if copy_button_text_str == "Copied!":
-            color_copy_bg = DARK_GREEN # Green feedback
+            color_copy_bg = DARK_GREEN
         elif "Failed" in copy_button_text_str or "N/A" in copy_button_text_str:
             color_copy_bg = RED # Red feedback
         elif hover_copy:
@@ -1753,14 +1717,13 @@ def create_board():
     for r, c in dw: board[r][c] = PINK
     for r, c in tl: board[r][c] = BLUE
     for r, c in dl: board[r][c] = LIGHT_BLUE
-    board[7][7] = PINK # Center square
+    board[7][7] = PINK
 
     return board, labels, tiles
 
 
 
 
-# --- Drawing Functions ---
 
 
 
@@ -1776,7 +1739,6 @@ def draw_scoreboard(screen, move_history, scroll_offset, scores, is_ai, player_n
     global is_batch_running
     global ui_font
 
-    # MODIFIED: Reverted scoreboard_x back to BOARD_SIZE + 275
     scoreboard_x = BOARD_SIZE + 275
     scoreboard_y = 40
     scoreboard_width = max(200, WINDOW_WIDTH - scoreboard_x - 20)
@@ -1797,56 +1759,35 @@ def draw_scoreboard(screen, move_history, scroll_offset, scores, is_ai, player_n
 
     current_scroll_offset = scroll_offset # Start with the passed-in scroll offset
 
-    # Calculate total content height based on current move_history
-    # (or history_to_draw if that's what's passed for replay)
+   
     num_history_items = len(move_history)
     total_history_items_height = num_history_items * line_height
 
-    # Calculate total height needed for all content IF it were laid out
-    # This includes the initial Y offset for text.
+    
     total_content_layout_height = initial_y_offset_text + total_history_items_height
 
     if game_over_state and final_scores is not None:
-        # Add height for the gap and the final score line itself
         total_content_layout_height += (line_height // 2) + line_height
 
-    # Determine maximum possible scroll offset
     max_possible_scroll = 0
-    if total_content_layout_height > content_render_height: # Only if content exceeds visible area
+    if total_content_layout_height > content_render_height:
         max_possible_scroll = total_content_layout_height - content_render_height
-    max_possible_scroll = max(0, max_possible_scroll) # Ensure it's not negative
+    max_possible_scroll = max(0, max_possible_scroll)
 
-    # Auto-scroll logic
     if game_over_state and final_scores is not None:
-        # If game is over, always try to scroll to make final scores visible
         current_scroll_offset = max_possible_scroll
     elif num_history_items > 0:
-        # If not game over, auto-scroll to the newest move ONLY IF
-        # the user is already at/near the bottom (or if it's the first few moves).
-        # A simple heuristic: if current scroll is close to max scroll, assume user wants to see new items.
-        # "close to" could be within a line or two.
-        # Or, more simply, if a new item is added, and we were at the bottom, scroll to keep it visible.
-        # For now, let's always try to make the last item visible if not game_over
-        # This will be refined if manual scroll override is needed.
-        # We want the bottom of the last item to be at content_render_height
-
-        # Position of the top of the last item if fully scrolled to it:
-        # initial_y_offset_text + (num_history_items - 1) * line_height
-        # We want its bottom (another line_height down) to be at content_render_height
+        
         desired_top_of_last_item_on_surface = content_render_height - line_height
 
-        # The y_pos of the last item in the full list (if no scrolling)
         y_pos_of_last_item_unscrolled = initial_y_offset_text + (num_history_items - 1) * line_height
 
-        # Required scroll to bring desired_top_of_last_item_on_surface to y_pos_of_last_item_unscrolled
-        # No, this is wrong.
-        # We want y_pos_of_last_item_unscrolled - current_scroll_offset = desired_top_of_last_item_on_surface
-        # So, current_scroll_offset = y_pos_of_last_item_unscrolled - desired_top_of_last_item_on_surface
+        
 
         if num_history_items * line_height + initial_y_offset_text > content_render_height:
              current_scroll_offset = (num_history_items * line_height + initial_y_offset_text) - content_render_height
         else:
-             current_scroll_offset = 0 # Not enough content to scroll
+             current_scroll_offset = 0
         current_scroll_offset = max(0, min(current_scroll_offset, max_possible_scroll))
 
 
@@ -1880,7 +1821,7 @@ def draw_scoreboard(screen, move_history, scroll_offset, scores, is_ai, player_n
         else:
             text = f"{i+1}: {player_label} - Unknown Move Type"
         text_surface = ui_font.render(text, True, BLACK)
-        if y_pos >= 0 and y_pos + line_height <= scoreboard_height : # Check against full scoreboard_height for visibility
+        if y_pos >= 0 and y_pos + line_height <= scoreboard_height :
             if y_pos < content_render_height and (y_pos + line_height) <= content_render_height :
                 if player_idx == 0:
                      highlight_rect = pygame.Rect(0, y_pos, scoreboard_width, line_height)
@@ -1936,7 +1877,6 @@ def draw_rack(player, rack, scores, turn, player_names, dragged_tile=None, drag_
         for i in range(10): angle = i * math.pi / 5; r = radius if i % 2 == 0 else radius / 2; x = center_x + r * math.cos(angle); y = center_y + r * math.sin(angle); points.append((x, y))
         pygame.draw.polygon(screen, TURN_INDICATOR_COLOR, points)
 
-    # Draw tiles (visible or hidden)
     for i, tile in enumerate(rack):
         tile_x = start_x + i * (TILE_WIDTH + TILE_GAP)
         if dragged_tile == (player, i) and drag_pos: continue
@@ -1949,7 +1889,7 @@ def draw_rack(player, rack, scores, turn, player_names, dragged_tile=None, drag_
             else:
                 pygame.draw.rect(screen, GREEN, (tile_x, rack_y, TILE_WIDTH, TILE_HEIGHT)); text = font.render(tile, True, BLACK)
                 screen.blit(text, (tile_x + 5, rack_y + 5))
-        else: # Rack is hidden, draw placeholders
+        else:
             pygame.draw.rect(screen, DARK_GREEN, (tile_x, rack_y, TILE_WIDTH, TILE_HEIGHT))
             pygame.draw.rect(screen, BLACK, (tile_x, rack_y, TILE_WIDTH, TILE_HEIGHT), 1)
 
@@ -1965,12 +1905,11 @@ def draw_rack(player, rack, scores, turn, player_names, dragged_tile=None, drag_
                 pygame.draw.rect(screen, GREEN, (tile_x - TILE_WIDTH // 2, tile_y - TILE_HEIGHT // 2, TILE_WIDTH, TILE_HEIGHT))
                 text = font.render(tile, True, BLACK); screen.blit(text, (tile_x - TILE_WIDTH // 2 + 5, tile_y - TILE_HEIGHT // 2 + 5))
 
-    # --- Button and Icon Drawing ---
     eye_icon_rect = None
     button_start_x = start_x + rack_width + BUTTON_GAP
 
     if is_human_game:
-        eye_icon_width = 30 # Square icon
+        eye_icon_width = 30
         eye_icon_rect = pygame.Rect(button_start_x, rack_y, eye_icon_width, BUTTON_HEIGHT)
         hover_eye = eye_icon_rect.collidepoint(pygame.mouse.get_pos())
         color_eye = BUTTON_HOVER if hover_eye else BUTTON_COLOR
@@ -2024,21 +1963,16 @@ def draw_dev_tools_dialog(screen, cprofile_checked, visualize_batch_checked):
     checkbox_y_visualize = dialog_y + 90 # Adjusted y
     label_x_offset = 30
 
-    # cProfile Checkbox
     cprofile_checkbox_rect = pygame.Rect(checkbox_x, checkbox_y_cprofile, 20, 20)
     draw_checkbox(screen, checkbox_x, checkbox_y_cprofile, cprofile_checked)
-    # MODIFIED: Exact label text
     cprofile_label = ui_font.render("Use cProfile", True, BLACK)
     screen.blit(cprofile_label, (checkbox_x + label_x_offset, checkbox_y_cprofile + 2))
 
-    # Visualize Batch Games Checkbox
     visualize_checkbox_rect = pygame.Rect(checkbox_x, checkbox_y_visualize, 20, 20)
     draw_checkbox(screen, checkbox_x, checkbox_y_visualize, visualize_batch_checked)
-    # MODIFIED: Exact label text
     visualize_label = ui_font.render("Visualize Batch Games", True, BLACK)
     screen.blit(visualize_label, (checkbox_x + label_x_offset, checkbox_y_visualize + 2))
 
-    # OK Button
     ok_button_rect = pygame.Rect(
         dialog_x + (dialog_width - BUTTON_WIDTH) // 2,
         dialog_y + dialog_height - BUTTON_HEIGHT - 20, # Adjusted y for OK button
@@ -5024,7 +4958,7 @@ def draw_simulation_config_dialog_mode_sel(screen, input_texts, active_input_ind
 
 
 
-def draw_hint_dialog(screen, moves, selected_index, dialog_x, dialog_y, scroll_offset, is_simulation_result=False, is_play_disabled=False, is_loaded_or_replay_mode=False):
+def draw_hint_dialog(screen, moves, selected_index, dialog_x, dialog_y, scroll_offset, font_to_use, is_simulation_result=False, is_play_disabled=False, is_loaded_or_replay_mode=False):
     """Draw the hint dialog showing simulation results, with scrolling."""
     dialog_width, dialog_height = 400, 250
     
@@ -5043,8 +4977,9 @@ def draw_hint_dialog(screen, moves, selected_index, dialog_x, dialog_y, scroll_o
     
     hint_rects = []
     
-    # --- Scrolling Logic ---
-    item_height = 30
+    item_padding_vertical = 8
+    item_height = font_to_use.get_linesize() + item_padding_vertical
+    
     total_content_height = len(moves) * item_height
     
     # Create a surface for the scrollable content
@@ -5082,7 +5017,7 @@ def draw_hint_dialog(screen, moves, selected_index, dialog_x, dialog_y, scroll_o
         else:
             text_str = f"{i+1}. {word_display} ({int(score)} pts) at {coord} ({leave_str})"
 
-        text_surface = ui_font.render(text_str, True, BLACK)
+        text_surface = font_to_use.render(text_str, True, BLACK)
 
         max_text_width = rect_on_surface.width - 10
         if text_surface.get_width() > max_text_width:
@@ -5091,21 +5026,19 @@ def draw_hint_dialog(screen, moves, selected_index, dialog_x, dialog_y, scroll_o
                  max_chars = int(max_text_width / avg_char_width) - 3
                  if max_chars < 5: max_chars = 5
                  text_str = text_str[:max_chars] + "..."
-                 text_surface = ui_font.render(text_str, True, BLACK)
+                 text_surface = font_to_use.render(text_str, True, BLACK)
 
-        content_surface.blit(text_surface, (5, i * item_height + 5))
+        text_y_blit_offset = (item_height - text_surface.get_height()) // 2
+        content_surface.blit(text_surface, (5, i * item_height + text_y_blit_offset))
         
-        # Calculate the on-screen rect for click detection
         screen_y = content_area_y + (i * item_height) - scroll_offset
         screen_rect = pygame.Rect(dialog_x + 10, screen_y, content_area_width, item_height)
         hint_rects.append(screen_rect)
 
-    # Blit the visible portion of the content surface to the screen
     visible_area = pygame.Rect(0, scroll_offset, content_area_width, content_area_height)
     screen.blit(content_surface, (dialog_x + 10, content_area_y), visible_area)
     pygame.draw.rect(screen, BLACK, (dialog_x + 10, content_area_y, content_area_width, content_area_height), 1) # Border
 
-    # --- Buttons ---
     button_y_abs = dialog_y + dialog_height - BUTTON_HEIGHT - 10
     total_button_width = 3 * BUTTON_WIDTH + 2 * BUTTON_GAP
     button_start_x_abs = dialog_x + (dialog_width - total_button_width) // 2
@@ -5326,61 +5259,67 @@ def count_consecutive_existing(row, col, direction, tiles):
     while r < GRID_SIZE and tiles[r][col]: count += 1; r += 1
     return count
 
-def calculate_final_scores(current_scores, racks, bag, is_silent_batch_run_param=False): # MODIFIED: Added is_silent_batch_run_param
+
+
+def calculate_final_scores(current_scores, racks, bag, game_clock, is_silent_batch_run_param=False):
     """
-    Calculates the final scores based on game end conditions and remaining tiles.
+    Calculates the final scores based on game end conditions, remaining tiles, and clock penalties.
     Print statements are now conditional.
 
     Args:
         current_scores (list): List containing the scores of [Player1, Player2] before adjustments.
         racks (list): List containing the tile lists for [Player1's rack, Player2's rack].
         bag (list): The list representing the tile bag.
+        game_clock (GameClock or None): The game clock object to check for time penalties.
         is_silent_batch_run_param (bool): If True, suppress informational console output.
 
     Returns:
         list: A new list containing the final adjusted scores for [Player1, Player2].
     """
-    final_scores = list(current_scores) # Start with a copy of current scores
+    final_scores = list(current_scores)
     rack_values = [0, 0]
 
-    # Calculate the value of tiles left on each rack (blanks count as 0)
     for i in range(2):
-        if i < len(racks) and racks[i]: # Check if rack exists and is not None
+        if i < len(racks) and racks[i]:
              rack_values[i] = sum(TILE_DISTRIBUTION[tile][1] for tile in racks[i] if tile != ' ')
-        # else: rack_values[i] remains 0
 
-    # Determine if a player went out (must have empty rack AND bag must be empty)
-    p1_out = (len(racks) > 0 and racks[0] is not None and not racks[0]) and (not bag) # MODIFIED: Check rack existence
-    p2_out = (len(racks) > 1 and racks[1] is not None and not racks[1]) and (not bag) # MODIFIED: Check rack existence
+    p1_out = (len(racks) > 0 and racks[0] is not None and not racks[0]) and (not bag)
+    p2_out = (len(racks) > 1 and racks[1] is not None and not racks[1]) and (not bag)
 
     if p1_out:
-        if not is_silent_batch_run_param: # MODIFIED
+        if not is_silent_batch_run_param:
             print("Final Score Adjust: P1 went out.")
-        # Player 1 went out: Add double Player 2's remaining tile value to P1's score. P2 score unchanged.
         adjustment = 2 * rack_values[1]
         final_scores[0] += adjustment
-        # final_scores[1] remains unchanged
-        if not is_silent_batch_run_param: # MODIFIED
+        if not is_silent_batch_run_param:
             print(f"  P2 tiles value: {rack_values[1]}, P1 adjustment: +{adjustment}")
     elif p2_out:
-        if not is_silent_batch_run_param: # MODIFIED
+        if not is_silent_batch_run_param:
             print("Final Score Adjust: P2 went out.")
-        # Player 2 went out: Add double Player 1's remaining tile value to P2's score. P1 score unchanged.
         adjustment = 2 * rack_values[0]
         final_scores[1] += adjustment
-        # final_scores[0] remains unchanged
-        if not is_silent_batch_run_param: # MODIFIED
+        if not is_silent_batch_run_param:
             print(f"  P1 tiles value: {rack_values[0]}, P2 adjustment: +{adjustment}")
     else:
-        # Neither player went out: Subtract each player's own remaining tile value from their score.
-        if not is_silent_batch_run_param: # MODIFIED
+        if not is_silent_batch_run_param:
             print("Final Score Adjust: Neither player went out.")
         final_scores[0] -= rack_values[0]
         final_scores[1] -= rack_values[1]
-        if not is_silent_batch_run_param: # MODIFIED
+        if not is_silent_batch_run_param:
             print(f"  P1 adjustment: -{rack_values[0]}, P2 adjustment: -{rack_values[1]}")
 
-    if not is_silent_batch_run_param: # MODIFIED
+    if game_clock:
+        for i in range(2):
+            player_time = game_clock.player_times[i]
+            if player_time < 0:
+                overtime_seconds = abs(player_time)
+                penalty_minutes = math.ceil(overtime_seconds / 60)
+                penalty_points = penalty_minutes * 10
+                final_scores[i] -= penalty_points
+                if not is_silent_batch_run_param:
+                    print(f"  Player {i+1} overtime penalty: -{penalty_points} points for {format_duration(overtime_seconds)} overtime.")
+
+    if not is_silent_batch_run_param:
         print(f"  Scores before: {current_scores}, Scores after: {final_scores}")
     return final_scores
 
@@ -5412,7 +5351,6 @@ def play_hint_move(move, tiles, racks, blanks, scores, turn, bag, board, is_ai_p
                 actual_tiles_consumed_from_rack.append(' ')
                 temp_rack_for_consumption_check.remove(' ')
             else:
-                # Critical error
                 if not is_silent_batch_run_param:
                     print(f"CRITICAL Error in play_hint_move: Tried to consume blank for ({r_np},{c_np})='{letter_on_board_np}', but no blank in temp_rack_for_consumption_check: {temp_rack_for_consumption_check}")
                 return turn, [], [], [] 
@@ -5421,7 +5359,6 @@ def play_hint_move(move, tiles, racks, blanks, scores, turn, bag, board, is_ai_p
                 actual_tiles_consumed_from_rack.append(letter_on_board_np)
                 temp_rack_for_consumption_check.remove(letter_on_board_np)
             else:
-                # Critical error
                 if not is_silent_batch_run_param:
                     print(f"CRITICAL Error in play_hint_move: Tried to consume letter '{letter_on_board_np}' for ({r_np},{c_np}), but not in temp_rack_for_consumption_check: {temp_rack_for_consumption_check}")
                 return turn, [], [], [] 
@@ -5436,13 +5373,11 @@ def play_hint_move(move, tiles, racks, blanks, scores, turn, bag, board, is_ai_p
 
     original_rack_counter = Counter(racks[player_idx])
     if blanks_needed_for_board_play > original_rack_counter.get(' ', 0):
-        # Verification error, potentially critical if logic leading here is flawed
         if not is_silent_batch_run_param:
             print(f"Error playing move (verification): Needs {blanks_needed_for_board_play} blanks, only {original_rack_counter.get(' ', 0)} available in original rack.")
         return turn, [], [], []
     for letter_check, count_check in needed_tiles_on_board.items():
         if original_rack_counter.get(letter_check, 0) < count_check:
-            # Verification error
             if not is_silent_batch_run_param:
                 print(f"Error playing move (verification): Needs {count_check} '{letter_check}', only {original_rack_counter.get(letter_check, 0)} available in original rack.")
             return turn, [], [], []
@@ -5450,7 +5385,6 @@ def play_hint_move(move, tiles, racks, blanks, scores, turn, bag, board, is_ai_p
     rack_after_play = racks[player_idx][:] 
 
     if len(actual_tiles_consumed_from_rack) != len(newly_placed_details):
-        # Critical logic error
         if not is_silent_batch_run_param:
             print("CRITICAL Error: Mismatch between consumed tiles and newly placed details lengths.")
         return turn, [], [], []
@@ -5467,7 +5401,6 @@ def play_hint_move(move, tiles, racks, blanks, scores, turn, bag, board, is_ai_p
         if tile_consumed in rack_after_play:
             rack_after_play.remove(tile_consumed)
         else:
-            # Critical error
             if not is_silent_batch_run_param:
                 print(f"Error: Tried to remove '{tile_consumed}' from rack_after_play, but not found. Rack: {rack_after_play}")
             return turn, [], [], [] 
@@ -5481,12 +5414,9 @@ def play_hint_move(move, tiles, racks, blanks, scores, turn, bag, board, is_ai_p
         drawn_tiles = [bag.pop() for _ in range(num_to_draw) if bag]
         rack_after_play.extend(drawn_tiles)
 
-    # MODIFICATION: Conditional sorting
-    # is_silent_batch_run_param is True if (is_batch_running and not DEV_VISUALIZE_BATCH_ENABLED_SESSION)
-    # We sort if it's NOT a silent batch run (i.e., if it's visualized batch or not a batch at all)
     should_sort_rack_play_hint = not is_silent_batch_run_param
     if should_sort_rack_play_hint:
-        if rack_after_play is not None: # Ensure rack exists
+        if rack_after_play is not None:
             rack_after_play.sort() 
 
     racks[player_idx] = rack_after_play
@@ -11617,14 +11547,13 @@ def handle_mouse_down_event(event, state, drawn_rects):
 
 
 
-def draw_all_words_dialog(state, moves, selected_index, current_scroll_offset, dialog_x_param, dialog_y_param, is_play_disabled=False, is_loaded_or_replay_mode=False):
+def draw_all_words_dialog(state, moves, selected_index, current_scroll_offset, dialog_x_param, dialog_y_param, font_to_use, is_play_disabled=False, is_loaded_or_replay_mode=False):
     """
     Draw the dialog showing all valid moves with scrolling, at specified coordinates.
     Uses passed dialog_x_param and dialog_y_param for positioning.
-    MODIFIED: Uses a more robust item_height to prevent text overlap.
-    MODIFIED: Now accepts the 'state' dictionary as a parameter.
+    MODIFIED: Now accepts a font object and uses dynamic item height for a permanent layout fix.
     """
-    global ui_font, dialog_font, button_font 
+    global dialog_font, button_font 
     global DIALOG_COLOR, BLACK, HINT_SELECTED_COLOR, HINT_NORMAL_COLOR, BUTTON_COLOR, GRAYED_OUT_COLOR
     global WINDOW_WIDTH, WINDOW_HEIGHT, ALL_WORDS_DIALOG_WIDTH, ALL_WORDS_DIALOG_HEIGHT, BUTTON_HEIGHT, BUTTON_GAP 
 
@@ -11643,7 +11572,8 @@ def draw_all_words_dialog(state, moves, selected_index, current_scroll_offset, d
     
     content_surface_width = max(1, ALL_WORDS_DIALOG_WIDTH - 20)
     
-    item_height = 30 
+    item_padding_vertical = 8
+    item_height = font_to_use.get_linesize() + item_padding_vertical
 
     total_content_scrollable_height = len(moves) * item_height
     if total_content_scrollable_height == 0: 
@@ -11655,7 +11585,6 @@ def draw_all_words_dialog(state, moves, selected_index, current_scroll_offset, d
     all_words_rects_for_click = [] 
 
     for i, move in enumerate(moves):
-        # THIS IS THE KEY FIX: Calculate a new y-position for each item based on its index.
         y_pos_on_item_surface = i * item_height
             
         color = HINT_SELECTED_COLOR if i == selected_index else HINT_NORMAL_COLOR
@@ -11671,9 +11600,8 @@ def draw_all_words_dialog(state, moves, selected_index, current_scroll_offset, d
         coord = ai_engine.get_coord(start_pos, direction) 
         leave_str = ''.join(sorted(l if l != ' ' else '?' for l in leave))
         
-        # THIS IS THE SECOND KEY FIX: Use i+1 for numbering and int(score) for display.
         text_str_to_render = f"{i+1}. {word_display} ({int(score)} pts) at {coord} ({leave_str})"
-        text_surface_item = ui_font.render(text_str_to_render, True, BLACK)
+        text_surface_item = font_to_use.render(text_str_to_render, True, BLACK)
 
         max_text_width = rect_on_item_surface.width - 10 
         if text_surface_item.get_width() > max_text_width:
@@ -11682,7 +11610,7 @@ def draw_all_words_dialog(state, moves, selected_index, current_scroll_offset, d
                 max_chars = int(max_text_width / avg_char_width) - 3
                 if max_chars < 5: max_chars = 5 
                 text_str_to_render = text_str_to_render[:max_chars] + "..."
-                text_surface_item = ui_font.render(text_str_to_render, True, BLACK) 
+                text_surface_item = font_to_use.render(text_str_to_render, True, BLACK) 
         
         text_y_blit_offset = (item_height - text_surface_item.get_height()) // 2
         content_surface.blit(text_surface_item, (15, y_pos_on_item_surface + text_y_blit_offset))
@@ -12049,7 +11977,6 @@ def _draw_dialogs_and_overlays(screen, state, drawn_rects):
     game_over_state = state['game_over_state']
     is_batch_running = state['is_batch_running']
     
-    # Draw dialogs based on state
     if showing_practice_end_dialog:
         dialog_x_practice = state.get('practice_dialog_x', (WINDOW_WIDTH - 400) // 2)
         dialog_y_practice = state.get('practice_dialog_y', (WINDOW_HEIGHT - 180) // 2)
@@ -12067,7 +11994,7 @@ def _draw_dialogs_and_overlays(screen, state, drawn_rects):
         drawn_rects['profile_checkbox_rect_sim_dialog'] = profile_checkbox_rect_sim_dialog
     elif specifying_rack:
         p1_name_disp = state['player_names'][0] if state['player_names'] and state['player_names'][0] else "Player 1"
-        p2_name_disp = state['player_names'][1] if state['player_names'] and len(state['player_names']) > 1 and state['player_names'][1] else "Player 2"
+        p2_name_disp = state['player_names'][1] if len(state['player_names']) > 1 and state['player_names'][1] else "Player 2"
         p1_input_rect_sr_draw, p2_input_rect_sr_draw, p1_reset_rect_sr_draw, p2_reset_rect_sr_draw, confirm_rect_sr_draw, cancel_rect_sr_draw = draw_specify_rack_dialog(p1_name_disp, p2_name_disp, state['specify_rack_inputs'], state['specify_rack_active_input'], state['specify_rack_original_racks'])
         drawn_rects['p1_input_rect_sr'] = p1_input_rect_sr_draw
         drawn_rects['p2_input_rect_sr'] = p2_input_rect_sr_draw
@@ -12089,7 +12016,7 @@ def _draw_dialogs_and_overlays(screen, state, drawn_rects):
         is_simulation_result = bool(state['hint_moves'] and isinstance(state['hint_moves'][0], dict) and 'final_score' in state['hint_moves'][0])
         is_play_disabled_in_replay_sim = state['replay_mode'] and is_simulation_result
         is_loaded_or_replay = state.get('replay_mode', False)
-        hint_rects_draw, play_button_rect_local_hint, ok_button_rect_local_hint, all_words_button_rect_hint = draw_hint_dialog(screen, state['hint_moves'], state['selected_hint_index'], state['hint_dialog_x'], state['hint_dialog_y'], state['hint_scroll_offset'], is_simulation_result=is_simulation_result, is_play_disabled=is_play_disabled_in_replay_sim, is_loaded_or_replay_mode=is_loaded_or_replay)
+        hint_rects_draw, play_button_rect_local_hint, ok_button_rect_local_hint, all_words_button_rect_hint = draw_hint_dialog(screen, state['hint_moves'], state['selected_hint_index'], state['hint_dialog_x'], state['hint_dialog_y'], state['hint_scroll_offset'], ui_font, is_simulation_result=is_simulation_result, is_play_disabled=is_play_disabled_in_replay_sim, is_loaded_or_replay_mode=is_loaded_or_replay)
         drawn_rects['hint_rects'] = hint_rects_draw
         drawn_rects['play_button_rect'] = play_button_rect_local_hint
         drawn_rects['ok_button_rect'] = ok_button_rect_local_hint
@@ -12103,7 +12030,7 @@ def _draw_dialogs_and_overlays(screen, state, drawn_rects):
         is_simulation_result_aw = bool(state['hint_moves'] and isinstance(state['hint_moves'][0], dict) and 'final_score' in state['hint_moves'][0])
         is_play_disabled_in_all_words = state['replay_mode'] and is_simulation_result_aw
         is_loaded_or_replay = state.get('replay_mode', False)
-        all_words_rects_draw, all_words_play_rect_draw, all_words_ok_rect_draw = draw_all_words_dialog(state, moves_for_all, state['selected_hint_index'], state['all_words_scroll_offset'], state.get('all_words_dialog_x'), state.get('all_words_dialog_y'), is_play_disabled=is_play_disabled_in_all_words, is_loaded_or_replay_mode=is_loaded_or_replay)
+        all_words_rects_draw, all_words_play_rect_draw, all_words_ok_rect_draw = draw_all_words_dialog(state, moves_for_all, state['selected_hint_index'], state['all_words_scroll_offset'], state.get('all_words_dialog_x'), state.get('all_words_dialog_y'), ui_font, is_play_disabled=is_play_disabled_in_all_words, is_loaded_or_replay_mode=is_loaded_or_replay)
         drawn_rects['all_words_rects'] = all_words_rects_draw
         drawn_rects['all_words_play_rect'] = all_words_play_rect_draw
         drawn_rects['all_words_ok_rect'] = all_words_ok_rect_draw
@@ -12221,13 +12148,12 @@ def check_and_handle_game_over(state):
     Print statements are now conditional.
     MODIFIED: Added debug prints for game_ended, final_scores, and game_over_state.
     MODIFIED: Ensures ai_simulation_parameters and bbb settings are saved in SGS for batch games.
+    MODIFIED: Passes the game_clock object to calculate_final_scores for penalty calculation.
     """
     global DEV_VISUALIZE_BATCH_ENABLED_SESSION 
 
-    # --- MODIFICATION START: Add a guard clause to skip this check in endgame practice mode ---
     if state.get('practice_mode') == "endgame":
         return state # In this mode, the game ends only when the puzzle is solved.
-    # --- MODIFICATION END ---
 
     is_silent_run = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
 
@@ -12239,10 +12165,9 @@ def check_and_handle_game_over(state):
     consecutive_zero_point_turns = state['consecutive_zero_point_turns']
     scores = state['scores']
     is_batch_running_local_check = state['is_batch_running'] 
-    initial_game_config = state['initial_game_config'] # Used for batch game settings
+    initial_game_config = state['initial_game_config']
     player_names = state['player_names']
     move_history = state['move_history']
-    # Use current_game_initial_racks if available (set at start of batch game), else fallback
     current_game_initial_racks = state.get('current_game_initial_racks', state.get('initial_racks')) 
     current_batch_game_num = state['current_batch_game_num']
     batch_results = state['batch_results']
@@ -12272,7 +12197,7 @@ def check_and_handle_game_over(state):
 
             if not is_silent_run:
                 print(f"DEBUG check_and_handle_game_over: game_ended is TRUE. Reason: {reason}")
-            final_scores_calc = calculate_final_scores(scores, racks, bag, is_silent_batch_run_param=is_silent_run)
+            final_scores_calc = calculate_final_scores(scores, racks, bag, game_clock, is_silent_batch_run_param=is_silent_run)
             state['final_scores'] = final_scores_calc 
             if not is_silent_run:
                 print(f"DEBUG check_and_handle_game_over: state['final_scores'] set to {state['final_scores']}")
@@ -12307,14 +12232,12 @@ def check_and_handle_game_over(state):
                 batch_prefix = initial_game_config.get('batch_filename_prefix', 'UNKNOWN-BATCH')
                 individual_sgs_filename = f"{batch_prefix}-GAME-{current_batch_game_num}.sgs"
                 
-                # The file is NOT saved here. The filename is just passed for stat collection.
-                # The actual saving is buffered and handled in execute_game_session.
                 game_stats = collect_game_stats(current_batch_game_num, player_names, final_scores_calc, \
                                                 move_history, individual_sgs_filename,
                                                 is_silent_batch_run_param=is_silent_run) 
                 batch_results.append(game_stats)
                 state['batch_results'] = batch_results
-                state['running_inner'] = False # End this game's inner loop for batch
+                state['running_inner'] = False
 
     return state
 
@@ -14282,22 +14205,18 @@ class GameClock:
     def _calculate_time_delta(self):
         """
         Calculates and applies the time delta since the last update.
-        Returns True if time ran out, False otherwise.
+        Allows time to go into negative values.
         """
         if self.is_running and self.last_update_time is not None and self.current_player_idx is not None:
             current_time = time.perf_counter()
             delta_time = current_time - self.last_update_time
             self.last_update_time = current_time
             self.player_times[self.current_player_idx] -= delta_time
-            if self.player_times[self.current_player_idx] <= 0:
-                self.player_times[self.current_player_idx] = 0
-                return True # Time ran out
-        return False # Time has not run out
 
     def stop(self):
         """Stops the clock and performs a final time update."""
         if self.is_running:
-            self._calculate_time_delta() # Final update
+            self._calculate_time_delta()
             self.is_running = False
             self.last_update_time = None
 
@@ -14308,19 +14227,25 @@ class GameClock:
 
     def update(self):
         """Updates the time for the currently active player."""
-        time_ran_out = self._calculate_time_delta()
-        if time_ran_out:
-            self.is_running = False
-            self.last_update_time = None
+        self._calculate_time_delta()
 
     def get_time_str(self, player_index):
-        """Returns the player's time formatted as MM:SS."""
+        """Returns the player's time formatted as MM:SS, handling negative time."""
         total_seconds = self.player_times[player_index]
-        if total_seconds < 0:
-            total_seconds = 0
-        minutes = int(total_seconds // 60)
-        seconds = int(total_seconds % 60)
-        return f"{minutes:02d}:{seconds:02d}"
+        
+        is_negative = total_seconds < 0
+        
+        display_seconds = int(abs(total_seconds))
+        
+        minutes = display_seconds // 60
+        seconds = display_seconds % 60
+        
+        time_str = f"{minutes:02d}:{seconds:02d}"
+        
+        if is_negative:
+            return f"-{time_str}"
+        else:
+            return time_str
 
     def reset(self):
         """Resets the clock to its initial state."""
