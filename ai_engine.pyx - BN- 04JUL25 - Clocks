@@ -1,8 +1,8 @@
 
 
 #ai_engine.pyx
-#ai_engine_pyx - BN - 04JUL25
-#Added score adjustments to overtime
+#ai_engine_pyx - BO - 19JUL25
+#Changed batch game save location to Documents/Batch Games
 
 
 
