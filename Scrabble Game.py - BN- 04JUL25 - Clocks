@@ -3,12 +3,12 @@
 
 
 #python
-#Scrabble BN
-#Added score adjustments to overtime
+#Scrabble BO
+#Changed batch game save location to Documents/Batch Games
 
 
 
-#04JUL25
+#19JUL25
 
 
 
@@ -959,13 +959,17 @@ def trigger_save_game_in_progress(current_game_state_dict):
         if 'final_scores_adjusted' in game_data_to_save:
             del game_data_to_save['final_scores_adjusted']
 
+        home_dir = os.path.expanduser('~')
+        save_dir = os.path.join(home_dir, 'Documents')
+        os.makedirs(save_dir, exist_ok=True)
+
         now = datetime.datetime.now()
         date_str = now.strftime("%d%b%y").upper()
         time_str = now.strftime("%H%M")
         seq_num = 1
         max_existing_num = 0
         try:
-            for filename_os in os.listdir('.'):
+            for filename_os in os.listdir(save_dir):
                 if filename_os.startswith(f"{date_str}-") and filename_os.endswith(".sgs") and "-SGSGAME-" in filename_os:
                     parts = filename_os[:-4].split('-')
                     if len(parts) >= 4 and parts[2] == "SGSGAME":
@@ -976,9 +980,10 @@ def trigger_save_game_in_progress(current_game_state_dict):
         except OSError as e_os_err:
             print(f"Error listing directory for SGS save sequence number: {e_os_err}")
         
-        save_filename_sgs = f"{date_str}-{time_str}-SGSGAME-{seq_num}.sgs"
+        base_filename = f"{date_str}-{time_str}-SGSGAME-{seq_num}.sgs"
+        save_filepath_sgs = os.path.join(save_dir, base_filename)
         
-        success = save_game_sgs(save_filename_sgs, game_data_to_save, show_success_dialog=(not is_silent_run), is_silent_batch_run_param=is_silent_run)
+        success = save_game_sgs(save_filepath_sgs, game_data_to_save, show_success_dialog=(not is_silent_run), is_silent_batch_run_param=is_silent_run)
         return success
     except Exception as e:
         print(f"Error preparing data for in-progress save: {e}")
@@ -9539,18 +9544,10 @@ def _handle_mouse_down_game_over_dialog(event, state, drawn_rects):
     """
     Handles MOUSEBUTTONDOWN events when the Game Over dialog is showing.
     This includes interactions with its buttons and the Statistics sub-dialog.
-    MODIFIED: Uses a unique key for the game over dialog's replay button rect.
-    MODIFIED: Calls generate_turn_insights_data when entering replay mode.
-    MODIFIED: Defined is_silent_run locally.
-    MODIFIED: Displays "Generating Insights..." message.
-    MODIFIED: Ensures save_game_sgs is called with show_success_dialog=True.
-    MODIFIED: Constructs in-memory SGS data when entering replay from a live game.
-    This is a full and complete function with no code omitted.
     """
     global DEV_VISUALIZE_BATCH_ENABLED_SESSION 
     global insights_data_for_replay 
-    global screen, ui_font, RED, WHITE, BLUE # For loading message
-    # Constants for default AI sim params if not found in loaded SGS
+    global screen, ui_font, RED, WHITE, BLUE
     global DEFAULT_AI_CANDIDATES, DEFAULT_OPPONENT_SIMULATIONS, DEFAULT_POST_SIM_CANDIDATES
 
 
@@ -9615,13 +9612,17 @@ def _handle_mouse_down_game_over_dialog(event, state, drawn_rects):
                         'bbb_8l_max_prob': state.get('bbb_8l_max_prob_global', 1000)
                     }
                 }
+                home_dir = os.path.expanduser('~')
+                save_dir = os.path.join(home_dir, 'Documents')
+                os.makedirs(save_dir, exist_ok=True)
+                
                 now = datetime.datetime.now()
                 date_str = now.strftime("%d%b%y").upper()
                 time_str = now.strftime("%H%M")
                 seq_num = 1
                 max_existing_num = 0
                 try:
-                    for filename_os in os.listdir('.'):
+                    for filename_os in os.listdir(save_dir):
                         if filename_os.startswith(f"{date_str}-") and filename_os.endswith(".sgs") and "-SGSGAME-" in filename_os:
                             parts = filename_os[:-4].split('-');
                             if len(parts) >= 4 and parts[2] == "SGSGAME":
@@ -9631,8 +9632,11 @@ def _handle_mouse_down_game_over_dialog(event, state, drawn_rects):
                     seq_num = max_existing_num + 1
                 except OSError as e_os_err:
                     print(f"Warning: Error listing directory for SGS save sequence number: {e_os_err}")
-                save_filename_sgs = f"{date_str}-{time_str}-SGSGAME-{seq_num}.sgs"
-                save_game_sgs(save_filename_sgs, game_data_for_sgs,
+                
+                base_filename = f"{date_str}-{time_str}-SGSGAME-{seq_num}.sgs"
+                save_filepath_sgs = os.path.join(save_dir, base_filename)
+
+                save_game_sgs(save_filepath_sgs, game_data_for_sgs,
                                   show_success_dialog=True, 
                                   is_silent_batch_run_param=is_silent_run)
             else:
@@ -9652,7 +9656,6 @@ def _handle_mouse_down_game_over_dialog(event, state, drawn_rects):
                 if not is_silent_run:
                     print("Entering Replay Mode (from Game Over Dialog)...")
                 
-                # --- MODIFICATION START: Construct SGS data if not already loaded ---
                 game_data_for_insights = sgs_loaded_game_data_local
                 if not game_data_for_insights:
                     if not is_silent_run:
@@ -9663,11 +9666,8 @@ def _handle_mouse_down_game_over_dialog(event, state, drawn_rects):
                         'full_move_history': state.get('move_history', []),
                         'player_names': state.get('player_names', ["P1", "P2"]),
                         'final_scores_adjusted': state.get('final_scores', [0,0])
-                        # Add other necessary keys if get_sgs_replay_state needs them
                     }
-                    # Store this constructed data back into the main state
                     state['sgs_loaded_game_data'] = game_data_for_insights
-                # --- MODIFICATION END ---
 
                 if gaddag_loading_status == 'loaded' and GADDAG_STRUCTURE is not None:
                     if not is_silent_run:
@@ -13506,11 +13506,15 @@ def save_sgs_batch(sgs_data_buffer, is_silent_run):
     if not is_silent_run:
         print(f"--- Writing batch of {len(sgs_data_buffer)} SGS files to disk... ---")
 
+    home_dir = os.path.expanduser('~')
+    batch_save_dir = os.path.join(home_dir, 'Documents', 'Batch Games')
+    os.makedirs(batch_save_dir, exist_ok=True)
+
     for filename, game_data in sgs_data_buffer:
         try:
-            save_game_sgs(filename, game_data, show_success_dialog=False, is_silent_batch_run_param=True)
+            full_filepath = os.path.join(batch_save_dir, filename)
+            save_game_sgs(full_filepath, game_data, show_success_dialog=False, is_silent_batch_run_param=True)
         except Exception as e:
-            # Log error but continue trying to save others
             print(f"  ERROR saving individual game SGS '{filename}' during batch write: {e}")
     
     if not is_silent_run:
@@ -14616,7 +14620,6 @@ def main(is_initialized_from_outer_loop_param):
         profiler = cProfile.Profile()
         
         temp_namespace = {}
-        # Pass game_clock into the execution context for the profiler
         profiler.runctx('temp_namespace["result"] = execute_game_session(is_initialized_from_outer_loop_param, game_clock)',
                         globals(),
                         {'execute_game_session': execute_game_session,
@@ -14632,14 +14635,10 @@ def main(is_initialized_from_outer_loop_param):
         if is_batch_running:
             just_finished_a_batch = True
     else:
-        # Pass game_clock as an argument in the standard call
         session_flags = execute_game_session(is_initialized_from_outer_loop_param, game_clock)
         
     if is_batch_running:
         just_finished_a_batch = True
-
-    if just_finished_a_batch:
-        return False, False 
 
     _module_level_batch_stop_requested_main = session_flags.get('batch_stop_requested', False)
     _local_start_new_game_same_mode_main = session_flags.get('start_new_game_same_mode', False)
@@ -14668,8 +14667,8 @@ if __name__ == "__main__":
     ai_sim_num_candidates_global = DEFAULT_AI_CANDIDATES
     ai_sim_num_opponent_sims_global = DEFAULT_OPPONENT_SIMULATIONS
     ai_sim_num_post_sim_candidates_global = DEFAULT_POST_SIM_CANDIDATES
-    bbb_7l_max_prob_global = 1000 # Default integer value
-    bbb_8l_max_prob_global = 1000 # Default integer value
+    bbb_7l_max_prob_global = 6370
+    bbb_8l_max_prob_global = 3669
 
     startup_initialization()
     
