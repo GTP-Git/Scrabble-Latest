@@ -1,9 +1,10 @@
 
 
 #ai_engine.pyx
-#ai_engine_pyx - BO - 19JUL25
-#Changed batch game save location to Documents/Batch Games
-
+#ai_engine_pyx - BP - 19JUL25
+# Made AI opponent's Unseen Tiles hidden by default, eye icon hides/reveals
+# In HVA mode, the AI now won't start thinking about their turn until the human reveals their rack.
+# This will allow the human to see their rack on the first turn while the AI is thinking.
 
 
 
