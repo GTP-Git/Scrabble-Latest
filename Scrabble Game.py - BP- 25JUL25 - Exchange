@@ -6372,7 +6372,9 @@ def ai_turn(state):
     """
     Handles the AI's turn by calling the unified Cython decision-making function
     and then executing the returned action.
+    MODIFIED: Now includes clock management to adapt simulation parameters based on time.
     """
+    # Add a guard clause at the top to prevent any action if the game is already paused for practice.
     if state.get('paused_for_power_tile') or state.get('paused_for_bingo_practice'):
         return state
 
@@ -6382,11 +6384,63 @@ def ai_turn(state):
 
     is_silent_batch_run_param = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
     
+    # Unpack needed state
     turn = state['turn']
     player_idx = turn - 1
     opponent_idx = 1 - player_idx
     current_rack = state['racks'][player_idx][:] if 0 <= player_idx < len(state['racks']) and state['racks'][player_idx] is not None else []
     
+    # --- NEW: Clock Management Logic ---
+    # 1. Get user-configured baseline parameters
+    base_candidates = state.get('ai_sim_num_candidates_cfg', DEFAULT_AI_CANDIDATES)
+    base_opp_sims = state.get('ai_sim_num_opponent_sims_cfg', DEFAULT_OPPONENT_SIMULATIONS)
+    base_post_sim = state.get('ai_sim_num_post_sim_candidates_cfg', DEFAULT_POST_SIM_CANDIDATES)
+
+    # 2. Get AI's remaining time
+    game_clock = state.get('game_clock')
+    remaining_time = 9999  # Default to safe if no clock
+    if game_clock:
+        remaining_time = game_clock.player_times[player_idx]
+
+    # 3. Determine parameters for this turn based on time
+    sim_params = {}
+
+    if remaining_time > 300:  # More than 5 minutes -> Full Power
+        sim_params['use_sim'] = USE_AI_SIMULATION
+        sim_params['ply_depth'] = 2
+        sim_params['num_candidates'] = base_candidates
+        sim_params['num_opponent_sims'] = base_opp_sims
+        sim_params['num_post_sim_candidates'] = base_post_sim
+    elif remaining_time > 120:  # 2-5 minutes -> Caution
+        sim_params['use_sim'] = USE_AI_SIMULATION
+        sim_params['ply_depth'] = 2
+        sim_params['num_candidates'] = max(1, int(base_candidates * 0.75))
+        sim_params['num_opponent_sims'] = max(1, int(base_opp_sims * 0.6))
+        sim_params['num_post_sim_candidates'] = max(1, int(base_post_sim * 0.75))
+    elif remaining_time > 30:  # 30-120 seconds -> Urgent (1-ply)
+        sim_params['use_sim'] = True # Force sim to be on to get prelim_equity
+        sim_params['ply_depth'] = 1
+        sim_params['num_candidates'] = max(1, int(base_candidates * 0.5))
+        sim_params['num_opponent_sims'] = 0 # 1-ply does not use this
+        sim_params['num_post_sim_candidates'] = max(1, int(base_post_sim * 0.5))
+    else:  # Less than 30 seconds -> Critical (No sim)
+        sim_params['use_sim'] = False
+        sim_params['ply_depth'] = 0
+        sim_params['num_candidates'] = 0
+        sim_params['num_opponent_sims'] = 0
+        sim_params['num_post_sim_candidates'] = 0
+    
+    # For the first 6 turns (3 for each player), use full power if not in critical time
+    if len(state.get('move_history', [])) < 6 and remaining_time > 30:
+        sim_params['use_sim'] = USE_AI_SIMULATION
+        sim_params['ply_depth'] = 2
+        sim_params['num_candidates'] = base_candidates
+        sim_params['num_opponent_sims'] = base_opp_sims
+        sim_params['num_post_sim_candidates'] = base_post_sim
+
+    # --- END: Clock Management Logic ---
+
+    # Prepare other arguments for the Cython function
     opponent_rack_len = len(state['racks'][opponent_idx]) if 0 <= opponent_idx < len(state['racks']) and state['racks'][opponent_idx] is not None else 7
     current_score_diff = state['scores'][player_idx] - state['scores'][opponent_idx]
     is_plaid_mode = state.get('initial_game_config', {}).get('plaid_mode', False)
@@ -6399,30 +6453,29 @@ def ai_turn(state):
         '8L_max': bbb_8l_max_prob_global
     }
 
+    # Call the unified Cython AI brain with the new sim_params
     action_chosen, details = ai_engine.determine_best_action(
         current_rack, state['tiles'], state['board'], state['blanks'], state['bag'][:], state['first_play'],
-        USE_AI_SIMULATION, USE_ENDGAME_SOLVER, is_plaid_mode,
-        opponent_rack_len, state.get('ai_sim_num_candidates_cfg', DEFAULT_AI_CANDIDATES),
-        state.get('ai_sim_num_opponent_sims_cfg', DEFAULT_OPPONENT_SIMULATIONS),
-        state.get('ai_sim_num_post_sim_candidates_cfg', DEFAULT_POST_SIM_CANDIDATES),
+        USE_ENDGAME_SOLVER, is_plaid_mode,
+        opponent_rack_len,
+        sim_params,  # Pass the new dictionary
         current_score_diff, pass_count, state['practice_mode'], state['letter_checks'], bbb_thresholds,
         is_silent_batch_run_param=is_silent_batch_run_param
     )
 
+    # --- Process the result from the Cython function (this part remains the same) ---
     if action_chosen == 'PAUSE':
         if details['type'] == 'power_tile':
             state['paused_for_power_tile'] = True
             state['current_power_tile'] = details['tile']
             if not is_silent_batch_run_param:
-                print(f"AI turn PAUSING for power tile practice. Target: \{details['tile']\}")
+                print(f"AI turn PAUSING for power tile practice. Target: \{details['tile']}")
         elif details['type'] == 'bingo_bango_bongo':
             state['paused_for_bingo_practice'] = True
             state['all_moves'] = details['moves']
             if not is_silent_batch_run_param:
                 print(f"AI turn PAUSING for Bingo, Bango, Bongo.")
         
-        
-
         return state
 
     move_rack_before = state['racks'][player_idx][:] if 0 <= player_idx < len(state['racks']) and state['racks'][player_idx] is not None else []
@@ -6451,7 +6504,6 @@ def ai_turn(state):
             'player': turn, 'move_type': 'place', 'rack': move_rack_before, 'drawn': drawn_tiles,
             'newly_placed': newly_placed, 'tiles_played_from_rack': tiles_consumed,
             'coord': ai_engine.get_coord(details.get('start', (0,0)), details.get('direction', 'right'), is_silent_batch_run_param)
-        
         })
         state['first_play'] = False
         state['consecutive_zero_point_turns'] = 0
@@ -6464,7 +6516,7 @@ def ai_turn(state):
         exchanged_tiles = details[:]
         current_rack_list = state['racks'][player_idx]
         
-        temp_rack = current_rack_list[:] # Make a mutable copy
+        temp_rack = current_rack_list[:]
         for tile_to_remove in exchanged_tiles:
             if tile_to_remove in temp_rack:
                 temp_rack.remove(tile_to_remove)
@@ -6488,7 +6540,7 @@ def ai_turn(state):
         state['turn'] = 3 - turn
         state['last_played_highlight_coords'] = set()
 
-    else:
+    else: # Pass
         leave = state['racks'][player_idx][:]
         details = {'score': 0, 'word': '', 'positions': [], 'blanks': set(), 'is_bingo': False, 'word_with_blanks': '', 'leave': leave}
         details.update({'player': turn, 'move_type': 'pass', 'rack': move_rack_before, 'drawn': [], 'coord': '', 'tiles_played_from_rack': []})
@@ -6505,11 +6557,10 @@ def ai_turn(state):
     
     details['total_expected_draw_value'] = total_expected_value_of_this_draw
     details['luck_factor'] = luck_factor
-    details['turn_duration'] = 0.0
+    details['turn_duration'] = 0.0 # Placeholder
     
     state['move_history'].append(details)
     state['current_replay_turn'] = len(state['move_history'])
-    
     
     state['human_played'] = False
 
@@ -8744,7 +8795,7 @@ def _handle_mouse_down_exchange_dialog(event, state, drawn_rects):
                 if selected_tiles:
                     tiles_to_exchange_list = [racks[turn-1][i_sel] for i_sel in selected_tiles]
                     if not is_silent_run_local:
-                        print(f"Player \{turn\} exchanging \{len(tiles_to_exchange_list)\} tiles: \{''.join(sorted(tiles_to_exchange_list))\}")
+                        print(f"Player \{turn} exchanging \{len(tiles_to_exchange_list)} tiles: \{''.join(sorted(tiles_to_exchange_list))}")
                     
                     move_rack_before_exchange = racks[turn-1][:] if 0 <= turn-1 < len(racks) and racks[turn-1] is not None else []
                     
@@ -8779,7 +8830,7 @@ def _handle_mouse_down_exchange_dialog(event, state, drawn_rects):
                         luck_factor_exchange = drawn_leave_value_exchange - expected_draw_value_simple_exchange
                         if not is_silent_run_local:
                             drawn_tiles_str_exchange = "".join(sorted(t if t != ' ' else '?' for t in drawn_tiles_exchange))
-                            print(f"  Drew (Exchange): \{drawn_tiles_str_exchange\}, Leave Value: \{drawn_leave_value_exchange:.2f\}, Luck: \{luck_factor_exchange:+.2f\}")
+                            print(f"  Drew (Exchange): \{drawn_tiles_str_exchange}, Leave Value: \{drawn_leave_value_exchange:.2f}, Luck: \{luck_factor_exchange:+.2f}")
                     
                     state['move_history'].append({
                         'player': turn, 'move_type': 'exchange', 
