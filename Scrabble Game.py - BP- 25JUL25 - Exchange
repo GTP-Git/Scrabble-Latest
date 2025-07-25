@@ -4,13 +4,10 @@
 
 #python
 #Scrabble BP
-# Made AI opponent's Unseen Tiles hidden by default, eye icon hides/reveals
-# In HVA mode, the AI now won't start thinking about their turn until the human reveals their rack.
-# This will allow the human to see their rack on the first turn while the AI is thinking.
-#
+# Fixed exchange bug, ensured exchanged tiles can't be redrawn
 
 
-#19JUL25
+#25JUL25
 
 
 
@@ -909,7 +906,7 @@ def trigger_save_game_in_progress(current_game_state_dict):
     Returns:
         bool: True if save was successful, False otherwise.
     """
-    global DEV_VISUALIZE_BATCH_ENABLED_SESSION
+    global DEV_VISUALIZE_BATCH_ENABLED_SESSION # For conditional printing
     is_silent_run = current_game_state_dict.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
 
     if not is_silent_run:
@@ -936,8 +933,7 @@ def trigger_save_game_in_progress(current_game_state_dict):
                 'current_exchange_count': current_game_state_dict.get('exchange_count', 0),
                 'current_consecutive_zero_point_turns': current_game_state_dict.get('consecutive_zero_point_turns', 0),
                 'current_last_played_highlight_coords': current_game_state_dict.get('last_played_highlight_coords', set()),
-                'rack_visibility': current_game_state_dict.get('rack_visibility', [True, True]),
-                'unseen_tiles_visible': current_game_state_dict.get('unseen_tiles_visible', False),
+                'rack_visibility': current_game_state_dict.get('rack_visibility', [True, True]), # Save visibility state
                 'previous_turn_state_for_luck_calc': current_game_state_dict.get('current_turn_pool_quality_score', 0.0) # Save for luck on load
             },
             
@@ -4612,94 +4608,66 @@ def get_words_played(word_positions, tiles):
 
     
 
-def draw_remaining_tiles(unseen_tiles_dict, turn, bag_count, game_mode, is_ai_turn, is_visible):
-    """
-    Draw the list of remaining tiles, with a visibility toggle for the AI's turn in HVA mode.
-    Returns the clickable rect for the visibility icon, if drawn.
-    """
-    global practice_mode, ui_font, tile_count_font, BLACK, BUTTON_HEIGHT, BUTTON_HOVER, BUTTON_COLOR, MODE_HVA
-
-    if practice_mode == "eight_letter":
-        return None
-
+def draw_remaining_tiles(unseen_tiles_dict, turn, bag_count):
+    """Draw the list of remaining tiles by repeating letters."""
+    global practice_mode
+    if practice_mode == "eight_letter": return # Don't draw remaining tiles in this mode
+    
     remaining_x = min(BOARD_SIZE + 70, WINDOW_WIDTH - 200)
-    if remaining_x < BOARD_SIZE + 10:
-        remaining_x = BOARD_SIZE + 10
-
+    if remaining_x < BOARD_SIZE + 10: remaining_x = BOARD_SIZE + 10
+    
     title_text = ui_font.render(f"P{turn}'s Unseen Tiles:", True, BLACK)
     screen.blit(title_text, (remaining_x, 10))
+    
+    y_pos = 40
+    col_width = 60
+    max_y = WINDOW_HEIGHT - 100
+    sorted_letters = sorted(unseen_tiles_dict.keys())
+    current_col_x = remaining_x
+    items_in_col = 0
+    max_items_per_col = (max_y - y_pos) // 20
+    if max_items_per_col <= 0: max_items_per_col = 1
+    
+    last_drawn_y = 40 
+    last_drawn_col_x = remaining_x 
 
-    eye_icon_rect = None
-    show_eye_icon = (game_mode == MODE_HVA and is_ai_turn)
+    surfaces_to_blit = []
+    for letter in sorted_letters:
+        count = unseen_tiles_dict.get(letter, 0)
+        if count > 0:
+            display_letter = "?" if letter == " " else letter
+            text_str = display_letter * count
+            text = tile_count_font.render(text_str, True, BLACK)
+            
+            if items_in_col >= max_items_per_col:
+                y_pos = 40 
+                current_col_x += col_width
+                items_in_col = 0
+            
+            surfaces_to_blit.append((text, (current_col_x, y_pos)))
+            
+            last_drawn_y = y_pos 
+            last_drawn_col_x = current_col_x 
+            y_pos += 20
+            items_in_col += 1
 
-    if show_eye_icon:
-        eye_icon_width = 30
-        eye_icon_x = remaining_x + title_text.get_width() + 10
-        # Vertically align the button with the text
-        eye_icon_y = 10 + (title_text.get_height() - BUTTON_HEIGHT) // 2
-        eye_icon_rect = pygame.Rect(eye_icon_x, eye_icon_y, eye_icon_width, BUTTON_HEIGHT)
-        
-        hover_eye = eye_icon_rect.collidepoint(pygame.mouse.get_pos())
-        color_eye = BUTTON_HOVER if hover_eye else BUTTON_COLOR
-        pygame.draw.rect(screen, color_eye, eye_icon_rect)
-        draw_visibility_icon(screen, eye_icon_rect, is_visible)
+    # Now blit all at once
+    for surf, pos in surfaces_to_blit:
+        screen.blit(surf, pos)
 
-    draw_the_list = True
-    if show_eye_icon and not is_visible:
-        draw_the_list = False
+    summary_y_start = last_drawn_y + 20 + 5
+    summary_y_start = min(summary_y_start, max_y + 40) 
 
-    if draw_the_list:
-        y_pos = 40
-        col_width = 60
-        max_y = WINDOW_HEIGHT - 100
-        sorted_letters = sorted(unseen_tiles_dict.keys())
-        current_col_x = remaining_x
-        items_in_col = 0
-        max_items_per_col = (max_y - y_pos) // 20
-        if max_items_per_col <= 0:
-            max_items_per_col = 1
-        
-        last_drawn_y = 40
-        last_drawn_col_x = remaining_x
+    vowels = sum(unseen_tiles_dict.get(letter, 0) for letter in 'AEIOU')
+    consonants = sum(unseen_tiles_dict.get(letter, 0) for letter in unseen_tiles_dict if letter.isalpha() and letter not in 'AEIOU ')
+    blanks_rem = unseen_tiles_dict.get(' ', 0)
+    
+    text1 = tile_count_font.render(f"Tiles In Bag: {bag_count}", True, BLACK)
+    text2 = tile_count_font.render(f"V: {vowels}  C: {consonants}  B: {blanks_rem}", True, BLACK)
 
-        surfaces_to_blit = []
-        for letter in sorted_letters:
-            count = unseen_tiles_dict.get(letter, 0)
-            if count > 0:
-                display_letter = "?" if letter == " " else letter
-                text_str = display_letter * count
-                text = tile_count_font.render(text_str, True, BLACK)
-                
-                if items_in_col >= max_items_per_col:
-                    y_pos = 40
-                    current_col_x += col_width
-                    items_in_col = 0
-                
-                surfaces_to_blit.append((text, (current_col_x, y_pos)))
-                
-                last_drawn_y = y_pos
-                last_drawn_col_x = current_col_x
-                y_pos += 20
-                items_in_col += 1
-
-        for surf, pos in surfaces_to_blit:
-            screen.blit(surf, pos)
-
-        summary_y_start = last_drawn_y + 20 + 5
-        summary_y_start = min(summary_y_start, max_y + 40)
-
-        vowels = sum(unseen_tiles_dict.get(letter, 0) for letter in 'AEIOU')
-        consonants = sum(unseen_tiles_dict.get(letter, 0) for letter in unseen_tiles_dict if letter.isalpha() and letter not in 'AEIOU ')
-        blanks_rem = unseen_tiles_dict.get(' ', 0)
-        
-        text1 = tile_count_font.render(f"Tiles In Bag: {bag_count}", True, BLACK)
-        text2 = tile_count_font.render(f"V: {vowels}  C: {consonants}  B: {blanks_rem}", True, BLACK)
-
-        summary_x = remaining_x
-        screen.blit(text1, (summary_x, summary_y_start))
-        screen.blit(text2, (summary_x, summary_y_start + 20))
-
-    return eye_icon_rect
+    summary_x = remaining_x
+    screen.blit(text1, (summary_x, summary_y_start))
+    screen.blit(text2, (summary_x, summary_y_start + 20))
 
 
 
@@ -6376,15 +6344,12 @@ def draw_simulation_config_dialog(input_texts, active_input_index, state):
             cursor_x_pos = rect.x + 5 + text_surf.get_width()
             pygame.draw.line(screen, BLACK, (cursor_x_pos, rect.y + 5), (cursor_x_pos, rect.bottom - 5), 1)
 
-    # --- NEW: Add Profile Checkbox ---
     profile_checkbox_y = input_y_start + len(labels) * (input_height + input_gap)
     profile_checkbox_rect = pygame.Rect(label_x, profile_checkbox_y, 20, 20)
     draw_checkbox(screen, profile_checkbox_rect.x, profile_checkbox_rect.y, state.get('profile_simulation_checked', False))
     profile_label_surf = ui_font.render("Profile this simulation", True, BLACK)
     screen.blit(profile_label_surf, (profile_checkbox_rect.right + 5, profile_checkbox_rect.y + 2))
-    # --- END NEW ---
 
-    # Bottom Buttons
     button_y = dialog_y + dialog_height - BUTTON_HEIGHT - 20
     simulate_rect = pygame.Rect(dialog_x + dialog_width // 2 - BUTTON_WIDTH - BUTTON_GAP // 2, button_y, BUTTON_WIDTH, BUTTON_HEIGHT)
     cancel_rect = pygame.Rect(dialog_x + dialog_width // 2 + BUTTON_GAP // 2, button_y, BUTTON_WIDTH, BUTTON_HEIGHT)
@@ -6395,7 +6360,6 @@ def draw_simulation_config_dialog(input_texts, active_input_index, state):
     screen.blit(simulate_text, simulate_text.get_rect(center=simulate_rect.center))
     screen.blit(cancel_text, cancel_text.get_rect(center=cancel_rect.center))
 
-    # Return all clickable rects, including the new checkbox
     return input_rects, simulate_rect, cancel_rect, profile_checkbox_rect
 
 
@@ -6409,7 +6373,6 @@ def ai_turn(state):
     Handles the AI's turn by calling the unified Cython decision-making function
     and then executing the returned action.
     """
-    # Add a guard clause at the top to prevent any action if the game is already paused for practice.
     if state.get('paused_for_power_tile') or state.get('paused_for_bingo_practice'):
         return state
 
@@ -6419,19 +6382,16 @@ def ai_turn(state):
 
     is_silent_batch_run_param = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
     
-    # Unpack needed state
     turn = state['turn']
     player_idx = turn - 1
     opponent_idx = 1 - player_idx
     current_rack = state['racks'][player_idx][:] if 0 <= player_idx < len(state['racks']) and state['racks'][player_idx] is not None else []
     
-    # Prepare arguments for the Cython function
     opponent_rack_len = len(state['racks'][opponent_idx]) if 0 <= opponent_idx < len(state['racks']) and state['racks'][opponent_idx] is not None else 7
     current_score_diff = state['scores'][player_idx] - state['scores'][opponent_idx]
     is_plaid_mode = state.get('initial_game_config', {}).get('plaid_mode', False)
     pass_count = state.get('pass_count', 0)
     
-    # Prepare BBB thresholds to pass to Cython
     bbb_thresholds = {
         '7L_words': seven_letter_words,
         '8L_words': eight_letter_words,
@@ -6439,7 +6399,6 @@ def ai_turn(state):
         '8L_max': bbb_8l_max_prob_global
     }
 
-    # Call the unified Cython AI brain
     action_chosen, details = ai_engine.determine_best_action(
         current_rack, state['tiles'], state['board'], state['blanks'], state['bag'][:], state['first_play'],
         USE_AI_SIMULATION, USE_ENDGAME_SOLVER, is_plaid_mode,
@@ -6450,13 +6409,12 @@ def ai_turn(state):
         is_silent_batch_run_param=is_silent_batch_run_param
     )
 
-    # --- Process the result from the Cython function ---
     if action_chosen == 'PAUSE':
         if details['type'] == 'power_tile':
             state['paused_for_power_tile'] = True
             state['current_power_tile'] = details['tile']
             if not is_silent_batch_run_param:
-                print(f"AI turn PAUSING for power tile practice. Target: {details['tile']}")
+                print(f"AI turn PAUSING for power tile practice. Target: \{details['tile']\}")
         elif details['type'] == 'bingo_bango_bongo':
             state['paused_for_bingo_practice'] = True
             state['all_moves'] = details['moves']
@@ -6465,12 +6423,10 @@ def ai_turn(state):
         
         
 
-        return state # Return early, turn does not advance
+        return state
 
-    # If not pausing, proceed with play/exchange/pass
     move_rack_before = state['racks'][player_idx][:] if 0 <= player_idx < len(state['racks']) and state['racks'][player_idx] is not None else []
     
-    # This logic is now common for all actions
     expected_single_draw_value_for_turn = ai_engine.get_expected_single_draw_value(current_rack, state['tiles'], state['blanks'])
     luck_factor = 0.0
     total_expected_value_of_this_draw = 0.0
@@ -6495,6 +6451,7 @@ def ai_turn(state):
             'player': turn, 'move_type': 'place', 'rack': move_rack_before, 'drawn': drawn_tiles,
             'newly_placed': newly_placed, 'tiles_played_from_rack': tiles_consumed,
             'coord': ai_engine.get_coord(details.get('start', (0,0)), details.get('direction', 'right'), is_silent_batch_run_param)
+        
         })
         state['first_play'] = False
         state['consecutive_zero_point_turns'] = 0
@@ -6513,10 +6470,14 @@ def ai_turn(state):
                 temp_rack.remove(tile_to_remove)
 
         leave = temp_rack[:]
+
+        drawn_tiles = [state['bag'].pop() for _ in range(len(exchanged_tiles)) if state['bag']]
+        
+        temp_rack.extend(drawn_tiles)
+
         state['bag'].extend(exchanged_tiles)
         random.shuffle(state['bag'])
-        drawn_tiles = [state['bag'].pop() for _ in range(len(exchanged_tiles)) if state['bag']]
-        temp_rack.extend(drawn_tiles)
+        
         if not is_silent_batch_run_param: temp_rack.sort()
         state['racks'][player_idx] = temp_rack
         details = {'exchanged_tiles': exchanged_tiles, 'score': 0, 'word': '', 'positions': [], 'blanks': set(), 'is_bingo': False, 'word_with_blanks': '', 'leave': leave}
@@ -6527,7 +6488,7 @@ def ai_turn(state):
         state['turn'] = 3 - turn
         state['last_played_highlight_coords'] = set()
 
-    else: # Pass
+    else:
         leave = state['racks'][player_idx][:]
         details = {'score': 0, 'word': '', 'positions': [], 'blanks': set(), 'is_bingo': False, 'word_with_blanks': '', 'leave': leave}
         details.update({'player': turn, 'move_type': 'pass', 'rack': move_rack_before, 'drawn': [], 'coord': '', 'tiles_played_from_rack': []})
@@ -6544,13 +6505,12 @@ def ai_turn(state):
     
     details['total_expected_draw_value'] = total_expected_value_of_this_draw
     details['luck_factor'] = luck_factor
-    details['turn_duration'] = 0.0 # Placeholder
+    details['turn_duration'] = 0.0
     
     state['move_history'].append(details)
     state['current_replay_turn'] = len(state['move_history'])
     
-    # Reset human_played flag after AI has taken its turn.
-    # This is crucial for both standard AI and practice mode AI.
+    
     state['human_played'] = False
 
     return state
@@ -7100,8 +7060,6 @@ def _initialize_game_state_variables():
         'last_scoreboard_click_time_init': 0,
         'last_scoreboard_click_idx_init': -1,
         'insights_data_for_replay': [],
-        'unseen_tiles_visible': False,
-        'waiting_for_human_ready_signal': False,
         'rack_visibility': [False, False],
         'ai_sim_num_candidates_init': DEFAULT_AI_CANDIDATES,
         'ai_sim_num_opponent_sims_init': DEFAULT_OPPONENT_SIMULATIONS,
@@ -7309,11 +7267,14 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
     global screen, ui_font, RED, WHITE, BLACK, BLUE
     global TILE_DISTRIBUTION, LETTERS, GRID_SIZE 
 
+    # This block only runs on the very first game launch to set session-wide globals
     if not main_called_flag:
         settings = _perform_one_time_setup(selected_mode_result, return_data)
     else:
+        # If it's not the first run, we still need to parse the settings for the new game
         settings = _parse_mode_selection_results(selected_mode_result, return_data)
 
+    # Unpack settings into local variables for use in this function
     sgs_loaded_game_data_from_param = settings['sgs_loaded_data']
     game_mode_tuple = settings['game_mode_tuple']
     player_names_sel = settings['player_names']
@@ -7331,6 +7292,7 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
     bbb_7l_max_prob_init = settings['bbb_7l_max_prob']
     bbb_8l_max_prob_init = settings['bbb_8l_max_prob']
 
+    # --- Initialize state from helper function ---
     state = _initialize_game_state_variables()
 
     is_silent_run_for_init = (selected_mode_result == "BATCH_MODE" and not DEV_VISUALIZE_BATCH_ENABLED_SESSION)
@@ -7352,9 +7314,6 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
             state['game_over_at_init'], state['pass_count'], state['exchange_count'], state['consecutive_zero_point_turns'],
             state['last_played_highlight_coords'], state['rack_visibility']
         ) = _setup_loaded_game(state['sgs_loaded_game_data'], is_silent_run_for_init)
-
-        snapshot = state['sgs_loaded_game_data'].get('current_game_state_snapshot', {})
-        state['unseen_tiles_visible'] = snapshot.get('unseen_tiles_visible', False)
 
     elif selected_mode_result == "BATCH_MODE":
         (
@@ -7394,16 +7353,9 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
     elif selected_mode_result is None:
         print("--- initialize_game(): Mode selection returned None. Exiting. ---"); pygame.quit(); sys.exit()
 
-    if state.get('game_mode') == MODE_HVA and \
-       not state.get('is_loaded_game') and \
-       not state.get('is_batch_running') and \
-       state.get('human_player') == 2 and \
-       state.get('turn') == 1:
-        state['waiting_for_human_ready_signal'] = True
-        state['rack_visibility'][1] = True
-        if not is_silent_run_for_init:
-            print("--- Game Start: Waiting for Human (P2) to reveal rack before AI (P1) starts. ---")
-    
+    # Create the GameClock instance for relevant modes.
+    # This is done after all state setup to ensure game_mode is final.
+    # Clocks are not used for batch runs, replays, or pure AI vs AI games.
     if state.get('game_mode') in [MODE_HVH, MODE_HVA] and \
        not state.get('is_batch_running') and \
        not state.get('replay_mode'):
@@ -8641,11 +8593,6 @@ def _handle_mouse_down_live_game_ui(event, state, drawn_rects):
     if _handle_mouse_down_simulate_button(event, state, drawn_rects):
         return
 
-    unseen_tiles_eye_rect = drawn_rects.get('unseen_tiles_eye_rect')
-    if unseen_tiles_eye_rect and unseen_tiles_eye_rect.collidepoint(x, y):
-        state['unseen_tiles_visible'] = not state.get('unseen_tiles_visible', False)
-        return True
-
     p1_eye_rect = drawn_rects.get('p1_eye_rect')
     p2_eye_rect = drawn_rects.get('p2_eye_rect')
     if p1_eye_rect and p1_eye_rect.collidepoint(x, y):
@@ -8671,6 +8618,7 @@ def _handle_mouse_down_live_game_ui(event, state, drawn_rects):
                     game_clock.start(state['turn'] - 1)
         return True
 
+    # Handle clock options button
     clock_options_button_rect = drawn_rects.get('clock_options_button_rect')
     if clock_options_button_rect and clock_options_button_rect.collidepoint(x, y):
         game_clock = state.get('game_clock')
@@ -8698,11 +8646,13 @@ def _handle_mouse_down_live_game_ui(event, state, drawn_rects):
                 else:
                     show_message_dialog(f"Invalid time format for Player 2: '{p2_time_str}'.\nPlease use MM:SS.", "Input Error")
             
+            # Resume clock if it was running before dialog
             if was_running:
                 if game_clock.current_player_idx is not None:
                     game_clock.start(game_clock.current_player_idx)
         return True
 
+    # Handle rack sorting and tile dragging initiation
     if _handle_mouse_down_rack_ui_elements(event, state, drawn_rects):
         return
 
@@ -8765,16 +8715,14 @@ def _handle_mouse_down_exchange_dialog(event, state, drawn_rects):
 
     is_silent_run_local = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
 
-    # Unpack relevant state variables
-    # exchanging = state['exchanging'] # Assumed True if this function is called
+    
     selected_tiles = state['selected_tiles']
     racks = state['racks']
     turn = state['turn']
     bag = state['bag']
     
 
-    # Unpack drawn rectangles for the exchange dialog
-    tile_rects_exchange = drawn_rects.get('tile_rects', []) # These are from draw_exchange_dialog
+    tile_rects_exchange = drawn_rects.get('tile_rects', [])
     exchange_button_rect_exchange = drawn_rects.get('exchange_button_rect')
     cancel_button_rect_exchange = drawn_rects.get('cancel_button_rect')
 
@@ -8791,12 +8739,12 @@ def _handle_mouse_down_exchange_dialog(event, state, drawn_rects):
                 clicked_tile_in_dialog = True
                 break
         
-        if not clicked_tile_in_dialog: # Click was not on a tile in the dialog
+        if not clicked_tile_in_dialog:
             if exchange_button_rect_exchange and exchange_button_rect_exchange.collidepoint(x, y):
                 if selected_tiles:
                     tiles_to_exchange_list = [racks[turn-1][i_sel] for i_sel in selected_tiles]
                     if not is_silent_run_local:
-                        print(f"Player {turn} exchanging {len(tiles_to_exchange_list)} tiles: {''.join(sorted(tiles_to_exchange_list))}")
+                        print(f"Player \{turn\} exchanging \{len(tiles_to_exchange_list)\} tiles: \{''.join(sorted(tiles_to_exchange_list))\}")
                     
                     move_rack_before_exchange = racks[turn-1][:] if 0 <= turn-1 < len(racks) and racks[turn-1] is not None else []
                     
@@ -8805,16 +8753,16 @@ def _handle_mouse_down_exchange_dialog(event, state, drawn_rects):
                     
                     leave_for_history = new_rack_after_exchange[:]
                     
-                    bag.extend(tiles_to_exchange_list)
-                    random.shuffle(bag)
-
                     drawn_tiles_exchange = []
                     for _ in range(num_to_draw_exchange):
                         if bag:
                             drawn_tiles_exchange.append(bag.pop())
                         else:
-                            break # Stop drawing if bag runs out mid-exchange
+                            break
                     
+                    bag.extend(tiles_to_exchange_list)
+                    random.shuffle(bag)
+
                     new_rack_after_exchange.extend(drawn_tiles_exchange)
                     
                     should_sort_racks_exchange_dialog = not is_silent_run_local
@@ -8831,7 +8779,7 @@ def _handle_mouse_down_exchange_dialog(event, state, drawn_rects):
                         luck_factor_exchange = drawn_leave_value_exchange - expected_draw_value_simple_exchange
                         if not is_silent_run_local:
                             drawn_tiles_str_exchange = "".join(sorted(t if t != ' ' else '?' for t in drawn_tiles_exchange))
-                            print(f"  Drew (Exchange): {drawn_tiles_str_exchange}, Leave Value: {drawn_leave_value_exchange:.2f}, Luck: {luck_factor_exchange:+.2f}")
+                            print(f"  Drew (Exchange): \{drawn_tiles_str_exchange\}, Leave Value: \{drawn_leave_value_exchange:.2f\}, Luck: \{luck_factor_exchange:+.2f\}")
                     
                     state['move_history'].append({
                         'player': turn, 'move_type': 'exchange', 
@@ -8845,6 +8793,7 @@ def _handle_mouse_down_exchange_dialog(event, state, drawn_rects):
                         'luck_factor': luck_factor_exchange,
                         'tiles_played_from_rack': [], # No tiles played on board
                         'leave': leave_for_history # Use the correctly captured leave
+                    
                     })
                     state['current_replay_turn'] = len(state['move_history'])
                     
@@ -8858,7 +8807,6 @@ def _handle_mouse_down_exchange_dialog(event, state, drawn_rects):
                     state['paused_for_bingo_practice'] = False
                     state['turn'] = 3 - turn
                     
-                    # If in Only Fives mode, immediately trigger the AI's turn.
                     if state.get('practice_mode') == 'only_fives' and state.get('turn') == 2:
                         state = ai_turn(state)
 
@@ -8869,7 +8817,7 @@ def _handle_mouse_down_exchange_dialog(event, state, drawn_rects):
             elif cancel_button_rect_exchange and cancel_button_rect_exchange.collidepoint(x, y):
                 state['exchanging'] = False
                 selected_tiles.clear()
-    return state # Return the modified state
+    return state
 
 
 
@@ -11744,6 +11692,7 @@ def _draw_base_game_ui(screen, state, drawn_rects):
     bag_count_live = len(bag)
     showing_practice_end_dialog = state.get('showing_practice_end_dialog', False)
 
+    # Determine which state variables to use for display (live vs. replay)
     racks_to_display_for_draw_rack_func = state.get('replay_racks_for_display', racks_main) if replay_mode else racks_main
     scores_to_display_func = state.get('replay_scores_for_display', scores_main) if replay_mode else (final_scores_state if game_over_state else scores_main)
     turn_to_display_for_ui_func = state.get('replay_turn_for_display', turn) if replay_mode else turn
@@ -11751,6 +11700,7 @@ def _draw_base_game_ui(screen, state, drawn_rects):
     history_to_draw_func = move_history[:current_replay_turn] if replay_mode else move_history
     is_final_turn_in_replay_func = (current_replay_turn == len(move_history)) if replay_mode else game_over_state
 
+    # Draw Board and Tiles
     for r_draw_board in range(GRID_SIZE):
         for c_draw_board in range(GRID_SIZE):
             pygame.draw.rect(screen, board_layout_multipliers[r_draw_board][c_draw_board], (40 + c_draw_board * SQUARE_SIZE, 40 + r_draw_board * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE))
@@ -11786,6 +11736,7 @@ def _draw_base_game_ui(screen, state, drawn_rects):
                     text_rect = text_surf.get_rect(center=tile_rect.center)
                     screen.blit(text_surf, text_rect)
 
+    # Draw Highlights for Replay
     if replay_mode and current_replay_turn > 0 and current_replay_turn <= len(move_history):
         last_move_data_replay = move_history[current_replay_turn - 1]
         if last_move_data_replay['move_type'] == 'place':
@@ -11795,6 +11746,7 @@ def _draw_base_game_ui(screen, state, drawn_rects):
                     if 0 <= r_hl < GRID_SIZE and 0 <= c_hl < GRID_SIZE:
                         pygame.draw.rect(screen, PALE_YELLOW, (40 + c_hl * SQUARE_SIZE, 40 + r_hl * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE), 3)
 
+    # Draw Labels, Racks, Scoreboard, etc.
     draw_board_labels(screen, ui_font)
     p1_alpha_rect, p1_rand_rect, p2_alpha_rect, p2_rand_rect, p1_eye_rect, p2_eye_rect = draw_player_racks(
         screen, racks_to_display_for_draw_rack_func, scores_to_display_func, turn_to_display_for_ui_func, player_names, state['dragged_tile'], state['drag_pos'], practice_mode, state['rack_visibility'], is_ai, replay_mode, game_over_state
@@ -11807,16 +11759,7 @@ def _draw_base_game_ui(screen, state, drawn_rects):
     drawn_rects['p2_eye_rect'] = p2_eye_rect
 
     if practice_mode != "eight_letter":
-        is_ai_turn_for_draw = is_ai[turn_to_display_for_ui_func - 1] if 0 <= turn_to_display_for_ui_func - 1 < len(is_ai) else False
-        unseen_tiles_eye_rect = draw_remaining_tiles(
-            unseen_tiles_for_display_dict_func,
-            turn_to_display_for_ui_func,
-            bag_count_live,
-            state['game_mode'],
-            is_ai_turn_for_draw,
-            state.get('unseen_tiles_visible', False)
-        )
-        drawn_rects['unseen_tiles_eye_rect'] = unseen_tiles_eye_rect
+        draw_remaining_tiles(unseen_tiles_for_display_dict_func, turn_to_display_for_ui_func, bag_count_live)
 
     sb_x = BOARD_SIZE + 275
     sb_y = 40
@@ -11827,14 +11770,17 @@ def _draw_base_game_ui(screen, state, drawn_rects):
     scoreboard_display_rect = pygame.Rect(sb_x, sb_y, sb_w, sb_h)
     drawn_rects['scoreboard_rect'] = scoreboard_display_rect
     
+    #Draw Endgame Puzzle Filename
     if practice_mode == 'endgame':
         puzzle_filename = state.get('active_practice_state_data', {}).get('filename', 'Unknown Puzzle')
         if puzzle_filename:
-            puzzle_font = ui_font
-            puzzle_text_surf = puzzle_font.render(puzzle_filename, True, BLUE)
+            puzzle_font = ui_font # Use the standard UI font
+            puzzle_text_surf = puzzle_font.render(puzzle_filename, True, BLUE) # Use a distinct color
             
+            # Position it above the scoreboard
             puzzle_text_rect = puzzle_text_surf.get_rect(centerx=scoreboard_display_rect.centerx, bottom=scoreboard_display_rect.top - 5)
             
+            # Ensure it doesn't go off the top of the screen
             if puzzle_text_rect.top < 5:
                 puzzle_text_rect.top = 5
             
@@ -11885,6 +11831,7 @@ def _draw_base_game_ui(screen, state, drawn_rects):
         def_err_rect = def_err_surf.get_rect(centerx=indicator_center_x, top=definitions_indicator_y)
         screen.blit(def_err_surf, def_err_rect)
 
+    # Draw Main Action Buttons
     is_human_turn_or_paused_practice = (0 <= turn-1 < len(is_ai)) and (not is_ai[turn-1] or paused_for_power_tile or paused_for_bingo_practice)
     show_suggest_button = is_human_turn_or_paused_practice and not state.get('is_loaded_game', False) and not state.get('replay_mode', False)
     show_secondary_buttons = is_human_turn_or_paused_practice or state.get('replay_mode', False) or state.get('is_loaded_game', False)
@@ -11958,6 +11905,7 @@ def _draw_base_game_ui(screen, state, drawn_rects):
                     screen.blit(score_surf_pv, (score_x_pv, score_y_pv))
                 drawn_rects['preview_checkbox_rect'] = preview_checkbox_rect
 
+    # Draw Replay/Insights UI
     if replay_mode or state.get('is_loaded_game', False):
         new_replay_button_y = scoreboard_display_rect.bottom + 4
         insights_button_width = 80
@@ -11990,9 +11938,11 @@ def _draw_base_game_ui(screen, state, drawn_rects):
         drawn_rects['analyzer_checkbox_rect'] = insights_checkbox_rect_val
         drawn_rects['insights_item_rects'] = insights_item_rects_val
 
+    # Draw Clocks
     if not replay_mode and not game_over_state:
         _draw_clocks(screen, state, drawn_rects)
 
+    # Draw Options Menu (if open)
     if not showing_practice_end_dialog and not is_batch_running_local_draw:
         options_rect_base_draw, dropdown_rects_base_draw = draw_options_menu(turn_to_display_for_ui_func, dropdown_open, bag_count_live, is_batch_running_local_draw, replay_mode, game_over_state)
         drawn_rects['options_rect_base'] = options_rect_base_draw
@@ -12403,31 +12353,36 @@ def handle_ai_turn_trigger(state):
     Checks if it's the AI's turn and conditions are met, then calls the main
     ai_turn handler to execute the turn.
     """
-    
+    # Special condition for practice modes where the AI acts as the second player
+    # even if the game mode is technically HvH.
     is_ai_turn_in_practice_mode = (
         state.get('practice_mode') == 'only_fives' and
         state.get('turn') == 2 and
         state.get('human_played') # Ensure human has played their turn first
     )
     
+    # Standard condition for an AI player's turn
     is_standard_ai_turn = (
         0 <= state['turn']-1 < len(state['is_ai']) and
         state['is_ai'][state['turn']-1]
     )
 
+    # Conditions for an AI to take a turn
     if not state['game_over_state'] and \
        not state['replay_mode'] and \
        not state['paused_for_power_tile'] and \
        not state['paused_for_bingo_practice'] and \
        state['practice_mode'] != "eight_letter" and \
        ((is_standard_ai_turn and not state['human_played']) or is_ai_turn_in_practice_mode) and \
-       not state['is_solving_endgame'] and \
-       not state.get('waiting_for_human_ready_signal', False):
+       not state['is_solving_endgame']:
         
+        # --- MODIFICATION START: Start clock for AI turn ---
         game_clock = state.get('game_clock')
         if game_clock and not game_clock.is_running:
             game_clock.start(state['turn'] - 1)
+        # --- MODIFICATION END ---
 
+        # Call the main AI turn processing function
         state = ai_turn(state)
 
     return state
@@ -13308,6 +13263,13 @@ def update_preview_score(state):
 
 def reset_per_game_variables():
     """
+    Resets common UI state, turn counters, and temporary variables
+    to their default values before the start of each game iteration.
+    MODIFIED: Added state for All Words dialog position and dragging.
+    MODIFIED: Replay button rects initialized to None.
+    MODIFIED: Added state variables for the Analyzer window.
+    MODIFIED: Removed analyzer_data_for_replay from reset (managed globally).
+
     Returns:
         dict: A dictionary containing the reset variables and their initial values.
     """
@@ -13391,8 +13353,6 @@ def reset_per_game_variables():
         'start_new_game_same_mode': False,
         'last_scoreboard_click_time': 0,
         'last_scoreboard_click_idx': -1,
-        'unseen_tiles_visible': False,
-        'waiting_for_human_ready_signal': False,
         'all_words_dialog_x': (WINDOW_WIDTH - ALL_WORDS_DIALOG_WIDTH) // 2,
         'all_words_dialog_y': (WINDOW_HEIGHT - ALL_WORDS_DIALOG_HEIGHT) // 2,
         'all_words_dialog_dragging': False,
@@ -13932,7 +13892,7 @@ def execute_game_session(is_initialized_from_outer_loop_param, game_clock_obj):
                             no_blanks_on_racks = False
                         total_tiles_on_racks = len(racks_for_trigger[0]) + len(racks_for_trigger[1])
                     
-                    if bag_len_for_trigger == 0 and no_blanks_on_racks and total_tiles_on_racks <= 11 and len(racks_for_trigger[0]) > 0 and len(racks_for_trigger[1]) > 0:
+                    if bag_len_for_trigger == 0 and no_blanks_on_racks and total_tiles_on_racks <= 9 and len(racks_for_trigger[0]) > 0 and len(racks_for_trigger[1]) > 0:
                         print(f"--- Endgame Triggered in Game {current_batch_game_num} (Turn {len(move_history)}) ---")
                         
                         # Gather the current state for the puzzle
