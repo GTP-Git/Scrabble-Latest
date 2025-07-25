@@ -3,9 +3,8 @@
 
 
 #python
-#Scrabble BP
-# Fixed exchange bug, ensured exchanged tiles can't be redrawn
-
+#Scrabble BQ
+# Added basic AI clock management
 
 #25JUL25
 
