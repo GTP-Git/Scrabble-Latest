@@ -1,9 +1,8 @@
 
 
 #ai_engine.pyx
-#ai_engine_pyx - BP - 25JUL25
-# Fixed exchange bug
-
+#ai_engine_pyx - BQ - 25JUL25
+# Added basic AI clock management
 
 
 
@@ -2103,17 +2102,21 @@ cdef bint _does_move_form_five_letter_word_cython(dict move, list tiles):
 
 
 
+# In ai_engine.pyx
+
 cpdef tuple determine_best_action(
     list rack, list tiles, list board, set blanks, list bag, bint first_play,
-    bint use_simulation, bint use_endgame_solver, bint is_plaid_mode,
-    int opponent_rack_len, int num_ai_candidates, int num_opponent_sims, int num_post_sim_candidates,
+    bint use_endgame_solver, bint is_plaid_mode,
+    int opponent_rack_len, 
+    dict sim_params, # MODIFIED: Replaced individual params with a dictionary
     int current_score_diff_for_endgame, int pass_count,
-    str practice_mode, list letter_checks, object bbb_thresholds, # New practice mode params
+    str practice_mode, list letter_checks, object bbb_thresholds,
     bint is_silent_batch_run_param=False
 ):
     """
     The consolidated AI brain, fully in Cython. It handles all modes and determines
     the best action (play, exchange, pass, or pause for practice).
+    MODIFIED: Accepts a sim_params dictionary to control simulation depth based on clock time.
     Returns: tuple (action_chosen_str, move_details_obj_or_metadata)
     """
     cdef list all_moves, best_exchange_tiles, bingo_plays, power_tiles_on_rack, power_tile_letters
@@ -2127,16 +2130,19 @@ cpdef tuple determine_best_action(
     cdef int word_len, current_index, most_probable_playable_bingo_index, threshold_to_use, bingo_len
     cdef dict most_probable_bingo_details
 
+    # --- Unpack sim_params from the Python manager ---
+    cdef bint use_simulation = sim_params.get('use_sim', False)
+    cdef int ply_depth = sim_params.get('ply_depth', 0)
+    cdef int num_ai_candidates = sim_params.get('num_candidates', 0)
+    cdef int num_opponent_sims = sim_params.get('num_opponent_sims', 0)
+    cdef int num_post_sim_candidates = sim_params.get('num_post_sim_candidates', 0)
+
     # --- Initial Checks (Endgame, Plaid) that might not need full move list ---
     bag_count = len(bag)
     player_rack_len = len(rack)
     total_tiles_on_racks = player_rack_len + opponent_rack_len
 
-
-
-
     if use_endgame_solver and bag_count == 0:
-        # Unpack the tuple, ignoring the formatted lines and full sequence for this function's purpose
         best_first_move_endgame, _, _ = solve_endgame(
             rack, [], tiles, blanks, board, current_score_diff_for_endgame, pass_count, True
         )
@@ -2159,20 +2165,17 @@ cpdef tuple determine_best_action(
         checked_power_tiles = {power_tile_letters[i] for i in range(4) if letter_checks[i]}
         power_tiles_on_rack = [tile for tile in rack if tile in checked_power_tiles]
         if power_tiles_on_rack:
-            # Return a PAUSE action with the specific tile to practice
             return 'PAUSE', {'type': 'power_tile', 'tile': power_tiles_on_rack[0]}
 
     # --- Generate moves ONCE for standard and BBB modes ---
     all_moves = generate_all_moves_gaddag(rack, tiles, board, blanks, None, is_silent_batch_run_param)
     if all_moves is None: all_moves = []
 
-    # --- NEW: Filter for "Only Fives" practice mode ---
     if practice_mode == "only_fives":
         all_moves = [
             move for move in all_moves 
             if _does_move_form_five_letter_word_cython(move, tiles)
         ]
-    # --- END NEW ---
 
     if practice_mode == "bingo_bango_bongo":
         bingo_plays = []
@@ -2215,21 +2218,18 @@ cpdef tuple determine_best_action(
     can_exchange = bag_count > 0
 
     if can_play:
-        # Calculate preliminary equity (score + leave) for all moves once.
         for move in all_moves:
             raw_score = move.get('score', 0)
             leave_value = evaluate_leave(move.get('leave', []), True)
             move['prelim_equity'] = raw_score + leave_value
         
-        # Sort all moves by this equity.
         all_moves.sort(key=_sort_key_prelim_equity, reverse=True)
         
-        # The best non-simulation move is now the first in the list.
         best_raw_plus_leave_play_candidate = all_moves[0]
         best_raw_plus_leave_evaluation = best_raw_plus_leave_play_candidate.get('prelim_equity', -1000000.0)
 
-    if use_simulation and can_play:
-        # Pass the pre-sorted list to the simulation function.
+    # --- MODIFIED LOGIC: Decide whether to perform 2-ply simulation ---
+    if use_simulation and ply_depth == 2 and can_play:
         sim_results = run_ai_simulation(
             all_moves, rack, opponent_rack_len, tiles, blanks, board, bag,
             num_ai_candidates, num_opponent_sims, num_post_sim_candidates, True
@@ -2242,10 +2242,15 @@ cpdef tuple determine_best_action(
             rack, tiles, blanks, bag_count, True
         )
 
+    # --- FINAL DECISION LOGIC ---
+    # This logic now correctly handles all tiers of thinking
     if can_play and best_raw_plus_leave_play_candidate:
+        # Compare the best exchange option against the best *non-simulated* play
         if best_exchange_tiles and (best_exchange_evaluation > best_raw_plus_leave_evaluation + 10.0):
             return 'exchange', best_exchange_tiles
         else:
+            # If a simulation was run and produced a result, use it.
+            # Otherwise, fall back to the best non-simulated (1-ply) move.
             if use_simulation and best_simulated_play_candidate:
                 return 'play', best_simulated_play_candidate
             else:
