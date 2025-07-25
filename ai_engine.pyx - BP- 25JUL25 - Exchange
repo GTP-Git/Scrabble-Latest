@@ -1,10 +1,9 @@
 
 
 #ai_engine.pyx
-#ai_engine_pyx - BP - 19JUL25
-# Made AI opponent's Unseen Tiles hidden by default, eye icon hides/reveals
-# In HVA mode, the AI now won't start thinking about their turn until the human reveals their rack.
-# This will allow the human to see their rack on the first turn while the AI is thinking.
+#ai_engine_pyx - BP - 25JUL25
+# Fixed exchange bug
+
 
 
 
