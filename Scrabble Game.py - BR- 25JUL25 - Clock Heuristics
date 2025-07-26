@@ -3,8 +3,8 @@
 
 
 #python
-#Scrabble BQ
-# Added basic AI clock management
+#Scrabble BR
+# Added AI clock heuristics
 
 #25JUL25
 
@@ -6371,7 +6371,8 @@ def ai_turn(state):
     """
     Handles the AI's turn by calling the unified Cython decision-making function
     and then executing the returned action.
-    MODIFIED: Now includes clock management to adapt simulation parameters based on time.
+    MODIFIED: Now includes clock management and heuristic thresholds to adapt
+    simulation parameters based on time and board state.
     """
     # Add a guard clause at the top to prevent any action if the game is already paused for practice.
     if state.get('paused_for_power_tile') or state.get('paused_for_bingo_practice'):
@@ -6389,7 +6390,7 @@ def ai_turn(state):
     opponent_idx = 1 - player_idx
     current_rack = state['racks'][player_idx][:] if 0 <= player_idx < len(state['racks']) and state['racks'][player_idx] is not None else []
     
-    # --- NEW: Clock Management Logic ---
+    # --- Clock and Heuristic Management Logic ---
     # 1. Get user-configured baseline parameters
     base_candidates = state.get('ai_sim_num_candidates_cfg', DEFAULT_AI_CANDIDATES)
     base_opp_sims = state.get('ai_sim_num_opponent_sims_cfg', DEFAULT_OPPONENT_SIMULATIONS)
@@ -6401,7 +6402,7 @@ def ai_turn(state):
     if game_clock:
         remaining_time = game_clock.player_times[player_idx]
 
-    # 3. Determine parameters for this turn based on time
+    # 3. Determine simulation parameters for this turn based on time
     sim_params = {}
 
     if remaining_time > 300:  # More than 5 minutes -> Full Power
@@ -6437,7 +6438,21 @@ def ai_turn(state):
         sim_params['num_opponent_sims'] = base_opp_sims
         sim_params['num_post_sim_candidates'] = base_post_sim
 
-    # --- END: Clock Management Logic ---
+    # --- NEW: Heuristic Early-Exit Logic ---
+    # Add early-exit heuristic parameters. The Cython engine will use these
+    # to check for special conditions and skip full simulation if they are met.
+    # This is only active if a 2-ply simulation would otherwise be run.
+    if sim_params.get('use_sim', False) and sim_params.get('ply_depth', 0) > 1:
+        sim_params['heuristic_thresholds'] = {
+            'bingo_advantage': 25,      # If top move is bingo and beats best non-bingo by this much, play it.
+            'dominant_advantage': 40,   # If top move beats #2 move by this much, play it.
+            'low_value_threshold': 8   # If best move's equity is below this, don't simulate (consider exchange).
+        }
+    else:
+        sim_params['heuristic_thresholds'] = None # Disable if not doing a 2-ply sim.
+    # --- END NEW CODE ---
+
+    # --- END: Clock and Heuristic Management Logic ---
 
     # Prepare other arguments for the Cython function
     opponent_rack_len = len(state['racks'][opponent_idx]) if 0 <= opponent_idx < len(state['racks']) and state['racks'][opponent_idx] is not None else 7
@@ -6457,7 +6472,7 @@ def ai_turn(state):
         current_rack, state['tiles'], state['board'], state['blanks'], state['bag'][:], state['first_play'],
         USE_ENDGAME_SOLVER, is_plaid_mode,
         opponent_rack_len,
-        sim_params,  # Pass the new dictionary
+        sim_params,  # Pass the new dictionary with heuristic thresholds
         current_score_diff, pass_count, state['practice_mode'], state['letter_checks'], bbb_thresholds,
         is_silent_batch_run_param=is_silent_batch_run_param
     )
