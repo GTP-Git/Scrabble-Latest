@@ -1,8 +1,8 @@
 
 
 #ai_engine.pyx
-#ai_engine_pyx - BQ - 25JUL25
-# Added basic AI clock management
+#ai_engine_pyx - BR - 25JUL25
+# Added clock heuristics
 
 
 
@@ -2102,12 +2102,11 @@ cdef bint _does_move_form_five_letter_word_cython(dict move, list tiles):
 
 
 
-# In ai_engine.pyx
 
 cpdef tuple determine_best_action(
     list rack, list tiles, list board, set blanks, list bag, bint first_play,
     bint use_endgame_solver, bint is_plaid_mode,
-    int opponent_rack_len, 
+    int opponent_rack_len,
     dict sim_params, # MODIFIED: Replaced individual params with a dictionary
     int current_score_diff_for_endgame, int pass_count,
     str practice_mode, list letter_checks, object bbb_thresholds,
@@ -2116,19 +2115,19 @@ cpdef tuple determine_best_action(
     """
     The consolidated AI brain, fully in Cython. It handles all modes and determines
     the best action (play, exchange, pass, or pause for practice).
-    MODIFIED: Accepts a sim_params dictionary to control simulation depth based on clock time.
+    MODIFIED: Accepts a sim_params dictionary and implements early-exit heuristics.
     Returns: tuple (action_chosen_str, move_details_obj_or_metadata)
     """
-    cdef list all_moves, best_exchange_tiles, bingo_plays, power_tiles_on_rack, power_tile_letters
+    cdef list all_moves, best_exchange_tiles, bingo_plays, power_tiles_on_rack, power_tile_letters, moves_to_simulate
     cdef object best_raw_plus_leave_play_candidate, best_simulated_play_candidate, best_first_move_endgame, best_plaid_move
     cdef float best_raw_plus_leave_evaluation, best_exchange_evaluation, best_simulated_play_final_score
-    cdef bint can_play, can_exchange
+    cdef bint can_play, can_exchange, is_bingo_shootout
     cdef int bag_count, total_tiles_on_racks, player_rack_len, i
     cdef float raw_score, leave_value, current_move_raw_plus_leave_eval
     cdef object move, sim_results, checked_power_tiles, bingo_move, word_list_to_check
     cdef str word_str, tile
     cdef int word_len, current_index, most_probable_playable_bingo_index, threshold_to_use, bingo_len
-    cdef dict most_probable_bingo_details
+    cdef dict most_probable_bingo_details, heuristic_thresholds, best_move, best_non_bingo_move
 
     # --- Unpack sim_params from the Python manager ---
     cdef bint use_simulation = sim_params.get('use_sim', False)
@@ -2136,6 +2135,7 @@ cpdef tuple determine_best_action(
     cdef int num_ai_candidates = sim_params.get('num_candidates', 0)
     cdef int num_opponent_sims = sim_params.get('num_opponent_sims', 0)
     cdef int num_post_sim_candidates = sim_params.get('num_post_sim_candidates', 0)
+    heuristic_thresholds = sim_params.get('heuristic_thresholds')
 
     # --- Initial Checks (Endgame, Plaid) that might not need full move list ---
     bag_count = len(bag)
@@ -2173,7 +2173,7 @@ cpdef tuple determine_best_action(
 
     if practice_mode == "only_fives":
         all_moves = [
-            move for move in all_moves 
+            move for move in all_moves
             if _does_move_form_five_letter_word_cython(move, tiles)
         ]
 
@@ -2182,7 +2182,7 @@ cpdef tuple determine_best_action(
         for m in all_moves:
             if m.get('is_bingo', False):
                 bingo_plays.append(m)
-        
+
         if bingo_plays:
             most_probable_playable_bingo_index = 999999
             most_probable_bingo_details = None
@@ -2213,6 +2213,7 @@ cpdef tuple determine_best_action(
     best_simulated_play_candidate = None
     best_exchange_tiles = []
     best_exchange_evaluation = -1000000.0
+    is_bingo_shootout = False
 
     can_play = bool(all_moves)
     can_exchange = bag_count > 0
@@ -2222,35 +2223,77 @@ cpdef tuple determine_best_action(
             raw_score = move.get('score', 0)
             leave_value = evaluate_leave(move.get('leave', []), True)
             move['prelim_equity'] = raw_score + leave_value
-        
+
         all_moves.sort(key=_sort_key_prelim_equity, reverse=True)
-        
+
         best_raw_plus_leave_play_candidate = all_moves[0]
         best_raw_plus_leave_evaluation = best_raw_plus_leave_play_candidate.get('prelim_equity', -1000000.0)
 
-    # --- MODIFIED LOGIC: Decide whether to perform 2-ply simulation ---
+    # --- Heuristic Early-Exit Checks ---
+    # This block checks for obvious moves to save simulation time.
+    if use_simulation and ply_depth == 2 and can_play and heuristic_thresholds is not None:
+        best_move = all_moves[0]
+        best_move_equity = best_move.get('prelim_equity', -1000000.0)
+
+        # --- NEW: Bingo-Only Simulation Check ---
+        if len(all_moves) > 1 and best_move.get('is_bingo', False) and all_moves[1].get('is_bingo', False):
+            is_bingo_shootout = True
+        # --- END NEW CODE ---
+
+        # Heuristic 1: Dominant Bingo
+        if best_move.get('is_bingo', False) and not is_bingo_shootout:
+            best_non_bingo_move = None
+            for move in all_moves[1:]:
+                if not move.get('is_bingo', False):
+                    best_non_bingo_move = move
+                    break
+            if best_non_bingo_move:
+                bingo_advantage = best_move_equity - best_non_bingo_move.get('prelim_equity', -1000000.0)
+                if bingo_advantage > heuristic_thresholds['bingo_advantage']:
+                    return 'play', best_move # Early exit: Play the dominant bingo
+
+        # Heuristic 2: Dominant Move (if not a dominant bingo)
+        if len(all_moves) > 1 and not is_bingo_shootout:
+            second_best_move_equity = all_moves[1].get('prelim_equity', -1000000.0)
+            dominant_advantage = best_move_equity - second_best_move_equity
+            if dominant_advantage > heuristic_thresholds['dominant_advantage']:
+                return 'play', best_move # Early exit: Play the dominant move
+
+        # Heuristic 3: Low-Value Plays
+        if best_move_equity < heuristic_thresholds['low_value_threshold']:
+            if can_exchange:
+                best_exchange_tiles, best_exchange_evaluation = find_best_exchange_option(
+                    rack, tiles, blanks, bag_count, True
+                )
+                if best_exchange_evaluation > best_move_equity + 1.0:
+                    return 'exchange', best_exchange_tiles
+            return 'play', best_move # Early exit: Play the weak move
+
+    # --- Simulation Block ---
     if use_simulation and ply_depth == 2 and can_play:
+        moves_to_simulate = all_moves
+        # --- NEW: If it's a shootout, only simulate the bingos ---
+        if is_bingo_shootout:
+            moves_to_simulate = [m for m in all_moves if m.get('is_bingo', False)]
+        # --- END NEW CODE ---
+
         sim_results = run_ai_simulation(
-            all_moves, rack, opponent_rack_len, tiles, blanks, board, bag,
+            moves_to_simulate, rack, opponent_rack_len, tiles, blanks, board, bag,
             num_ai_candidates, num_opponent_sims, num_post_sim_candidates, True
         )
         if sim_results:
             best_simulated_play_candidate = sim_results[0]['move']
 
-    if can_exchange:
+    # --- Final Decision Logic ---
+    if can_exchange and not best_exchange_tiles:
         best_exchange_tiles, best_exchange_evaluation = find_best_exchange_option(
             rack, tiles, blanks, bag_count, True
         )
 
-    # --- FINAL DECISION LOGIC ---
-    # This logic now correctly handles all tiers of thinking
     if can_play and best_raw_plus_leave_play_candidate:
-        # Compare the best exchange option against the best *non-simulated* play
         if best_exchange_tiles and (best_exchange_evaluation > best_raw_plus_leave_evaluation + 10.0):
             return 'exchange', best_exchange_tiles
         else:
-            # If a simulation was run and produced a result, use it.
-            # Otherwise, fall back to the best non-simulated (1-ply) move.
             if use_simulation and best_simulated_play_candidate:
                 return 'play', best_simulated_play_candidate
             else:
