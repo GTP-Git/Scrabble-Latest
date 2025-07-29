@@ -1,8 +1,9 @@
 
 
 #ai_engine.pyx
-#ai_engine_pyx - BR - 25JUL25
-# Added clock heuristics
+#ai_engine_pyx - BS - 29JUL25
+# Fixed "Play Again" behavior in Bingo, Bango, Bongo mode
+# Hid Unseen Tiles when AI turn
 
 
 
