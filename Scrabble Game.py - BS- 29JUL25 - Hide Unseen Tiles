@@ -3,10 +3,11 @@
 
 
 #python
-#Scrabble BR
-# Added AI clock heuristics
+#Scrabble BS
+# Fixed "Play Again" behavior in Bingo, Bango, Bongo mode
+# Hid Unseen Tiles when AI turn
 
-#25JUL25
+#29JUL25
 
 
 
@@ -4607,17 +4608,53 @@ def get_words_played(word_positions, tiles):
 
     
 
-def draw_remaining_tiles(unseen_tiles_dict, turn, bag_count):
-    """Draw the list of remaining tiles by repeating letters."""
-    global practice_mode
-    if practice_mode == "eight_letter": return # Don't draw remaining tiles in this mode
-    
+def draw_remaining_tiles(unseen_tiles_dict, turn, bag_count, is_visible, game_mode, is_ai):
+    """
+    Draw the list of remaining tiles, with a visibility toggle for HVA mode.
+    Returns the pygame.Rect for the eye icon if drawn, otherwise None.
+    """
+    global practice_mode, ui_font, tile_count_font, BLACK, BUTTON_COLOR, BUTTON_HOVER, MODE_HVA
+
+    if practice_mode == "eight_letter": 
+        return None
+
     remaining_x = min(BOARD_SIZE + 70, WINDOW_WIDTH - 200)
-    if remaining_x < BOARD_SIZE + 10: remaining_x = BOARD_SIZE + 10
-    
-    title_text = ui_font.render(f"P{turn}'s Unseen Tiles:", True, BLACK)
+    if remaining_x < BOARD_SIZE + 10: 
+        remaining_x = BOARD_SIZE + 10
+
+    title_text_str = f"P{turn}'s Unseen Tiles:"
+    title_text = ui_font.render(title_text_str, True, BLACK)
     screen.blit(title_text, (remaining_x, 10))
+
+    eye_icon_rect = None
+    is_hva_mode = (game_mode == MODE_HVA)
+    is_current_turn_ai = (0 <= turn - 1 < len(is_ai)) and is_ai[turn - 1]
+
+    # The eye icon is only drawn in HVA mode and on the HUMAN's turn
+    if is_hva_mode and not is_current_turn_ai:
+        eye_icon_width = 30
+        eye_icon_height = 20
+        eye_icon_x = remaining_x + title_text.get_width() + 10
+        eye_icon_y = 10 + (title_text.get_height() - eye_icon_height) // 2
+        eye_icon_rect = pygame.Rect(eye_icon_x, eye_icon_y, eye_icon_width, eye_icon_height)
+        
+        hover_eye = eye_icon_rect.collidepoint(pygame.mouse.get_pos())
+        color_eye = BUTTON_HOVER if hover_eye else BUTTON_COLOR
+        pygame.draw.rect(screen, color_eye, eye_icon_rect)
+        draw_visibility_icon(screen, eye_icon_rect, is_visible)
+
+    # Decide whether to draw the list of tiles
+    should_draw_list = False
+    if not is_hva_mode:
+        should_draw_list = True  # Always draw for non-HVA modes (HvH, AvA, etc.)
+    else:  # It is HVA mode
+        if not is_current_turn_ai and is_visible:  # Human's turn AND toggled on
+            should_draw_list = True
     
+    if not should_draw_list:
+        return eye_icon_rect # Return early if list should not be drawn
+
+    # --- Draw the tile list and summary (only if visible) ---
     y_pos = 40
     col_width = 60
     max_y = WINDOW_HEIGHT - 100
@@ -4625,7 +4662,8 @@ def draw_remaining_tiles(unseen_tiles_dict, turn, bag_count):
     current_col_x = remaining_x
     items_in_col = 0
     max_items_per_col = (max_y - y_pos) // 20
-    if max_items_per_col <= 0: max_items_per_col = 1
+    if max_items_per_col <= 0: 
+        max_items_per_col = 1
     
     last_drawn_y = 40 
     last_drawn_col_x = remaining_x 
@@ -4667,6 +4705,8 @@ def draw_remaining_tiles(unseen_tiles_dict, turn, bag_count):
     summary_x = remaining_x
     screen.blit(text1, (summary_x, summary_y_start))
     screen.blit(text2, (summary_x, summary_y_start + 20))
+
+    return eye_icon_rect
 
 
 
@@ -7126,6 +7166,7 @@ def _initialize_game_state_variables():
         'last_scoreboard_click_idx_init': -1,
         'insights_data_for_replay': [],
         'rack_visibility': [False, False],
+        'unseen_tiles_visible': True,
         'ai_sim_num_candidates_init': DEFAULT_AI_CANDIDATES,
         'ai_sim_num_opponent_sims_init': DEFAULT_OPPONENT_SIMULATIONS,
         'ai_sim_num_post_sim_candidates_init': DEFAULT_POST_SIM_CANDIDATES,
@@ -7173,6 +7214,12 @@ def _setup_new_game_or_practice(settings, is_silent_run):
         new_game_state['rack_visibility'] = [True, True]
     else:
         new_game_state['rack_visibility'] = [False, False]
+
+
+    if game_mode == MODE_HVA:
+        new_game_state['unseen_tiles_visible'] = False
+    else:
+        new_game_state['unseen_tiles_visible'] = True
 
     if active_practice_state_data:
         # Call the helper for practice modes
@@ -8764,6 +8811,11 @@ def _handle_general_mouse_down(event, state, drawn_rects):
     elif not state['replay_mode'] and not state['game_over_state'] and not state.get('is_batch_running', False) and not state.get('dropdown_open'):
         # Handle all clicks related to a live game interface
         _handle_mouse_down_live_game_ui(event, state, drawn_rects)
+
+
+    unseen_tiles_eye_rect = drawn_rects.get('unseen_tiles_eye_rect')
+    if unseen_tiles_eye_rect and unseen_tiles_eye_rect.collidepoint(x, y):
+        state['unseen_tiles_visible'] = not state.get('unseen_tiles_visible', True)
 
     return updated_state_flags
 
@@ -11824,7 +11876,15 @@ def _draw_base_game_ui(screen, state, drawn_rects):
     drawn_rects['p2_eye_rect'] = p2_eye_rect
 
     if practice_mode != "eight_letter":
-        draw_remaining_tiles(unseen_tiles_for_display_dict_func, turn_to_display_for_ui_func, bag_count_live)
+        unseen_tiles_eye_rect = draw_remaining_tiles(
+            unseen_tiles_for_display_dict_func, 
+            turn_to_display_for_ui_func, 
+            bag_count_live,
+            state.get('unseen_tiles_visible', True),
+            state.get('game_mode'),
+            is_ai
+        )
+        drawn_rects['unseen_tiles_eye_rect'] = unseen_tiles_eye_rect
 
     sb_x = BOARD_SIZE + 275
     sb_y = 40
@@ -12256,8 +12316,9 @@ def check_and_handle_game_over(state):
             if not is_silent_run:
                 print(f"DEBUG check_and_handle_game_over: state['final_scores'] set to {state['final_scores']}")
 
-            if practice_mode == "power_tiles":
-                state['practice_end_message'] = "Power Tiles Practice Over!"
+            if practice_mode in ["power_tiles", "bingo_bango_bongo", "only_fives"]:
+                message = f"{practice_mode.replace('_', ' ').title()} Practice Over!"
+                state['practice_end_message'] = message
                 state['showing_practice_end_dialog'] = True
                 state['game_over_state'] = True 
                 state['practice_solved'] = True 
@@ -13423,6 +13484,7 @@ def reset_per_game_variables():
         'all_words_dialog_dragging': False,
         'all_words_dialog_drag_offset': (0,0),
         'rack_visibility': [False, False],
+        'unseen_tiles_visible': True,
         'replay_start_rect': None,
         'replay_prev_rect': None,
         'replay_next_rect': None,
