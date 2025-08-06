@@ -3,11 +3,10 @@
 
 
 #python
-#Scrabble BS
-# Fixed "Play Again" behavior in Bingo, Bango, Bongo mode
-# Hid Unseen Tiles when AI turn
+#Scrabble BT
+# Added new "Unscramble" practice mode
 
-#29JUL25
+#06AUG25
 
 
 
@@ -2878,7 +2877,7 @@ def calculate_practice_dropdown_rects(player_ui_rects):
     dropdown_rect = pygame.Rect(name_rect_x, dropdown_button_y, 200, 30)
     
     dropdown_y = dropdown_button_y + 30 
-    options = ["Power Tiles", "8-Letter Bingos", "Bingo, Bango, Bongo", "Only Fives", "End Game"]
+    options = ["Power Tiles", "8-Letter Bingos", "Bingo, Bango, Bongo", "Only Fives", "ABCELMNRSU", "End Game"]
     option_rects = []
     for i, option in enumerate(options):
         option_rect = pygame.Rect(name_rect_x, dropdown_y + 30 * i, 200, 30)
@@ -2897,7 +2896,7 @@ def draw_practice_dropdown(screen, dropdown_open, dropdown_rect, option_rects):
     screen.blit(text_surf, text_surf.get_rect(center=dropdown_rect.center))
 
     if dropdown_open: 
-        options = ["Power Tiles", "8-Letter Bingos", "Bingo, Bango, Bongo", "Only Fives", "End Game"]
+        options = ["Power Tiles", "8-Letter Bingos", "Bingo, Bango, Bongo", "Only Fives", "ABCELMNRSU", "End Game"]
         for i, rect in enumerate(option_rects): 
              hover = rect.collidepoint(pygame.mouse.get_pos())
              color = BUTTON_HOVER if hover else DROPDOWN_COLOR
@@ -2912,18 +2911,148 @@ def handle_practice_dropdown_events(event, dropdown_open, dropdown_rect, option_
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
         x, y = event.pos
         if dropdown_rect.collidepoint(x, y):
-            return not dropdown_open, None # Toggle dropdown, no option selected
+            return not dropdown_open, None
         
         if dropdown_open:
-            options = ["Power Tiles", "8-Letter Bingos", "Bingo, Bango, Bongo", "Only Fives", "End Game"]
+            options = ["Power Tiles", "8-Letter Bingos", "Bingo, Bango, Bongo", "Only Fives", "ABCELMNRSU", "End Game"]
             for i, rect in enumerate(option_rects):
                 if rect.collidepoint(x, y):
-                    return False, options[i] # Close dropdown, return selected option
+                    return False, options[i]
             
-            # If click was outside any option while open, close it
             return False, None
             
-    return dropdown_open, None # No change
+    return dropdown_open, None
+
+
+
+def draw_radio_button(screen, x, y, selected):
+    """Draws a radio button, filled if selected."""
+    pygame.draw.circle(screen, BLACK, (x + 10, y + 10), 10, 1)
+    if selected:
+        pygame.draw.circle(screen, BLACK, (x + 10, y + 10), 7)
+
+
+
+
+def get_unscramble_practice_dialog():
+    """
+    Displays a modal dialog for configuring the Unscramble (ABCELMNRSU) practice mode.
+    Returns a tuple (main_word_length, list_of_sub_word_lengths) or None if cancelled.
+    """
+    global screen, dialog_font, ui_font, button_font, DIALOG_COLOR, BLACK, WHITE, BUTTON_COLOR, BUTTON_HOVER, RED
+
+    dialog_width, dialog_height = 450, 350
+    dialog_x = (WINDOW_WIDTH - dialog_width) // 2
+    dialog_y = (WINDOW_HEIGHT - dialog_height) // 2
+
+    # State for the dialog
+    main_word_len_options = [3, 4, 5, 6, 7]
+    selected_main_len = 7  # Default selection
+
+    sub_word_len_options = [3, 4, 5, 6, 7]
+    # Default to finding 3, 4, and 5-letter words
+    selected_sub_lens_checked = [True, True, True, False, False]
+
+    error_msg = None
+    dialog_running = True
+
+    while dialog_running:
+        # --- UI Element Rects (calculated each frame) ---
+        go_button_rect = pygame.Rect(dialog_x + (dialog_width // 2) - BUTTON_WIDTH - 10, dialog_y + dialog_height - BUTTON_HEIGHT - 20, BUTTON_WIDTH, BUTTON_HEIGHT)
+        cancel_button_rect = pygame.Rect(dialog_x + (dialog_width // 2) + 10, dialog_y + dialog_height - BUTTON_HEIGHT - 20, BUTTON_WIDTH, BUTTON_HEIGHT)
+
+        main_len_radio_rects = []
+        y_offset_main = dialog_y + 80
+        for i, length in enumerate(main_word_len_options):
+            x_pos = dialog_x + 20 + i * 70
+            rect = pygame.Rect(x_pos, y_offset_main, 20, 20)
+            main_len_radio_rects.append(rect)
+
+        sub_len_checkbox_rects = []
+        y_offset_sub = dialog_y + 180
+        for i, length in enumerate(sub_word_len_options):
+            x_pos = dialog_x + 20 + i * 70
+            rect = pygame.Rect(x_pos, y_offset_sub, 20, 20)
+            sub_len_checkbox_rects.append(rect)
+
+        # --- Event Loop ---
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                error_msg = None
+                x, y = event.pos
+                if go_button_rect.collidepoint(x, y):
+                    # Validate that at least one sub-length is checked
+                    if not any(selected_sub_lens_checked):
+                        error_msg = "Please select at least one sub-word length to find."
+                    else:
+                        sub_lengths_to_return = [sub_word_len_options[i] for i, checked in enumerate(selected_sub_lens_checked) if checked]
+                        return selected_main_len, sub_lengths_to_return
+                if cancel_button_rect.collidepoint(x, y):
+                    return None
+
+                for i, rect in enumerate(main_len_radio_rects):
+                    if rect.collidepoint(x, y):
+                        selected_main_len = main_word_len_options[i]
+                for i, rect in enumerate(sub_len_checkbox_rects):
+                    if rect.collidepoint(x, y):
+                        selected_sub_lens_checked[i] = not selected_sub_lens_checked[i]
+
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    return None
+                if event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
+                    if not any(selected_sub_lens_checked):
+                        error_msg = "Please select at least one sub-word length to find."
+                    else:
+                        sub_lengths_to_return = [sub_word_len_options[i] for i, checked in enumerate(selected_sub_lens_checked) if checked]
+                        return selected_main_len, sub_lengths_to_return
+
+        # --- Drawing ---
+        pygame.draw.rect(screen, DIALOG_COLOR, (dialog_x, dialog_y, dialog_width, dialog_height))
+        pygame.draw.rect(screen, BLACK, (dialog_x, dialog_y, dialog_width, dialog_height), 2)
+
+        title_surf = dialog_font.render("Unscramble Practice Options", True, BLACK)
+        screen.blit(title_surf, (dialog_x + 10, dialog_y + 10))
+
+        # Main Word Length Section
+        main_len_title = ui_font.render("Main Word Length:", True, BLACK)
+        screen.blit(main_len_title, (dialog_x + 20, dialog_y + 50))
+        for i, rect in enumerate(main_len_radio_rects):
+            is_selected = (selected_main_len == main_word_len_options[i])
+            draw_radio_button(screen, rect.x, rect.y, is_selected)
+            label_surf = ui_font.render(str(main_word_len_options[i]), True, BLACK)
+            screen.blit(label_surf, (rect.x + 25, rect.y))
+
+        # Sub-Word Length Section
+        sub_len_title = ui_font.render("Find Words of Length:", True, BLACK)
+        screen.blit(sub_len_title, (dialog_x + 20, dialog_y + 150))
+        for i, rect in enumerate(sub_len_checkbox_rects):
+            draw_checkbox(screen, rect.x, rect.y, selected_sub_lens_checked[i])
+            label_surf = ui_font.render(str(sub_word_len_options[i]), True, BLACK)
+            screen.blit(label_surf, (rect.x + 25, rect.y))
+
+        # Error Message
+        if error_msg:
+            error_surf = ui_font.render(error_msg, True, RED)
+            error_rect = error_surf.get_rect(center=(dialog_x + dialog_width // 2, dialog_y + 250))
+            screen.blit(error_surf, error_rect)
+
+        # Buttons
+        hover_go = go_button_rect.collidepoint(pygame.mouse.get_pos())
+        pygame.draw.rect(screen, BUTTON_HOVER if hover_go else BUTTON_COLOR, go_button_rect)
+        go_text = button_font.render("Go", True, BLACK)
+        screen.blit(go_text, go_text.get_rect(center=go_button_rect.center))
+
+        hover_cancel = cancel_button_rect.collidepoint(pygame.mouse.get_pos())
+        pygame.draw.rect(screen, BUTTON_HOVER if hover_cancel else BUTTON_COLOR, cancel_button_rect)
+        cancel_text = button_font.render("Cancel", True, BLACK)
+        screen.blit(cancel_text, cancel_text.get_rect(center=cancel_button_rect.center))
+
+        pygame.display.flip()
+        pygame.time.Clock().tick(30)
 
 
 
@@ -3176,6 +3305,15 @@ def mode_selection_screen():
                         elif practice_choice == "Only Fives":
                             practice_mode = "only_fives"
                             selected_mode = modes[current_input] # Reverted to original mode
+                        elif practice_choice == "ABCELMNRSU":
+                            unscramble_settings = get_unscramble_practice_dialog()
+                            if unscramble_settings:
+                                main_len, sub_lens = unscramble_settings
+                                selected_mode = "PRACTICE_UNSCRAMBLE"
+                                practice_state = {
+                                    'main_word_length': main_len,
+                                    'sub_word_lengths': sub_lens
+                                }
                         elif practice_choice == "End Game":
                             filename = show_endgame_puzzle_selection_dialog()
                             if filename is not None:
@@ -3228,7 +3366,7 @@ def mode_selection_screen():
 
     print(f"--- mode_selection_screen(): Exiting loop. Returning mode={selected_mode} ---")
     if selected_mode == "LOADED_GAME":
-        return selected_mode, (loaded_game_data, dev_cprofile_checked, dev_visualize_batch_checked,
+        return selected_mode, (loaded_game_data, dev_cprofile_checked, dev_visualize_batch_checked,\
                                ai_sim_num_candidates, ai_sim_num_opponent_sims, ai_sim_num_post_sim_candidates)
     elif selected_mode == "BATCH_MODE":
         return selected_mode, loaded_game_data
@@ -3238,6 +3376,8 @@ def mode_selection_screen():
         return selected_mode, (player_names, human_player, "eight_letter", letter_checks, number_checks, use_endgame_solver_checked, use_ai_simulation_checked, practice_state, dev_cprofile_checked, dev_visualize_batch_checked, ai_sim_num_candidates, ai_sim_num_opponent_sims, ai_sim_num_post_sim_candidates, bbb_7l_max_prob_input_str, bbb_8l_max_prob_input_str)
     elif selected_mode == "PRACTICE_ENDGAME":
         return selected_mode, (player_names, human_player, "endgame", letter_checks, number_checks, use_endgame_solver_checked, use_ai_simulation_checked, practice_state, dev_cprofile_checked, dev_visualize_batch_checked, ai_sim_num_candidates, ai_sim_num_opponent_sims, ai_sim_num_post_sim_candidates, bbb_7l_max_prob_input_str, bbb_8l_max_prob_input_str)
+    elif selected_mode == "PRACTICE_UNSCRAMBLE":
+        return selected_mode, (player_names, human_player, "unscramble", letter_checks, number_checks, use_endgame_solver_checked, use_ai_simulation_checked, practice_state, dev_cprofile_checked, dev_visualize_batch_checked, ai_sim_num_candidates, ai_sim_num_opponent_sims, ai_sim_num_post_sim_candidates, bbb_7l_max_prob_input_str, bbb_8l_max_prob_input_str)
     else: 
         standard_game_settings = (
             player_names,
@@ -13754,6 +13894,211 @@ def handle_endgame_practice_flow(state):
 
 
 
+def unscramble_practice_game(params):
+    """
+    Runs the main game loop for the Unscramble (ABCELMNRSU) practice mode.
+    """
+    global screen, ui_font, dialog_font, button_font, WHITE, BLACK, GREEN, RED, BUTTON_COLOR, BUTTON_HOVER, WORD_LISTS_BY_LENGTH
+
+    # --- Setup ---
+    main_word_length = params.get('main_word_length', 7)
+    sub_word_lengths = params.get('sub_word_lengths', [3, 4, 5])
+
+    # --- UI Constants ---
+    PRACTICE_WIDTH, PRACTICE_HEIGHT = 800, 600
+    INPUT_BOX_HEIGHT = 40
+    
+    # Re-center the screen for this mode
+    screen = pygame.display.set_mode((PRACTICE_WIDTH, PRACTICE_HEIGHT))
+    pygame.display.set_caption("Unscramble Practice")
+    
+    # --- NEW: Larger font for the main word ---
+    large_word_font = pygame.font.SysFont("Arial", 80, bold=True)
+
+    # --- Word Generation ---
+    if not WORD_LISTS_BY_LENGTH.get(main_word_length):
+        show_message_dialog(f"No words of length {main_word_length} found in the dictionary.", "Error")
+        return "main_menu"
+
+    main_word = random.choice(WORD_LISTS_BY_LENGTH[main_word_length])
+    main_word_counts = Counter(main_word)
+    all_sub_anagrams = set()
+
+    for length in sub_word_lengths:
+        word_list = WORD_LISTS_BY_LENGTH.get(length, [])
+        for word in word_list:
+            word_counts = Counter(word)
+            is_subset = all(main_word_counts.get(char, 0) >= count for char, count in word_counts.items())
+            if is_subset:
+                all_sub_anagrams.add(word)
+
+    words_to_find = sorted(list(all_sub_anagrams))
+    
+    # --- Game State ---
+    user_input = ""
+    found_words = []
+    show_answers = False
+    running = True
+    action_on_exit = "main_menu" # Default action
+    
+    # --- NEW: Scroll state ---
+    found_words_scroll_offset = 0
+    answers_scroll_offset = 0
+
+    while running:
+        # --- Event Handling ---
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    running = False
+                    action_on_exit = "main_menu"
+                elif event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
+                    guess = user_input.upper()
+                    if guess in words_to_find and guess not in found_words:
+                        found_words.append(guess)
+                        found_words.sort()
+                    user_input = ""
+                elif event.key == pygame.K_BACKSPACE:
+                    user_input = user_input[:-1]
+                elif event.unicode.isalpha():
+                    if len(user_input) < main_word_length:
+                        user_input += event.unicode.upper()
+            
+            # --- MODIFIED: Mouse Down Handling ---
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                show_answers_rect = pygame.Rect(20, PRACTICE_HEIGHT - BUTTON_HEIGHT - 20, 150, BUTTON_HEIGHT)
+                play_again_rect = pygame.Rect(show_answers_rect.right + BUTTON_GAP, PRACTICE_HEIGHT - BUTTON_HEIGHT - 20, 150, BUTTON_HEIGHT)
+                main_menu_rect = pygame.Rect(play_again_rect.right + BUTTON_GAP, PRACTICE_HEIGHT - BUTTON_HEIGHT - 20, 150, BUTTON_HEIGHT)
+                
+                if show_answers_rect.collidepoint(event.pos):
+                    show_answers = True
+                if play_again_rect.collidepoint(event.pos):
+                    running = False
+                    action_on_exit = "play_again"
+                if main_menu_rect.collidepoint(event.pos):
+                    running = False
+                    action_on_exit = "main_menu"
+
+            # --- NEW: Mouse Wheel Handling for Scrolling ---
+            if event.type == pygame.MOUSEWHEEL:
+                mouse_pos = pygame.mouse.get_pos()
+                
+                # Define list areas for scroll detection
+                answers_area_rect = pygame.Rect(20, 80, 400, PRACTICE_HEIGHT - 160)
+                found_words_area_rect = pygame.Rect(PRACTICE_WIDTH - 220, 80, 200, PRACTICE_HEIGHT - 160)
+
+                if show_answers and answers_area_rect.collidepoint(mouse_pos):
+                    answers_scroll_offset -= event.y * 20 # Scroll speed
+                    
+                    # Calculate max scroll for answers
+                    answers_to_show_count = len([w for w in words_to_find if w not in found_words])
+                    max_answers_scroll = max(0, (answers_to_show_count * 25) - answers_area_rect.height + 30)
+                    answers_scroll_offset = max(0, min(answers_scroll_offset, max_answers_scroll))
+
+                elif found_words_area_rect.collidepoint(mouse_pos):
+                    found_words_scroll_offset -= event.y * 20 # Scroll speed
+                    
+                    # Calculate max scroll for found words
+                    max_found_scroll = max(0, (len(found_words) * 25) - found_words_area_rect.height + 30)
+                    found_words_scroll_offset = max(0, min(found_words_scroll_offset, max_found_scroll))
+
+
+        # --- Drawing ---
+        screen.fill(WHITE)
+
+        # --- MODIFIED: Draw Main Word (larger) ---
+        main_word_display = "".join(sorted(main_word))
+        main_word_surf = large_word_font.render(main_word_display, True, BLACK)
+        main_word_rect = main_word_surf.get_rect(center=(PRACTICE_WIDTH // 2, 60))
+        screen.blit(main_word_surf, main_word_rect)
+
+        # Draw Words Remaining
+        remaining_count = len(words_to_find) - len(found_words)
+        remaining_text = f"Remaining: {remaining_count}"
+        remaining_surf = ui_font.render(remaining_text, True, BLACK)
+        remaining_rect = remaining_surf.get_rect(topright=(PRACTICE_WIDTH - 20, 20))
+        screen.blit(remaining_surf, remaining_rect)
+
+        # Draw Input Box
+        input_rect = pygame.Rect((PRACTICE_WIDTH - 300) // 2, PRACTICE_HEIGHT - INPUT_BOX_HEIGHT - 80, 300, INPUT_BOX_HEIGHT)
+        pygame.draw.rect(screen, BLACK, input_rect, 2)
+        input_surf = dialog_font.render(user_input, True, BLACK)
+        input_text_rect = input_surf.get_rect(center=input_rect.center)
+        screen.blit(input_surf, input_text_rect)
+        if int(time.time() * 2) % 2 == 0: # Blinking cursor
+            cursor_x = input_rect.centerx + input_surf.get_width() // 2 + 2
+            pygame.draw.line(screen, BLACK, (cursor_x, input_rect.y + 5), (cursor_x, input_rect.bottom - 5), 2)
+
+        # --- MODIFIED: Draw Found Words List with Scrolling ---
+        found_words_area_rect = pygame.Rect(PRACTICE_WIDTH - 220, 80, 200, PRACTICE_HEIGHT - 180)
+        found_title_surf = ui_font.render(f"Found ({len(found_words)}):", True, BLACK)
+        screen.blit(found_title_surf, (found_words_area_rect.x, found_words_area_rect.y))
+        
+        clip_rect = screen.get_clip()
+        screen.set_clip(found_words_area_rect)
+        for i, word in enumerate(found_words):
+            y_pos = found_words_area_rect.y + 30 + (i * 25) - found_words_scroll_offset
+            if y_pos >= found_words_area_rect.y: # Simple culling
+                word_surf = ui_font.render(word, True, GREEN)
+                screen.blit(word_surf, (found_words_area_rect.x, y_pos))
+        screen.set_clip(clip_rect)
+
+
+        # --- MODIFIED: Draw Answers with Scrolling ---
+        if show_answers:
+            answers_to_show = [word for word in words_to_find if word not in found_words]
+            answers_area_rect = pygame.Rect(20, 80, 400, PRACTICE_HEIGHT - 180)
+            answers_title_surf = ui_font.render(f"Answers ({len(answers_to_show)}):", True, BLACK)
+            screen.blit(answers_title_surf, (answers_area_rect.x, answers_area_rect.y))
+            
+            screen.set_clip(answers_area_rect)
+            num_columns = 3
+            col_width = 120
+            max_per_col = (answers_area_rect.height - 30) // 25
+            for i, word in enumerate(answers_to_show):
+                col = i // max_per_col
+                row = i % max_per_col
+                if col < num_columns:
+                    y_pos = answers_area_rect.y + 30 + (row * 25) - answers_scroll_offset
+                    if y_pos >= answers_area_rect.y:
+                        word_surf = ui_font.render(word, True, RED)
+                        screen.blit(word_surf, (answers_area_rect.x + col * col_width, y_pos))
+            screen.set_clip(clip_rect)
+
+        # --- MODIFIED: Draw Buttons ---
+        show_answers_rect = pygame.Rect(20, PRACTICE_HEIGHT - BUTTON_HEIGHT - 20, 150, BUTTON_HEIGHT)
+        play_again_rect = pygame.Rect(show_answers_rect.right + BUTTON_GAP, PRACTICE_HEIGHT - BUTTON_HEIGHT - 20, 150, BUTTON_HEIGHT)
+        main_menu_rect = pygame.Rect(play_again_rect.right + BUTTON_GAP, PRACTICE_HEIGHT - BUTTON_HEIGHT - 20, 150, BUTTON_HEIGHT)
+        
+        hover_show = show_answers_rect.collidepoint(pygame.mouse.get_pos())
+        pygame.draw.rect(screen, BUTTON_HOVER if hover_show else BUTTON_COLOR, show_answers_rect)
+        show_text = button_font.render("Show Answers", True, BLACK)
+        screen.blit(show_text, show_text.get_rect(center=show_answers_rect.center))
+
+        hover_play_again = play_again_rect.collidepoint(pygame.mouse.get_pos())
+        pygame.draw.rect(screen, BUTTON_HOVER if hover_play_again else BUTTON_COLOR, play_again_rect)
+        play_again_text = button_font.render("Play Again", True, BLACK)
+        screen.blit(play_again_text, play_again_text.get_rect(center=play_again_rect.center))
+
+        hover_main = main_menu_rect.collidepoint(pygame.mouse.get_pos())
+        pygame.draw.rect(screen, BUTTON_HOVER if hover_main else BUTTON_COLOR, main_menu_rect)
+        main_text = button_font.render("Main Menu", True, BLACK)
+        screen.blit(main_text, main_text.get_rect(center=main_menu_rect.center))
+
+        pygame.display.flip()
+        pygame.time.Clock().tick(30)
+
+    # After loop ends, restore the main game window size and return action
+    screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+    pygame.display.set_caption("Scrabble Game")
+    return action_on_exit
+
+
+
+
 
 
 
@@ -14630,6 +14975,19 @@ def main(is_initialized_from_outer_loop_param):
     just_finished_a_batch = False
 
     selected_mode_result, return_data_mode_sel = mode_selection_screen()
+    
+    if selected_mode_result == "PRACTICE_UNSCRAMBLE":
+        # The practice_state dictionary is at index 7 of the returned tuple
+        practice_params = return_data_mode_sel[7]
+        
+        # Loop to handle "Play Again" functionality
+        while True:
+            action = unscramble_practice_game(practice_params)
+            if action != "play_again":
+                break # Exit loop if user wants main menu or closes window
+        
+        # After the loop, always return to the main menu
+        return True, False
     
     if selected_mode_result == "SETUP_BOARD":
         setup_result_tuple = board_setup_screen()
