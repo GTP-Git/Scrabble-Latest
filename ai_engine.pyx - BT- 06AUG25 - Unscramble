@@ -2,8 +2,8 @@
 
 #ai_engine.pyx
 #ai_engine_pyx - BS - 29JUL25
-# Fixed "Play Again" behavior in Bingo, Bango, Bongo mode
-# Hid Unseen Tiles when AI turn
+# Added new "Unscramble" practice mode
+
 
 
 
