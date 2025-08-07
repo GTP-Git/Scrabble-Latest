@@ -3,8 +3,8 @@
 
 
 #python
-#Scrabble BT
-# Added new "Unscramble" practice mode
+#Scrabble BU
+# Added inverted board when in HVA mode
 
 #06AUG25
 
@@ -4851,13 +4851,31 @@ def draw_remaining_tiles(unseen_tiles_dict, turn, bag_count, is_visible, game_mo
 
 
 
-def draw_arrow(row, col, direction):
+def draw_arrow(row, col, direction, state=None):
     """Draw an arrow indicating play direction."""
-    center_x = 40 + col * SQUARE_SIZE + SQUARE_SIZE // 2; center_y = 40 + row * SQUARE_SIZE + SQUARE_SIZE // 2; arrow_length = SQUARE_SIZE * 0.4; arrow_width = SQUARE_SIZE * 0.2
-    if direction == "right": pygame.draw.line(screen, ARROW_COLOR, (center_x - arrow_length / 2, center_y), (center_x + arrow_length / 2, center_y), 3); pygame.draw.polygon(screen, ARROW_COLOR, [(center_x + arrow_length / 2, center_y - arrow_width / 2), (center_x + arrow_length / 2, center_y + arrow_width / 2), (center_x + arrow_length / 2 + arrow_width, center_y)])
-    elif direction == "down": pygame.draw.line(screen, ARROW_COLOR, (center_x, center_y - arrow_length / 2), (center_x, center_y + arrow_length / 2), 3); pygame.draw.polygon(screen, ARROW_COLOR, [(center_x - arrow_width / 2, center_y + arrow_length / 2), (center_x + arrow_width / 2, center_y + arrow_length / 2), (center_x, center_y + arrow_length / 2 + arrow_width)])
+    is_inverted = False
+    if state:
+        # Check if all keys exist before accessing to prevent errors
+        is_ai_list = state.get('is_ai')
+        turn_num = state.get('turn', 1)
+        is_inverted = (state.get('game_mode') == MODE_HVA and
+                       not state.get('replay_mode', False) and
+                       state.get('invert_board_on_ai_turn', False) and
+                       is_ai_list and len(is_ai_list) > turn_num - 1 and
+                       is_ai_list[turn_num - 1])
 
+    r_display, c_display = (GRID_SIZE - 1 - row, GRID_SIZE - 1 - col) if is_inverted else (row, col)
 
+    center_x = 40 + c_display * SQUARE_SIZE + SQUARE_SIZE // 2
+    center_y = 40 + r_display * SQUARE_SIZE + SQUARE_SIZE // 2
+    arrow_length = SQUARE_SIZE * 0.4
+    arrow_width = SQUARE_SIZE * 0.2
+    if direction == "right":
+        pygame.draw.line(screen, ARROW_COLOR, (center_x - arrow_length / 2, center_y), (center_x + arrow_length / 2, center_y), 3)
+        pygame.draw.polygon(screen, ARROW_COLOR, [(center_x + arrow_length / 2, center_y - arrow_width / 2), (center_x + arrow_length / 2, center_y + arrow_width / 2), (center_x + arrow_length / 2 + arrow_width, center_y)])
+    elif direction == "down":
+        pygame.draw.line(screen, ARROW_COLOR, (center_x, center_y - arrow_length / 2), (center_x, center_y + arrow_length / 2), 3)
+        pygame.draw.polygon(screen, ARROW_COLOR, [(center_x - arrow_width / 2, center_y + arrow_length / 2), (center_x + arrow_width / 2, center_y + arrow_length / 2), (center_x, center_y + arrow_length / 2 + arrow_width)])
 
 
 
@@ -7314,6 +7332,7 @@ def _initialize_game_state_variables():
         'bbb_8l_max_prob_init': 1000,
         'gaddag_loading_status': gaddag_loading_status,
         'GADDAG_STRUCTURE': GADDAG_STRUCTURE,
+        'invert_board_on_ai_turn': False,
     }
 
 
@@ -7552,6 +7571,10 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
     if not is_silent_run_for_init:
         print(f"--- initialize_game(): Starting game state initialization for mode: {selected_mode_result} ---")
 
+    # Set the board inversion default for HVA mode
+    if selected_mode_result == MODE_HVA:
+        state['invert_board_on_ai_turn'] = True
+
     if selected_mode_result == "LOADED_GAME":
         if not sgs_loaded_game_data_from_param or not isinstance(sgs_loaded_game_data_from_param, dict):
             print("Error: No valid SGS data provided for loaded game.")
@@ -7624,15 +7647,28 @@ def initialize_game(selected_mode_result, return_data, main_called_flag):
 
 
 
-def draw_board_labels(screen, ui_font):
+def draw_board_labels(screen, ui_font, state=None):
     """Draws the row (1-15) and column (A-O) labels around the board."""
+    is_inverted = False
+    if state:
+        # Check if all keys exist before accessing to prevent errors
+        is_ai_list = state.get('is_ai')
+        turn_num = state.get('turn', 1)
+        is_inverted = (state.get('game_mode') == MODE_HVA and
+                       not state.get('replay_mode', False) and
+                       state.get('invert_board_on_ai_turn', False) and
+                       is_ai_list and len(is_ai_list) > turn_num - 1 and
+                       is_ai_list[turn_num - 1])
+
     # Draw Row Labels (1-15)
     for r in range(GRID_SIZE):
-        row_label = ui_font.render(str(r + 1), True, BLACK)
+        label_text = str(GRID_SIZE - r) if is_inverted else str(r + 1)
+        row_label = ui_font.render(label_text, True, BLACK)
         screen.blit(row_label, (10, 40 + r * SQUARE_SIZE + (SQUARE_SIZE // 2 - row_label.get_height() // 2)))
     # Draw Column Labels (A-O)
     for c in range(GRID_SIZE):
-        col_label = ui_font.render(LETTERS[c], True, BLACK)
+        label_text = LETTERS[GRID_SIZE - 1 - c] if is_inverted else LETTERS[c]
+        col_label = ui_font.render(label_text, True, BLACK)
         screen.blit(col_label, (40 + c * SQUARE_SIZE + (SQUARE_SIZE // 2 - col_label.get_width() // 2), 10))
 
 
@@ -8956,6 +8992,12 @@ def _handle_general_mouse_down(event, state, drawn_rects):
     unseen_tiles_eye_rect = drawn_rects.get('unseen_tiles_eye_rect')
     if unseen_tiles_eye_rect and unseen_tiles_eye_rect.collidepoint(x, y):
         state['unseen_tiles_visible'] = not state.get('unseen_tiles_visible', True)
+
+    # --- NEW: Handle Invert Board checkbox click ---
+    invert_board_checkbox_rect = drawn_rects.get('invert_board_checkbox_rect')
+    if invert_board_checkbox_rect and invert_board_checkbox_rect.collidepoint(x, y):
+        state['invert_board_on_ai_turn'] = not state.get('invert_board_on_ai_turn', False)
+        return updated_state_flags # Event handled
 
     return updated_state_flags
 
@@ -11424,11 +11466,26 @@ def _handle_mouse_down_board_click(event, state):
 
     # Board click logic (only if not dragging a tile from rack)
     if not state.get('dragged_tile'):
-        col_board = (x - 40) // SQUARE_SIZE # Assuming board starts at x=40
-        row_board = (y - 40) // SQUARE_SIZE # Assuming board starts at y=40
+        col_display = (x - 40) // SQUARE_SIZE # Assuming board starts at x=40
+        row_display = (y - 40) // SQUARE_SIZE # Assuming board starts at y=40
+
+        # --- NEW: Translate display coordinates to model coordinates ---
+        is_inverted = (state.get('game_mode') == MODE_HVA and
+                       not state.get('replay_mode', False) and
+                       state.get('invert_board_on_ai_turn', False) and
+                       state.get('is_ai') and len(state.get('is_ai')) > state.get('turn', 1) - 1 and
+                       state.get('is_ai')[state.get('turn', 1) - 1])
+
+        if is_inverted:
+            row_model = GRID_SIZE - 1 - row_display
+            col_model = GRID_SIZE - 1 - col_display
+        else:
+            row_model = row_display
+            col_model = col_display
+        # --- END NEW ---
 
         # Check if the click is within the board grid
-        if 0 <= row_board < GRID_SIZE and 0 <= col_board < GRID_SIZE:
+        if 0 <= row_model < GRID_SIZE and 0 <= col_model < GRID_SIZE:
             # If currently typing and clicked on a *different* board square (or even the same one if it's to clear)
             if state.get('typing'):
                 # If the click is on any board square while typing, it implies an intent to change focus or finalize/cancel.
@@ -11465,8 +11522,8 @@ def _handle_mouse_down_board_click(event, state):
 
             # After potentially clearing a typed word, now handle the new click
             # If the clicked square is empty, proceed with selection/typing logic
-            if not state['tiles'][row_board][col_board]:
-                is_double_click = (state.get('last_left_click_pos') == (row_board, col_board) and \
+            if not state['tiles'][row_model][col_model]:
+                is_double_click = (state.get('last_left_click_pos') == (row_model, col_model) and \
                                    current_time_val - state.get('last_left_click_time', 0) < DOUBLE_CLICK_TIME)
 
                 if is_double_click:
@@ -11476,22 +11533,22 @@ def _handle_mouse_down_board_click(event, state):
                     state['current_r'] = None
                     state['current_c'] = None
                     # No need to revert word_positions here as typing was already reset above if active
-                elif state.get('selected_square') is None or state['selected_square'][:2] != (row_board, col_board):
+                elif state.get('selected_square') is None or state['selected_square'][:2] != (row_model, col_model):
                     # Single click on a new empty square, or first click
-                    state['selected_square'] = (row_board, col_board, "right") # Default to right
+                    state['selected_square'] = (row_model, col_model, "right") # Default to right
                     state['typing'] = False # Not typing yet, just selected
                     state['current_r'] = None # Cursor not active until a key is pressed
                     state['current_c'] = None
                 elif state['selected_square'][2] == "right":
                     # Clicked again on the same selected square, toggle direction to down
-                    state['selected_square'] = (row_board, col_board, "down")
+                    state['selected_square'] = (row_model, col_model, "down")
                 elif state['selected_square'][2] == "down":
                     # Clicked again, cycle back to no selection (or could cycle to 'right' again)
                     state['selected_square'] = None
                     state['current_r'] = None
                     state['current_c'] = None
                 
-                state['last_left_click_pos'] = (row_board, col_board)
+                state['last_left_click_pos'] = (row_model, col_model)
                 state['last_left_click_time'] = current_time_val
             else: # Clicked on an already occupied square (not empty)
                 state['selected_square'] = None # Clear any selection
@@ -11957,19 +12014,29 @@ def _draw_base_game_ui(screen, state, drawn_rects):
     history_to_draw_func = move_history[:current_replay_turn] if replay_mode else move_history
     is_final_turn_in_replay_func = (current_replay_turn == len(move_history)) if replay_mode else game_over_state
 
+    # --- NEW: Determine if board should be inverted for this frame ---
+    is_inverted = (state.get('game_mode') == MODE_HVA and
+                   not state.get('replay_mode', False) and
+                   state.get('invert_board_on_ai_turn', False) and
+                   is_ai and len(is_ai) > turn - 1 and
+                   is_ai[turn - 1])
+
     # Draw Board and Tiles
-    for r_draw_board in range(GRID_SIZE):
-        for c_draw_board in range(GRID_SIZE):
-            pygame.draw.rect(screen, board_layout_multipliers[r_draw_board][c_draw_board], (40 + c_draw_board * SQUARE_SIZE, 40 + r_draw_board * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE))
-            pygame.draw.rect(screen, BLACK, (40 + c_draw_board * SQUARE_SIZE, 40 + r_draw_board * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE), 1)
-            tile_char_to_render = current_tiles_on_board[r_draw_board][c_draw_board]
+    for r_model in range(GRID_SIZE):
+        for c_model in range(GRID_SIZE):
+            r_display, c_display = (GRID_SIZE - 1 - r_model, GRID_SIZE - 1 - c_model) if is_inverted else (r_model, c_model)
+            
+            pygame.draw.rect(screen, board_layout_multipliers[r_model][c_model], (40 + c_display * SQUARE_SIZE, 40 + r_display * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE))
+            pygame.draw.rect(screen, BLACK, (40 + c_display * SQUARE_SIZE, 40 + r_display * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE), 1)
+            
+            tile_char_to_render = current_tiles_on_board[r_model][c_model]
             if tile_char_to_render:
-                is_blank_tile_on_board = (r_draw_board, c_draw_board) in current_blanks_on_board
-                is_part_of_last_actual_play = (r_draw_board, c_draw_board) in last_played_highlight_coords and not replay_mode and not state.get('previewed_move_details')
+                is_blank_tile_on_board = (r_model, c_model) in current_blanks_on_board
+                is_part_of_last_actual_play = (r_model, c_model) in last_played_highlight_coords and not replay_mode and not state.get('previewed_move_details')
                 is_previewed_tile = False
                 if state.get('previewed_move_details'):
                     for pr, pc, _, _ in state['previewed_move_details']:
-                        if pr == r_draw_board and pc == c_draw_board:
+                        if pr == r_model and pc == c_model:
                             is_previewed_tile = True
                             break
                 tile_bg_color = GREEN
@@ -11977,19 +12044,25 @@ def _draw_base_game_ui(screen, state, drawn_rects):
                     tile_bg_color = YELLOW
                 elif is_part_of_last_actual_play:
                     tile_bg_color = PALE_YELLOW
+                
+                center_display = (40 + c_display * SQUARE_SIZE + SQUARE_SIZE // 2, 40 + r_display * SQUARE_SIZE + SQUARE_SIZE // 2)
+                
                 if is_blank_tile_on_board:
-                    center = (40 + c_draw_board * SQUARE_SIZE + SQUARE_SIZE // 2, 40 + r_draw_board * SQUARE_SIZE + SQUARE_SIZE // 2)
                     radius = SQUARE_SIZE // 2 - 3
-                    tile_rect_bg = pygame.Rect(40 + c_draw_board * SQUARE_SIZE + 2, 40 + r_draw_board * SQUARE_SIZE + 2, SQUARE_SIZE - 4, SQUARE_SIZE - 4)
+                    tile_rect_bg = pygame.Rect(40 + c_display * SQUARE_SIZE + 2, 40 + r_display * SQUARE_SIZE + 2, SQUARE_SIZE - 4, SQUARE_SIZE - 4)
                     pygame.draw.rect(screen, tile_bg_color, tile_rect_bg)
-                    pygame.draw.circle(screen, BLACK, center, radius)
+                    pygame.draw.circle(screen, BLACK, center_display, radius)
                     text_surf = font.render(tile_char_to_render, True, WHITE)
-                    text_rect = text_surf.get_rect(center=center)
+                    if is_inverted:
+                        text_surf = pygame.transform.rotate(text_surf, 180)
+                    text_rect = text_surf.get_rect(center=center_display)
                     screen.blit(text_surf, text_rect)
                 else:
-                    tile_rect = pygame.Rect(40 + c_draw_board * SQUARE_SIZE + 2, 40 + r_draw_board * SQUARE_SIZE + 2, SQUARE_SIZE - 4, SQUARE_SIZE - 4)
+                    tile_rect = pygame.Rect(40 + c_display * SQUARE_SIZE + 2, 40 + r_display * SQUARE_SIZE + 2, SQUARE_SIZE - 4, SQUARE_SIZE - 4)
                     pygame.draw.rect(screen, tile_bg_color, tile_rect)
                     text_surf = font.render(tile_char_to_render, True, BLACK)
+                    if is_inverted:
+                        text_surf = pygame.transform.rotate(text_surf, 180)
                     text_rect = text_surf.get_rect(center=tile_rect.center)
                     screen.blit(text_surf, text_rect)
 
@@ -11999,12 +12072,13 @@ def _draw_base_game_ui(screen, state, drawn_rects):
         if last_move_data_replay['move_type'] == 'place':
             if not state.get('previewed_move_details'):
                 newly_placed_coords_replay_hist = last_move_data_replay.get('newly_placed', [])
-                for r_hl, c_hl, _ in newly_placed_coords_replay_hist:
-                    if 0 <= r_hl < GRID_SIZE and 0 <= c_hl < GRID_SIZE:
-                        pygame.draw.rect(screen, PALE_YELLOW, (40 + c_hl * SQUARE_SIZE, 40 + r_hl * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE), 3)
+                for r_hl_model, c_hl_model, _ in newly_placed_coords_replay_hist:
+                    r_hl_display, c_hl_display = (GRID_SIZE - 1 - r_hl_model, GRID_SIZE - 1 - c_hl_model) if is_inverted else (r_hl_model, c_hl_model)
+                    if 0 <= r_hl_display < GRID_SIZE and 0 <= c_hl_display < GRID_SIZE:
+                        pygame.draw.rect(screen, PALE_YELLOW, (40 + c_hl_display * SQUARE_SIZE, 40 + r_hl_display * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE), 3)
 
     # Draw Labels, Racks, Scoreboard, etc.
-    draw_board_labels(screen, ui_font)
+    draw_board_labels(screen, ui_font, state)
     p1_alpha_rect, p1_rand_rect, p2_alpha_rect, p2_rand_rect, p1_eye_rect, p2_eye_rect = draw_player_racks(
         screen, racks_to_display_for_draw_rack_func, scores_to_display_func, turn_to_display_for_ui_func, player_names, state['dragged_tile'], state['drag_pos'], practice_mode, state['rack_visibility'], is_ai, replay_mode, game_over_state
     )
@@ -12056,12 +12130,13 @@ def _draw_base_game_ui(screen, state, drawn_rects):
 
     # Draw Typing Cursor / Selection Arrow
     if selected_square and not typing:
-        draw_arrow(selected_square[0], selected_square[1], selected_square[2])
+        draw_arrow(selected_square[0], selected_square[1], selected_square[2], state)
     elif typing:
         if current_r is not None and current_c is not None:
             if 0 <= current_r < GRID_SIZE and 0 <= current_c < GRID_SIZE:
-                cursor_x_draw = 40 + current_c * SQUARE_SIZE + SQUARE_SIZE // 2
-                cursor_y_draw = 40 + current_r * SQUARE_SIZE + SQUARE_SIZE - 5
+                r_cursor_display, c_cursor_display = (GRID_SIZE - 1 - current_r, GRID_SIZE - 1 - current_c) if is_inverted else (current_r, current_c)
+                cursor_x_draw = 40 + c_cursor_display * SQUARE_SIZE + SQUARE_SIZE // 2
+                cursor_y_draw = 40 + r_cursor_display * SQUARE_SIZE + SQUARE_SIZE - 5
                 if int(time.time() * 2) % 2 == 0:
                     pygame.draw.line(screen, BLACK, (cursor_x_draw - 5, cursor_y_draw), (cursor_x_draw + 5, cursor_y_draw), 2)
 
@@ -14146,6 +14221,7 @@ def execute_game_session(is_initialized_from_outer_loop_param, game_clock_obj):
     global ai_sim_num_candidates_global, ai_sim_num_opponent_sims_global, ai_sim_num_post_sim_candidates_global
     global last_scoreboard_click_time, last_scoreboard_click_idx
     global insights_data_for_replay, rack_visibility, game_clock
+    global invert_board_on_ai_turn
 
 
     _module_level_batch_stop_requested_internal = False
@@ -14830,6 +14906,20 @@ def _draw_clocks(screen, state, drawn_rects):
     p2_time_rect = p2_time_surf.get_rect(centerx=p2_clock_x + clock_width / 2, bottom=clock_y + clock_height - 5)
     screen.blit(p2_time_surf, p2_time_rect)
 
+    # --- NEW: Draw Invert Board checkbox for HVA mode ---
+    invert_board_checkbox_rect = None
+    if state.get('game_mode') == MODE_HVA:
+        checkbox_x = p2_clock_x + clock_width + clock_button_gap
+        checkbox_y = clock_y + (clock_height - 20) // 2 # Center vertically
+        invert_board_checkbox_rect = pygame.Rect(checkbox_x, checkbox_y, 20, 20)
+        
+        draw_checkbox(screen, checkbox_x, checkbox_y, state.get('invert_board_on_ai_turn', False))
+        
+        label_surf = ui_font.render("Invert Board", True, BLACK)
+        screen.blit(label_surf, (checkbox_x + 25, checkbox_y + 2))
+
+    drawn_rects['invert_board_checkbox_rect'] = invert_board_checkbox_rect
+
 
 
 
@@ -14971,6 +15061,8 @@ def main(is_initialized_from_outer_loop_param):
     global bbb_7l_max_prob_global, bbb_8l_max_prob_global
     global analyzer_data_for_replay
     global insights_data_for_replay, rack_visibility
+    global invert_board_on_ai_turn, game_clock
+
 
     just_finished_a_batch = False
 
@@ -15078,6 +15170,7 @@ def main(is_initialized_from_outer_loop_param):
     bbb_7l_max_prob_global = initial_state['bbb_7l_max_prob_init']
     bbb_8l_max_prob_global = initial_state['bbb_8l_max_prob_init']
     rack_visibility = initial_state['rack_visibility']
+    invert_board_on_ai_turn = initial_state.get('invert_board_on_ai_turn', False)
     game_clock = initial_state.get('game_clock')
     
     if replay_mode:
