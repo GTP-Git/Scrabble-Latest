@@ -1,9 +1,8 @@
 
 
 #ai_engine.pyx
-#ai_engine_pyx - BT - 06AUG25
-# Added new "Unscramble" practice mode
-
+#ai_engine_pyx - BU - 06AUG25
+# Inverted Board in HVA mode
 
 
 
