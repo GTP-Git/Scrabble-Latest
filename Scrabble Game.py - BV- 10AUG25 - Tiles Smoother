@@ -5,8 +5,9 @@
 #python
 #Scrabble BV
 #Tiles Smoother
+#Added Lookup button to UNSCRAMBLE
 
-#09AUG25
+#10AUG25
 
 
 
@@ -14019,13 +14020,16 @@ def unscramble_practice_game(params):
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 show_answers_rect = pygame.Rect(20, PRACTICE_HEIGHT - BUTTON_HEIGHT - 20, 150, BUTTON_HEIGHT)
                 play_again_rect = pygame.Rect(show_answers_rect.right + BUTTON_GAP, PRACTICE_HEIGHT - BUTTON_HEIGHT - 20, 150, BUTTON_HEIGHT)
-                main_menu_rect = pygame.Rect(play_again_rect.right + BUTTON_GAP, PRACTICE_HEIGHT - BUTTON_HEIGHT - 20, 150, BUTTON_HEIGHT)
+                lookup_rect = pygame.Rect(play_again_rect.right + BUTTON_GAP, PRACTICE_HEIGHT - BUTTON_HEIGHT - 20, 150, BUTTON_HEIGHT)
+                main_menu_rect = pygame.Rect(lookup_rect.right + BUTTON_GAP, PRACTICE_HEIGHT - BUTTON_HEIGHT - 20, 150, BUTTON_HEIGHT)
                 
                 if show_answers_rect.collidepoint(event.pos):
                     show_answers = True
                 if play_again_rect.collidepoint(event.pos):
                     running = False
                     action_on_exit = "play_again"
+                if lookup_rect.collidepoint(event.pos):
+                    show_word_lookup_dialog()
                 if main_menu_rect.collidepoint(event.pos):
                     running = False
                     action_on_exit = "main_menu"
@@ -14119,7 +14123,8 @@ def unscramble_practice_game(params):
         # --- MODIFIED: Draw Buttons ---
         show_answers_rect = pygame.Rect(20, PRACTICE_HEIGHT - BUTTON_HEIGHT - 20, 150, BUTTON_HEIGHT)
         play_again_rect = pygame.Rect(show_answers_rect.right + BUTTON_GAP, PRACTICE_HEIGHT - BUTTON_HEIGHT - 20, 150, BUTTON_HEIGHT)
-        main_menu_rect = pygame.Rect(play_again_rect.right + BUTTON_GAP, PRACTICE_HEIGHT - BUTTON_HEIGHT - 20, 150, BUTTON_HEIGHT)
+        lookup_rect = pygame.Rect(play_again_rect.right + BUTTON_GAP, PRACTICE_HEIGHT - BUTTON_HEIGHT - 20, 150, BUTTON_HEIGHT)
+        main_menu_rect = pygame.Rect(lookup_rect.right + BUTTON_GAP, PRACTICE_HEIGHT - BUTTON_HEIGHT - 20, 150, BUTTON_HEIGHT)
         
         hover_show = show_answers_rect.collidepoint(pygame.mouse.get_pos())
         pygame.draw.rect(screen, BUTTON_HOVER if hover_show else BUTTON_COLOR, show_answers_rect)
@@ -14130,6 +14135,11 @@ def unscramble_practice_game(params):
         pygame.draw.rect(screen, BUTTON_HOVER if hover_play_again else BUTTON_COLOR, play_again_rect)
         play_again_text = button_font.render("Play Again", True, BLACK)
         screen.blit(play_again_text, play_again_text.get_rect(center=play_again_rect.center))
+
+        hover_lookup = lookup_rect.collidepoint(pygame.mouse.get_pos())
+        pygame.draw.rect(screen, BUTTON_HOVER if hover_lookup else BUTTON_COLOR, lookup_rect)
+        lookup_text = button_font.render("Lookup", True, BLACK)
+        screen.blit(lookup_text, lookup_text.get_rect(center=lookup_rect.center))
 
         hover_main = main_menu_rect.collidepoint(pygame.mouse.get_pos())
         pygame.draw.rect(screen, BUTTON_HOVER if hover_main else BUTTON_COLOR, main_menu_rect)
