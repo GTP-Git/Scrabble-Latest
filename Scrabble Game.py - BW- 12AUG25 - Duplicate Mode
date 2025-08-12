@@ -3,13 +3,11 @@
 
 
 #python
-#Scrabble BV
-#Tiles Smoother
-#Added Lookup button to UNSCRAMBLE
-#Added Set Rack button to UNSCRAMBLE
+#Scrabble BW
+#Added Duplicate practice/game mode
 
 
-#10AUG25
+#12AUG25
 
 
 
@@ -1740,6 +1738,7 @@ def draw_scoreboard(screen, move_history, scroll_offset, scores, is_ai, player_n
     Auto-scrolls to new moves if user is at the bottom.
     Auto-scrolls to final score when game is over.
     MODIFIED: Adjusted scoreboard X position.
+    MODIFIED: Added handling for 'place_duplicate' move type.
     """
     global DEV_VISUALIZE_BATCH_ENABLED_SESSION
     global is_batch_running
@@ -1788,7 +1787,7 @@ def draw_scoreboard(screen, move_history, scroll_offset, scores, is_ai, player_n
 
         y_pos_of_last_item_unscrolled = initial_y_offset_text + (num_history_items - 1) * line_height
 
-        
+
 
         if num_history_items * line_height + initial_y_offset_text > content_render_height:
              current_scroll_offset = (num_history_items * line_height + initial_y_offset_text) - content_render_height
@@ -1819,6 +1818,12 @@ def draw_scoreboard(screen, move_history, scroll_offset, scores, is_ai, player_n
             word = move.get('word_with_blanks', move.get('word', 'N/A'))
             coord = move.get('coord', 'N/A')
             text = f"{i+1}: {player_label} - {word} at {coord} ({score_sign}{int(move_score)}) Total: {display_score_int}"
+        elif move.get('move_type') == 'place_duplicate':
+            player_word = move.get('player_word', 'N/A')
+            player_score = move.get('score', 0)
+            optimal_word = move.get('optimal_word', 'N/A')
+            optimal_score = move.get('optimal_score', 0)
+            text = f"{i+1}: {player_word} ({int(player_score)}) vs {optimal_word} ({int(optimal_score)})"
         elif move.get('move_type') == 'pass':
             text = f"{i+1}: {player_label} - Pass ({score_sign}{int(move_score)}) Total: {display_score_int}"
         elif move.get('move_type') == 'exchange':
@@ -1859,6 +1864,85 @@ def draw_scoreboard(screen, move_history, scroll_offset, scores, is_ai, player_n
 
 
 
+def draw_duplicate_score_tracker(screen, state, drawn_rects):
+    """
+    Draws the score tracker for Duplicate practice mode below the scoreboard.
+    This is a new function.
+    """
+    global ui_font, BLACK, DIALOG_COLOR, GREEN # Pygame globals
+
+    scoreboard_rect = drawn_rects.get('scoreboard_rect')
+    if not scoreboard_rect:
+        return # Cannot draw without scoreboard position
+
+    # --- Calculate positions ---
+    tracker_height = 100
+    tracker_y = scoreboard_rect.bottom + 10
+    tracker_rect = pygame.Rect(scoreboard_rect.x, tracker_y, scoreboard_rect.width, tracker_height)
+
+    # --- Calculate scores from move history ---
+    total_possible_score = 0
+    player_actual_score = 0
+    move_history = state.get('move_history', [])
+
+    for move in move_history:
+        # We will store the optimal score in 'optimal_score' and player's score in 'score'
+        if move.get('move_type') == 'place_duplicate':
+            total_possible_score += move.get('optimal_score', 0)
+            player_actual_score += move.get('score', 0)
+
+    percentage = 0.0
+    if total_possible_score > 0:
+        percentage = (player_actual_score / total_possible_score) * 100
+
+    # --- Drawing ---
+    pygame.draw.rect(screen, DIALOG_COLOR, tracker_rect)
+    pygame.draw.rect(screen, BLACK, tracker_rect, 1)
+
+    padding = 10
+    y_offset = tracker_rect.y + padding
+    
+    title_surf = ui_font.render("Duplicate Score Tracker", True, BLACK)
+    title_rect = title_surf.get_rect(centerx=tracker_rect.centerx, top=y_offset)
+    screen.blit(title_surf, title_rect)
+    y_offset += title_surf.get_height() + 8
+
+    # Create three columns
+    col_width = tracker_rect.width / 3
+    col1_x = tracker_rect.x
+    col2_x = tracker_rect.x + col_width
+    col3_x = tracker_rect.x + 2 * col_width
+
+    # Column 1: Possible
+    possible_label_surf = ui_font.render("Possible", True, BLACK)
+    possible_label_rect = possible_label_surf.get_rect(centerx=col1_x + col_width / 2, top=y_offset)
+    screen.blit(possible_label_surf, possible_label_rect)
+    
+    possible_val_surf = ui_font.render(str(total_possible_score), True, GREEN)
+    possible_val_rect = possible_val_surf.get_rect(centerx=col1_x + col_width / 2, top=possible_label_rect.bottom + 2)
+    screen.blit(possible_val_surf, possible_val_rect)
+
+    # Column 2: Player
+    player_label_surf = ui_font.render("Player", True, BLACK)
+    player_label_rect = player_label_surf.get_rect(centerx=col2_x + col_width / 2, top=y_offset)
+    screen.blit(player_label_surf, player_label_rect)
+
+    player_val_surf = ui_font.render(str(player_actual_score), True, GREEN)
+    player_val_rect = player_val_surf.get_rect(centerx=col2_x + col_width / 2, top=player_label_rect.bottom + 2)
+    screen.blit(player_val_surf, player_val_rect)
+
+    # Column 3: Percentage
+    percent_label_surf = ui_font.render("Percent", True, BLACK)
+    percent_label_rect = percent_label_surf.get_rect(centerx=col3_x + col_width / 2, top=y_offset)
+    screen.blit(percent_label_surf, percent_label_rect)
+
+    percent_val_surf = ui_font.render(f"{percentage:.1f}%", True, GREEN)
+    percent_val_rect = percent_val_surf.get_rect(centerx=col3_x + col_width / 2, top=percent_label_rect.bottom + 2)
+    screen.blit(percent_val_surf, percent_val_rect)
+
+
+
+
 
 
 
@@ -1869,7 +1953,7 @@ def draw_rack(player, rack, scores, turn, player_names, dragged_tile=None, drag_
     global practice_mode # Access global practice_mode
     if not rack: return None, None, None
     if display_scores is None: display_scores = scores
-    if practice_mode == 'eight_letter' and player == 2: return None, None, None
+    if practice_mode in ['eight_letter', 'duplicate'] and player == 2: return None, None, None
 
     rack_width = 7 * (TILE_WIDTH + TILE_GAP) - TILE_GAP
     replay_area_end_x = 10 + 4 * (REPLAY_BUTTON_WIDTH + REPLAY_BUTTON_GAP)
@@ -2868,7 +2952,7 @@ def calculate_practice_dropdown_rects(player_ui_rects):
     dropdown_rect = pygame.Rect(name_rect_x, dropdown_button_y, 200, 30)
     
     dropdown_y = dropdown_button_y + 30 
-    options = ["Power Tiles", "8-Letter Bingos", "Bingo, Bango, Bongo", "Only Fives", "ABCELMNRSU", "End Game"]
+    options = ["Power Tiles", "8-Letter Bingos", "Bingo, Bango, Bongo", "Only Fives", "ABCELMNRSU", "Duplicate", "End Game"]
     option_rects = []
     for i, option in enumerate(options):
         option_rect = pygame.Rect(name_rect_x, dropdown_y + 30 * i, 200, 30)
@@ -2887,7 +2971,7 @@ def draw_practice_dropdown(screen, dropdown_open, dropdown_rect, option_rects):
     screen.blit(text_surf, text_surf.get_rect(center=dropdown_rect.center))
 
     if dropdown_open: 
-        options = ["Power Tiles", "8-Letter Bingos", "Bingo, Bango, Bongo", "Only Fives", "ABCELMNRSU", "End Game"]
+        options = ["Power Tiles", "8-Letter Bingos", "Bingo, Bango, Bongo", "Only Fives", "ABCELMNRSU", "Duplicate", "End Game"]
         for i, rect in enumerate(option_rects): 
              hover = rect.collidepoint(pygame.mouse.get_pos())
              color = BUTTON_HOVER if hover else DROPDOWN_COLOR
@@ -2905,7 +2989,7 @@ def handle_practice_dropdown_events(event, dropdown_open, dropdown_rect, option_
             return not dropdown_open, None
         
         if dropdown_open:
-            options = ["Power Tiles", "8-Letter Bingos", "Bingo, Bango, Bongo", "Only Fives", "ABCELMNRSU", "End Game"]
+            options = ["Power Tiles", "8-Letter Bingos", "Bingo, Bango, Bongo", "Only Fives", "ABCELMNRSU", "Duplicate", "End Game"]
             for i, rect in enumerate(option_rects):
                 if rect.collidepoint(x, y):
                     return False, options[i]
@@ -3305,6 +3389,9 @@ def mode_selection_screen():
                                     'main_word_length': main_len,
                                     'sub_word_lengths': sub_lens
                                 }
+                        elif practice_choice == "Duplicate":
+                            practice_mode = "duplicate"
+                            selected_mode = modes[current_input]
                         elif practice_choice == "End Game":
                             filename = show_endgame_puzzle_selection_dialog()
                             if filename is not None:
@@ -10748,8 +10835,97 @@ def _handle_keydown_typing_on_board(event, state):
                 state['original_blanks_before_typing'] = None
                 
                 return state # IMPORTANT: Return here to bypass standard play logic.
+            
+            elif state.get('practice_mode') == 'duplicate':
+                newly_placed_details = [(r, c, l) for r, c, l in state['word_positions']]
+                initial_rack_size = len(state['original_rack'])
+                temp_tiles_for_validation = [row[:] for row in state['tiles']]
 
-            # Standard game logic continues here if not in endgame practice mode
+                validation_code, _, validation_detail, all_words_details = ai_engine.is_valid_play(
+                    newly_placed_details, temp_tiles_for_validation, state['first_play'],
+                    initial_rack_size, state['original_tiles'], state['original_rack'],
+                    is_silent_batch_run_param=is_silent_run
+                )
+
+                if validation_code == VC_VALID:
+                    player_score = ai_engine.calculate_score(newly_placed_details, state['board'], temp_tiles_for_validation, state['blanks'], all_words_details)
+                    
+                    all_possible_moves = ai_engine.generate_all_moves_gaddag(
+                        state['original_rack'], state['original_tiles'], state['board'], state['original_blanks_before_typing'],
+                        is_silent_batch_run_param=is_silent_run
+                    )
+                    
+                    optimal_move = all_possible_moves[0] if all_possible_moves else None
+                    
+                    player_move_info = {'word': "".join(t[2] for t in all_words_details[0]), 'score': player_score} if all_words_details else {'word': 'N/A', 'score': 0}
+                    
+                    show_duplicate_feedback_dialog(player_move_info, optimal_move, state)
+                    
+                    # Revert the player's move from the board before placing the optimal one
+                    state['tiles'] = state['original_tiles']
+                    state['blanks'] = state['original_blanks_before_typing']
+                    
+                    # Place the OPTIMAL move on the board
+                    if optimal_move:
+                        temp_racks_for_play = [state['original_rack']]
+                        
+                        _, _, _, _ = play_hint_move(
+                            optimal_move, state['tiles'], temp_racks_for_play, 
+                            state['blanks'], [0], 1, state['bag'], 
+                            state['board'], [False], 'duplicate', is_silent_run
+                        )
+                        
+                        state['scores'][0] += player_score
+                        
+                        state['move_history'].append({
+                            'player': 1, 'move_type': 'place_duplicate',
+                            'score': player_score, 'player_word': player_move_info['word'],
+                            'optimal_score': optimal_move.get('score', 0),
+                            'optimal_word': optimal_move.get('word_with_blanks', 'N/A')
+                        })
+                    else: # No possible moves
+                        state['scores'][0] += player_score
+                        state['move_history'].append({
+                            'player': 1, 'move_type': 'place_duplicate',
+                            'score': player_score, 'player_word': player_move_info['word'],
+                            'optimal_score': 0, 'optimal_word': "PASS"
+                        })
+
+                    state['first_play'] = False
+
+                    # Draw a new rack or end the game
+                    if len(state['bag']) >= 7:
+                        state['racks'][0] = [state['bag'].pop() for _ in range(7)]
+                        if not is_silent_run:
+                            state['racks'][0].sort()
+                    else:
+                        state['game_over_state'] = True
+                        state['reason'] = "Not enough tiles for a new rack."
+                        state['showing_practice_end_dialog'] = True
+                        
+                        total_possible = sum(m.get('optimal_score', 0) for m in state['move_history'])
+                        player_total = sum(m.get('score', 0) for m in state['move_history'])
+                        percent = (player_total / total_possible * 100) if total_possible > 0 else 0
+                        
+                        state['practice_end_message'] = f"Duplicate Practice Complete!\n\nYour Score: {player_total}\nPossible Score: {total_possible}\nEfficiency: {percent:.1f}%"
+
+                else: # Player's move was structurally invalid
+                    show_message_dialog(f"Invalid play: {validation_detail}", "Invalid Play")
+                    # Revert board and rack
+                    if state['original_tiles'] and state['original_rack']:
+                        for r, c, _ in state['word_positions']:
+                            state['tiles'][r][c] = state['original_tiles'][r][c]
+                        state['racks'][state['turn']-1] = state['original_rack'][:]
+                        state['blanks'] = state.get('original_blanks_before_typing', set()).copy()
+
+                # Reset typing state for the next turn
+                state['typing'] = False; state['word_positions'] = []; state['original_tiles'] = None
+                state['original_rack'] = None; state['selected_square'] = None; state['current_r'] = None
+                state['current_c'] = None; state['typing_direction'] = None; state['typing_start'] = None
+                state['original_blanks_before_typing'] = None
+                return state
+
+            # Standard game logic continues here if not in endgame or duplicate practice mode
             newly_placed_details = [(r_wp_val, c_wp_val, l_wp_val) for r_wp_val, c_wp_val, l_wp_val in state['word_positions']]
             initial_rack_size_for_play = len(state['original_rack']) if state['original_rack'] else 0
             temp_tiles_for_validation = [row[:] for row in state['tiles']]
@@ -11082,6 +11258,104 @@ def _handle_keydown_typing_on_board(event, state):
             state['original_blanks_before_typing'] = None
 
     return state
+
+
+
+def show_duplicate_feedback_dialog(player_move, optimal_move, state):
+    """
+    Displays a movable dialog with feedback for the Duplicate practice mode.
+    This is a new function.
+    """
+    global screen, dialog_font, ui_font, button_font, DIALOG_COLOR, BLACK, WHITE, BUTTON_COLOR, BUTTON_HOVER, GREEN, RED
+
+    # --- Dialog setup ---
+    dialog_width, dialog_height = 550, 200
+    dialog_x = (WINDOW_WIDTH - dialog_width) // 2
+    dialog_y = (WINDOW_HEIGHT - dialog_height) // 2
+    
+    dialog_running = True
+    dragging = False
+    drag_offset = (0, 0)
+    title_bar_height = 40
+
+    # --- Determine message ---
+    player_score = player_move.get('score', 0)
+    player_word = player_move.get('word', 'N/A')
+    
+    optimal_score = 0
+    optimal_word = "PASS"
+    if optimal_move:
+        optimal_score = optimal_move.get('score', 0)
+        optimal_word = optimal_move.get('word_with_blanks', 'N/A')
+
+    is_correct = (player_score >= optimal_score)
+
+    # --- Main Dialog Loop ---
+    while dialog_running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE or event.key == pygame.K_RETURN:
+                    dialog_running = False
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                continue_button_rect = pygame.Rect(dialog_x + (dialog_width - BUTTON_WIDTH) // 2, dialog_y + dialog_height - BUTTON_HEIGHT - 15, BUTTON_WIDTH, BUTTON_HEIGHT)
+                title_bar_rect = pygame.Rect(dialog_x, dialog_y, dialog_width, title_bar_height)
+                if event.button == 1:
+                    if continue_button_rect.collidepoint(event.pos):
+                        dialog_running = False
+                    elif title_bar_rect.collidepoint(event.pos):
+                        dragging = True
+                        drag_offset = (event.pos[0] - dialog_x, event.pos[1] - dialog_y)
+            if event.type == pygame.MOUSEBUTTONUP:
+                if event.button == 1:
+                    dragging = False
+            if event.type == pygame.MOUSEMOTION and dragging:
+                dialog_x = event.pos[0] - drag_offset[0]
+                dialog_y = event.pos[1] - drag_offset[1]
+                dialog_x = max(0, min(dialog_x, WINDOW_WIDTH - dialog_width))
+                dialog_y = max(0, min(dialog_y, WINDOW_HEIGHT - dialog_height))
+
+        # --- Drawing ---
+        # Redraw the background game screen to allow seeing the board
+        draw_game_screen(screen, state)
+        
+        pygame.draw.rect(screen, DIALOG_COLOR, (dialog_x, dialog_y, dialog_width, dialog_height))
+        pygame.draw.rect(screen, BLACK, (dialog_x, dialog_y, dialog_width, dialog_height), 2)
+
+        title_surf = dialog_font.render("Turn Result", True, BLACK)
+        screen.blit(title_surf, (dialog_x + 15, dialog_y + 10))
+
+        y_offset = dialog_y + 60
+        if is_correct:
+            line1_text = "Correct! You found the highest scoring play."
+            line2_text = f"You played {player_word} for {player_score} points."
+            line1_surf = ui_font.render(line1_text, True, GREEN)
+            line2_surf = ui_font.render(line2_text, True, BLACK)
+            line1_rect = line1_surf.get_rect(centerx=dialog_x + dialog_width / 2, top=y_offset)
+            line2_rect = line2_surf.get_rect(centerx=dialog_x + dialog_width / 2, top=line1_rect.bottom + 5)
+            screen.blit(line1_surf, line1_rect)
+            screen.blit(line2_surf, line2_rect)
+        else:
+            line1_text = f"You played {player_word} for {player_score} points."
+            line2_text = f"The best move was {optimal_word} for {optimal_score} points."
+            line1_surf = ui_font.render(line1_text, True, RED)
+            line2_surf = ui_font.render(line2_text, True, BLACK)
+            line1_rect = line1_surf.get_rect(centerx=dialog_x + dialog_width / 2, top=y_offset)
+            line2_rect = line2_surf.get_rect(centerx=dialog_x + dialog_width / 2, top=line1_rect.bottom + 5)
+            screen.blit(line1_surf, line1_rect)
+            screen.blit(line2_surf, line2_rect)
+
+        continue_button_rect = pygame.Rect(dialog_x + (dialog_width - BUTTON_WIDTH) // 2, dialog_y + dialog_height - BUTTON_HEIGHT - 15, BUTTON_WIDTH, BUTTON_HEIGHT)
+        hover_continue = continue_button_rect.collidepoint(pygame.mouse.get_pos())
+        color_continue = BUTTON_HOVER if hover_continue else BUTTON_COLOR
+        pygame.draw.rect(screen, color_continue, continue_button_rect)
+        continue_text_surf = button_font.render("Continue", True, BLACK)
+        screen.blit(continue_text_surf, continue_text_surf.get_rect(center=continue_button_rect.center))
+
+        pygame.display.flip()
+        pygame.time.Clock().tick(30)
 
 
 
@@ -12429,6 +12703,11 @@ def draw_game_screen(screen, state):
     # 2. Draw the base game UI (board, racks, scoreboard, main buttons)
     _draw_base_game_ui(screen, state, drawn_rects)
 
+    # --- NEW: Draw Duplicate Score Tracker if in that mode ---
+    if state.get('practice_mode') == 'duplicate':
+        draw_duplicate_score_tracker(screen, state, drawn_rects)
+    # --- END NEW ---
+
     # 3. Draw any active dialogs or overlays on top of the base UI
     _draw_dialogs_and_overlays(screen, state, drawn_rects)
 
@@ -12457,7 +12736,7 @@ def check_and_handle_game_over(state):
     """
     global DEV_VISUALIZE_BATCH_ENABLED_SESSION 
 
-    if state.get('practice_mode') == "endgame":
+    if state.get('practice_mode') in ["endgame", "duplicate"]:
         return state # In this mode, the game ends only when the puzzle is solved.
 
     is_silent_run = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
