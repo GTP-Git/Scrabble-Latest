@@ -7,6 +7,7 @@
 #Added Duplicate practice/game mode
 
 
+
 #12AUG25
 
 
@@ -10882,6 +10883,7 @@ def _handle_keydown_typing_on_board(event, state):
                             'score': player_score, 'player_word': player_move_info['word'],
                             'optimal_score': optimal_move.get('score', 0),
                             'optimal_word': optimal_move.get('word_with_blanks', 'N/A')
+                        
                         })
                     else: # No possible moves
                         state['scores'][0] += player_score
@@ -10893,12 +10895,12 @@ def _handle_keydown_typing_on_board(event, state):
 
                     state['first_play'] = False
 
-                    # Draw a new rack or end the game
-                    if len(state['bag']) >= 7:
-                        state['racks'][0] = [state['bag'].pop() for _ in range(7)]
-                        if not is_silent_run:
-                            state['racks'][0].sort()
-                    else:
+                    # Update the main rack with the replenished one from play_hint_move
+                    if optimal_move:
+                        state['racks'][0] = temp_racks_for_play[0]
+
+                    # Check for game over condition
+                    if len(state['bag']) < 7:
                         state['game_over_state'] = True
                         state['reason'] = "Not enough tiles for a new rack."
                         state['showing_practice_end_dialog'] = True
@@ -10907,7 +10909,7 @@ def _handle_keydown_typing_on_board(event, state):
                         player_total = sum(m.get('score', 0) for m in state['move_history'])
                         percent = (player_total / total_possible * 100) if total_possible > 0 else 0
                         
-                        state['practice_end_message'] = f"Duplicate Practice Complete!\n\nYour Score: {player_total}\nPossible Score: {total_possible}\nEfficiency: {percent:.1f}%"
+                        state['practice_end_message'] = f"Duplicate Practice Complete!\\n\\nYour Score: {player_total}\\nPossible Score: {total_possible}\\nEfficiency: {percent:.1f}%"
 
                 else: # Player's move was structurally invalid
                     show_message_dialog(f"Invalid play: {validation_detail}", "Invalid Play")
@@ -11027,8 +11029,7 @@ def _handle_keydown_typing_on_board(event, state):
                         show_message_dialog(f"You didn't use the required power tile: {state['current_power_tile']}. Try again!", "Incorrect Play")
                         practice_mode_allows_play = False
                 elif state['practice_mode'] == "bingo_bango_bongo" and state['paused_for_bingo_practice']:
-                    bingo_moves = [m for m in state['all_moves'] if m.get('is_bingo', False)]
-                    max_bingo_score = max(m['score'] for m in bingo_moves) if bingo_moves else 0
+                    bingo_moves = [m for m in state['all_moves'] if m.get('is_bingo', False)]; max_bingo_score = max(m['score'] for m in bingo_moves) if bingo_moves else 0
                     if is_bingo and score_val_play >= max_bingo_score:
                         show_message_dialog(f"Correct! You found the highest scoring bingo ({score_val_play} pts).", "Bingo Success!")
                     elif is_bingo:
@@ -11065,7 +11066,7 @@ def _handle_keydown_typing_on_board(event, state):
                             best_coord_str = ai_engine.get_coord(best_start_pos, best_direction, is_silent_batch_run_param=True)
                             outcome_text = f"Incorrect. The correct play was {best_word_solution} {best_coord_str} ({best_score_solution} pts)."
 
-                        state['practice_end_message'] = f"{outcome_text}\n\nYour new probability range is:\n{min_p} to {next_max_p}"
+                        state['practice_end_message'] = f"{outcome_text}\\n\\nYour new probability range is:\\n{min_p} to {next_max_p}"
                     else: # Not gamified mode
                         if is_correct_solve:
                             # This part is for displaying the user's own correct word, which is fine.
