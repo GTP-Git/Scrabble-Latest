@@ -3,12 +3,16 @@
 
 
 #python
-#Scrabble BW
-#Added Duplicate practice/game mode
+#Scrabble BX
+#Added way to assign a blank letter when typing on board
+
+#Now left/right arrows move back/forward in Replay mode
+
+#Added one vowel/one consonant rule to Duplicate
 
 
 
-#12AUG25
+#17AUG25
 
 
 
@@ -5589,12 +5593,33 @@ def calculate_final_scores(current_scores, racks, bag, game_clock, is_silent_bat
     return final_scores
 
 
+
+def is_valid_duplicate_rack(rack):
+    """
+    Checks if a rack is valid for Duplicate mode (at least one vowel and one consonant).
+    Blanks (' ') are ignored in this check.
+    """
+    vowels = "AEIOU"
+    has_vowel = False
+    has_consonant = False
+    for tile in rack:
+        if tile in vowels:
+            has_vowel = True
+        elif tile.isalpha() and tile not in vowels:
+            has_consonant = True
+        if has_vowel and has_consonant:
+            return True # Early exit if both are found
+    return False
+
+
+
 def play_hint_move(move, tiles, racks, blanks, scores, turn, bag, board, is_ai_param, practice_mode_param, is_silent_batch_run_param=False): # Added is_silent_batch_run_param
     """
     Plays a move (usually from hint/AI), updates state. Handles practice mode. Sorts human rack.
     Returns next_turn, drawn_tiles, newly_placed_details, and actual_tiles_consumed_from_rack.
     Critical error prints are now conditional.
     MODIFIED: Rack sorting is now conditional.
+    MODIFIED: Added redraw logic for Duplicate mode to ensure vowel/consonant balance.
     """
     player_idx = turn - 1
     if not (0 <= player_idx < len(racks)):
@@ -5677,6 +5702,27 @@ def play_hint_move(move, tiles, racks, blanks, scores, turn, bag, board, is_ai_p
     if practice_mode_param != "eight_letter":
         num_to_draw = len(newly_placed_details) 
         drawn_tiles = [bag.pop() for _ in range(num_to_draw) if bag]
+        
+        if practice_mode_param == "duplicate":
+            potential_new_rack = rack_after_play + drawn_tiles
+            redraw_attempts = 0
+            while not is_valid_duplicate_rack(potential_new_rack) and redraw_attempts < 50:
+                if not is_silent_batch_run_param:
+                    print(f"  Duplicate Mode: Invalid rack drawn ({''.join(sorted(potential_new_rack))}). Redrawing...")
+                
+                # Return the invalid tiles to the bag and shuffle
+                bag.extend(drawn_tiles)
+                random.shuffle(bag)
+                
+                # Draw a new set of tiles
+                drawn_tiles = [bag.pop() for _ in range(num_to_draw) if bag]
+                potential_new_rack = rack_after_play + drawn_tiles
+                redraw_attempts += 1
+            
+            if redraw_attempts >= 50:
+                if not is_silent_batch_run_param:
+                    print("  WARNING: Could not form a valid duplicate rack after 50 attempts. Proceeding with current rack.")
+
         rack_after_play.extend(drawn_tiles)
 
     should_sort_rack_play_hint = not is_silent_batch_run_param
@@ -5688,6 +5734,8 @@ def play_hint_move(move, tiles, racks, blanks, scores, turn, bag, board, is_ai_p
 
     next_turn = turn if practice_mode_param == "eight_letter" else 3 - turn
     return next_turn, drawn_tiles, newly_placed_details, actual_tiles_consumed_from_rack
+
+
 
 
 
@@ -10560,7 +10608,8 @@ def _get_all_word_structures_for_phony_scoring(new_tiles, tiles):
 def _handle_keydown_typing_on_board(event, state):
     """
     Handles KEYDOWN events when a player is actively typing a word on the board.
-    Manages letter placement, blank usage, backspace, and word submission.
+    Manages letter placement, blank usage (Shift+key = use blank), backspace,
+    and word submission.
     This is a full and complete function.
     """
     global GRID_SIZE, DEV_VISUALIZE_BATCH_ENABLED_SESSION, pyperclip_available, pyperclip, VC_VALID, VC_INVALID_WORDS
@@ -10575,7 +10624,7 @@ def _handle_keydown_typing_on_board(event, state):
                 pasted_text = pasted_text.upper()
                 if not is_silent_run:
                     print(f"Pasting: {pasted_text}")
-                
+
                 if not state['typing']:
                     state['typing'] = True
                     state['original_tiles'] = [row[:] for row in state['tiles']]
@@ -10636,54 +10685,80 @@ def _handle_keydown_typing_on_board(event, state):
 
 
     elif event.unicode.isalpha() and len(event.unicode) == 1:
-        letter = event.unicode.upper()
-        current_rack_debug = state['racks'][state['turn']-1]
-        has_letter = letter in current_rack_debug
-        has_blank = ' ' in current_rack_debug
+        letter_to_place = event.unicode.upper()
+        current_rack = state['racks'][state['turn']-1]
+        
+        use_blank = False
+        tile_to_consume = None
+        
+        # Check if Shift key is pressed (this will be true for uppercase letters unless Caps Lock is on)
+        is_shift_pressed = mods & pygame.KMOD_SHIFT
 
-        if has_letter or has_blank:
-            if not state['typing']:
-                state['typing'] = True
-                state['original_tiles'] = [row[:] for row in state['tiles']]
-                state['original_rack'] = state['racks'][state['turn']-1][:]
-                state['original_blanks_before_typing'] = state['blanks'].copy()
-                state['typing_start'] = state['selected_square'][:2]
-                state['typing_direction'] = state['selected_square'][2]
-                state['word_positions'] = []
-                state['current_r'], state['current_c'] = state['typing_start']
-            elif state['current_r'] is None or state['current_c'] is None or state['typing_direction'] is None:
-                if not is_silent_run:
-                    print("ERROR: Typing mode active but cursor state invalid. Resetting typing.")
-                state['typing'] = False; state['word_positions'] = []; state['original_tiles'] = None; state['original_rack'] = None
-                state['selected_square'] = None; state['current_r'] = None; state['current_c'] = None; state['typing_direction'] = None; state['typing_start'] = None
-                state['original_blanks_before_typing'] = None
-                return state
-
-            use_blank = False
-            if not has_letter and has_blank:
+        if is_shift_pressed:
+            # User explicitly requests to use a blank with Shift
+            if ' ' in current_rack:
                 use_blank = True
-            
-            if state['current_r'] is not None and state['current_c'] is not None and \
-               0 <= state['current_r'] < GRID_SIZE and 0 <= state['current_c'] < GRID_SIZE:
-                
-                state['tiles'][state['current_r']][state['current_c']] = letter
-                state['word_positions'].append((state['current_r'], state['current_c'], letter))
-                if use_blank:
-                    state['racks'][state['turn']-1].remove(' ')
-                    state['blanks'].add((state['current_r'], state['current_c']))
-                else:
-                    state['racks'][state['turn']-1].remove(letter)
+                tile_to_consume = ' '
+            else:
+                # No blank available for the explicit request, so ignore the keypress
+                return state # Exit early
+        else: # Standard typing (no Shift, or with Caps Lock)
+            # Prioritize using the actual letter tile
+            if letter_to_place in current_rack:
+                use_blank = False
+                tile_to_consume = letter_to_place
+            # Fallback to using a blank if the letter tile isn't available
+            elif ' ' in current_rack:
+                use_blank = True
+                tile_to_consume = ' '
+            else:
+                # No tile and no blank, ignore keypress
+                return state # Exit early
 
-                if state['typing_direction'] == "right":
+        # If we are here, a valid tile_to_consume was found.
+        if not state['typing']:
+            state['typing'] = True
+            state['original_tiles'] = [row[:] for row in state['tiles']]
+            state['original_rack'] = state['racks'][state['turn']-1][:]
+            state['original_blanks_before_typing'] = state['blanks'].copy()
+            state['typing_start'] = state['selected_square'][:2]
+            state['typing_direction'] = state['selected_square'][2]
+            state['word_positions'] = []
+            state['current_r'], state['current_c'] = state['typing_start']
+        elif state['current_r'] is None or state['current_c'] is None or state['typing_direction'] is None:
+            if not is_silent_run:
+                print("ERROR: Typing mode active but cursor state invalid. Resetting typing.")
+            state['typing'] = False; state['word_positions'] = []; state['original_tiles'] = None; state['original_rack'] = None
+            state['selected_square'] = None; state['current_r'] = None; state['current_c'] = None; state['typing_direction'] = None; state['typing_start'] = None
+            state['original_blanks_before_typing'] = None
+            return state
+
+        # Check if cursor is valid before placing
+        if state['current_r'] is not None and state['current_c'] is not None and \
+           0 <= state['current_r'] < GRID_SIZE and 0 <= state['current_c'] < GRID_SIZE:
+            
+            # Place the tile on the board
+            state['tiles'][state['current_r']][state['current_c']] = letter_to_place
+            state['word_positions'].append((state['current_r'], state['current_c'], letter_to_place))
+            
+            # Consume the tile from the rack
+            state['racks'][state['turn']-1].remove(tile_to_consume)
+            
+            # Mark as blank if we used one
+            if use_blank:
+                state['blanks'].add((state['current_r'], state['current_c']))
+
+            # Advance cursor
+            if state['typing_direction'] == "right":
+                state['current_c'] += 1
+                while 0 <= state['current_c'] < GRID_SIZE and state['original_tiles'][state['current_r']][state['current_c']]:
                     state['current_c'] += 1
-                    while 0 <= state['current_c'] < GRID_SIZE and state['original_tiles'][state['current_r']][state['current_c']]:
-                        state['current_c'] += 1
-                elif state['typing_direction'] == "down":
+            elif state['typing_direction'] == "down":
+                state['current_r'] += 1
+                while 0 <= state['current_r'] < GRID_SIZE and state['original_tiles'][state['current_r']][state['current_c']]:
                     state['current_r'] += 1
-                    while 0 <= state['current_r'] < GRID_SIZE and state['original_tiles'][state['current_r']][state['current_c']]:
-                        state['current_r'] += 1
-            elif not is_silent_run:
-                print(f"Warning: Attempted to type '{letter}' at invalid cursor ({state['current_r']},{state['current_c']})")
+        elif not is_silent_run:
+            print(f"Warning: Attempted to type '{letter_to_place}' at invalid cursor ({state['current_r']},{state['current_c']})")
 
     elif event.key == pygame.K_BACKSPACE and state['typing']:
         if state['word_positions']:
@@ -11671,6 +11746,59 @@ def _handle_keydown_event(event, state, drawn_rects):
     # 3. Handle dialog-specific keyboard navigation (includes ESC for those dialogs)
     if _handle_keydown_dialog_navigation(event, state, drawn_rects):
         return running_inner, return_to_mode_selection, batch_stop_requested, start_new_game_same_mode
+
+    # --- NEW: Handle Replay Navigation with Arrow Keys ---
+    if state.get('replay_mode') and not (state.get('hinting') or state.get('showing_all_words') or state.get('showing_stats')):
+        turn_changed_by_key = False
+        new_replay_turn = state['current_replay_turn']
+
+        if event.key == pygame.K_LEFT:
+            if new_replay_turn > 0:
+                new_replay_turn -= 1
+                turn_changed_by_key = True
+        elif event.key == pygame.K_RIGHT:
+            if new_replay_turn < len(state['move_history']):
+                new_replay_turn += 1
+                turn_changed_by_key = True
+        
+        if turn_changed_by_key:
+            is_silent_run = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
+            
+            state['current_replay_turn'] = new_replay_turn
+            state = clear_current_preview(state)
+            state['last_played_highlight_coords'] = set()
+            state['last_scoreboard_click_time'] = 0
+            state['last_scoreboard_click_idx'] = -1
+            state['analyzer_selected_move_index'] = None
+
+            sgs_data_for_nav = state.get('sgs_loaded_game_data')
+            if not sgs_data_for_nav:
+                sgs_data_for_nav = {
+                    'sgs_initial_bag': state.get('sgs_initial_bag', []),
+                    'initial_racks_sgs': state.get('initial_racks', [[],[]]),
+                    'full_move_history': state.get('move_history', [])
+                }
+            
+            sgs_tiles, sgs_blanks, sgs_scores, sgs_racks, sgs_bag, sgs_turn = get_sgs_replay_state(
+                sgs_data_for_nav,
+                state['current_replay_turn'],
+                is_silent_batch_run_param=is_silent_run
+            )
+            state['tiles'] = sgs_tiles
+            state['blanks'] = sgs_blanks
+            state['replay_scores_for_display'] = sgs_scores
+            state['replay_racks_for_display'] = sgs_racks
+            state['replay_turn_for_display'] = sgs_turn
+            
+            combined_unseen = sgs_bag[:]
+            if sgs_turn == 1 and len(sgs_racks) > 1 and sgs_racks[1] is not None:
+                combined_unseen.extend(sgs_racks[1])
+            elif sgs_turn == 2 and len(sgs_racks) > 0 and sgs_racks[0] is not None:
+                combined_unseen.extend(sgs_racks[0])
+            state['replay_unseen_tiles_for_display'] = Counter(combined_unseen)
+            
+            return running_inner, return_to_mode_selection, batch_stop_requested, start_new_game_same_mode
+    # --- END NEW SECTION ---
 
     # 4. Handle typing on the board
     current_player_idx = state['turn'] - 1
