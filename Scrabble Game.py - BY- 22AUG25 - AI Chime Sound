@@ -6,6 +6,7 @@
 #Scrabble BY
 # Added sound when AI plays and move >5 seconds
 # Added up/down arrow through move list in Replay Mode
+# Made Exchange Dialog movable
 
 
 
@@ -3960,7 +3961,6 @@ def draw_options_menu(turn, dropdown_open, bag_count, is_batch_running_param, re
 
 
 
-# draw_suggest_button, draw_exchange_dialog, confirm_quit, draw_game_over_dialog, draw_score_row, calculate_moves_per_player, calculate_bingos_per_player, calculate_bingo_avg_per_player, draw_moves_row, draw_avg_score_row, draw_bingos_row, draw_bingo_avg_row, calculate_blanks_per_player, draw_blanks_row, draw_stats_dialog, show_message_dialog, draw_practice_end_dialog (Unchanged from Part 3 provided previously)
 def draw_suggest_button():
     """Draw the suggest button."""
     suggest_x = 10 + OPTIONS_WIDTH + BUTTON_GAP; suggest_rect = pygame.Rect(suggest_x, OPTIONS_Y, OPTIONS_WIDTH, OPTIONS_HEIGHT)
@@ -3968,25 +3968,64 @@ def draw_suggest_button():
     suggest_text = button_font.render("Suggest", True, BLACK); suggest_text_rect = suggest_text.get_rect(center=(suggest_x + OPTIONS_WIDTH // 2, OPTIONS_Y + OPTIONS_HEIGHT // 2)); screen.blit(suggest_text, suggest_text_rect)
     return suggest_rect
 
-def draw_exchange_dialog(rack, selected_tiles):
+
+
+def draw_exchange_dialog(rack, selected_tiles, dialog_x, dialog_y):
     """Draw the tile exchange dialog."""
-    dialog_width, dialog_height = 400, 200; dialog_x = (WINDOW_WIDTH - dialog_width) // 2; dialog_y = (WINDOW_HEIGHT - dialog_height) // 2
-    pygame.draw.rect(screen, DIALOG_COLOR, (dialog_x, dialog_y, dialog_width, dialog_height)); pygame.draw.rect(screen, BLACK, (dialog_x, dialog_y, dialog_width, dialog_height), 2)
-    prompt_text = dialog_font.render("Select tiles to exchange:", True, BLACK); screen.blit(prompt_text, (dialog_x + 10, dialog_y + 10))
-    tile_rects = []; rack_display_width = len(rack) * (TILE_WIDTH + TILE_GAP) - TILE_GAP; start_tile_x = dialog_x + (dialog_width - rack_display_width) // 2
+    dialog_width, dialog_height = 400, 200
+    pygame.draw.rect(screen, DIALOG_COLOR, (dialog_x, dialog_y, dialog_width, dialog_height))
+    pygame.draw.rect(screen, BLACK, (dialog_x, dialog_y, dialog_width, dialog_height), 2)
+    
+    title_text = dialog_font.render("Exchange Tiles", True, BLACK)
+    screen.blit(title_text, (dialog_x + 10, dialog_y + 10))
+
+    prompt_text = ui_font.render("Select tiles to exchange:", True, BLACK)
+    screen.blit(prompt_text, (dialog_x + 10, dialog_y + 45))
+    
+    tile_rects = []
+    rack_display_width = len(rack) * (TILE_WIDTH + TILE_GAP) - TILE_GAP
+    start_tile_x = dialog_x + (dialog_width - rack_display_width) // 2
+    
     for i, tile in enumerate(rack):
-        tile_x = start_tile_x + i * (TILE_WIDTH + TILE_GAP); tile_y = dialog_y + 50; rect = pygame.Rect(tile_x, tile_y, TILE_WIDTH, TILE_HEIGHT); tile_rects.append(rect)
+        tile_x = start_tile_x + i * (TILE_WIDTH + TILE_GAP)
+        tile_y = dialog_y + 80
+        rect = pygame.Rect(tile_x, tile_y, TILE_WIDTH, TILE_HEIGHT)
+        tile_rects.append(rect)
         if tile == ' ':
-            center = rect.center; radius = TILE_WIDTH // 2 - 2; pygame.draw.circle(screen, BLACK, center, radius)
-            if i in selected_tiles: pygame.draw.circle(screen, SELECTED_TILE_COLOR, center, radius + 2, 2)
-            text = font.render('?', True, WHITE); text_rect = text.get_rect(center=center); screen.blit(text, text_rect)
-        else: color = SELECTED_TILE_COLOR if i in selected_tiles else GREEN; pygame.draw.rect(screen, color, rect); text = font.render(tile, True, BLACK); screen.blit(text, (tile_x + 5, tile_y + 5))
-    total_button_width = BUTTON_WIDTH * 2 + BUTTON_GAP; button_start_x = dialog_x + (dialog_width - total_button_width) // 2; button_y = dialog_y + dialog_height - BUTTON_HEIGHT - 10
-    exchange_button_rect = pygame.Rect(button_start_x, button_y, BUTTON_WIDTH, BUTTON_HEIGHT); cancel_button_rect = pygame.Rect(button_start_x + BUTTON_WIDTH + BUTTON_GAP, button_y, BUTTON_WIDTH, BUTTON_HEIGHT)
-    hover = exchange_button_rect.collidepoint(pygame.mouse.get_pos()); color = BUTTON_HOVER if hover else BUTTON_COLOR; pygame.draw.rect(screen, color, exchange_button_rect)
-    exchange_text = button_font.render("Exchange", True, BLACK); exchange_text_rect = exchange_text.get_rect(center=exchange_button_rect.center); screen.blit(exchange_text, exchange_text_rect)
-    hover = cancel_button_rect.collidepoint(pygame.mouse.get_pos()); color = BUTTON_HOVER if hover else BUTTON_COLOR; pygame.draw.rect(screen, color, cancel_button_rect)
-    cancel_text = button_font.render("Cancel", True, BLACK); cancel_text_rect = cancel_text.get_rect(center=cancel_button_rect.center); screen.blit(cancel_text, cancel_text_rect)
+            center = rect.center
+            radius = TILE_WIDTH // 2 - 2
+            pygame.draw.circle(screen, BLACK, center, radius)
+            if i in selected_tiles:
+                pygame.draw.circle(screen, SELECTED_TILE_COLOR, center, radius + 2, 2)
+            text = font.render('?', True, WHITE)
+            text_rect = text.get_rect(center=center)
+            screen.blit(text, text_rect)
+        else:
+            color = SELECTED_TILE_COLOR if i in selected_tiles else GREEN
+            pygame.draw.rect(screen, color, rect)
+            text = font.render(tile, True, BLACK)
+            screen.blit(text, (tile_x + 5, tile_y + 5))
+            
+    total_button_width = BUTTON_WIDTH * 2 + BUTTON_GAP
+    button_start_x = dialog_x + (dialog_width - total_button_width) // 2
+    button_y = dialog_y + dialog_height - BUTTON_HEIGHT - 10
+    exchange_button_rect = pygame.Rect(button_start_x, button_y, BUTTON_WIDTH, BUTTON_HEIGHT)
+    cancel_button_rect = pygame.Rect(button_start_x + BUTTON_WIDTH + BUTTON_GAP, button_y, BUTTON_WIDTH, BUTTON_HEIGHT)
+    
+    hover = exchange_button_rect.collidepoint(pygame.mouse.get_pos())
+    color = BUTTON_HOVER if hover else BUTTON_COLOR
+    pygame.draw.rect(screen, color, exchange_button_rect)
+    exchange_text = button_font.render("Exchange", True, BLACK)
+    exchange_text_rect = exchange_text.get_rect(center=exchange_button_rect.center)
+    screen.blit(exchange_text, exchange_text_rect)
+    
+    hover = cancel_button_rect.collidepoint(pygame.mouse.get_pos())
+    color = BUTTON_HOVER if hover else BUTTON_COLOR
+    pygame.draw.rect(screen, color, cancel_button_rect)
+    cancel_text = button_font.render("Cancel", True, BLACK)
+    cancel_text_rect = cancel_text.get_rect(center=cancel_button_rect.center)
+    screen.blit(cancel_text, cancel_text_rect)
+    
     return tile_rects, exchange_button_rect, cancel_button_rect
 
 
@@ -8678,6 +8717,13 @@ def process_game_events(state, drawn_rects):
                 state['practice_dialog_y'] = y_mm - state['practice_dialog_drag_offset'][1]
                 state['practice_dialog_x'] = max(0, min(state['practice_dialog_x'], WINDOW_WIDTH - dialog_width))
                 state['practice_dialog_y'] = max(0, min(state['practice_dialog_y'], WINDOW_HEIGHT - dialog_height))
+            elif state.get('exchanging') and state.get('exchange_dialog_dragging'):
+                x_mm, y_mm = event.pos
+                dialog_width, dialog_height = 400, 200
+                state['exchange_dialog_x'] = x_mm - state['exchange_dialog_drag_offset'][0]
+                state['exchange_dialog_y'] = y_mm - state['exchange_dialog_drag_offset'][1]
+                state['exchange_dialog_x'] = max(0, min(state['exchange_dialog_x'], WINDOW_WIDTH - dialog_width))
+                state['exchange_dialog_y'] = max(0, min(state['exchange_dialog_y'], WINDOW_HEIGHT - dialog_height))
 
 
         elif event.type == pygame.MOUSEBUTTONUP and not state['is_batch_running']:
@@ -8688,6 +8734,7 @@ def process_game_events(state, drawn_rects):
                 if state['hinting'] and state['hint_dialog_dragging']: state['hint_dialog_dragging'] = False
                 if state.get('showing_all_words', False) and state.get('all_words_dialog_dragging', False): state['all_words_dialog_dragging'] = False
                 if state.get('showing_practice_end_dialog') and state.get('practice_dialog_dragging'): state['practice_dialog_dragging'] = False
+                if state.get('exchanging') and state.get('exchange_dialog_dragging'): state['exchange_dialog_dragging'] = False
                 elif state['dragged_tile'] and (0 <= state['dragged_tile'][0]-1 < len(state['is_ai']) and (not state['is_ai'][state['dragged_tile'][0]-1] or state['paused_for_power_tile'] or state['paused_for_bingo_practice'])) and not state['replay_mode']:
                     player_idx = state['dragged_tile'][0] - 1; rack_y = BOARD_SIZE + 80 if state['dragged_tile'][0] == 1 else BOARD_SIZE + 150
                     rack_width_calc = 7 * (TILE_WIDTH + TILE_GAP) - TILE_GAP; replay_area_end_x = 10 + 4 * (REPLAY_BUTTON_WIDTH + REPLAY_BUTTON_GAP)
@@ -9157,7 +9204,9 @@ def _handle_mouse_down_exchange_dialog(event, state, drawn_rects):
     racks = state['racks']
     turn = state['turn']
     bag = state['bag']
-    
+    dialog_x = state['exchange_dialog_x']
+    dialog_y = state['exchange_dialog_y']
+
 
     tile_rects_exchange = drawn_rects.get('tile_rects', [])
     exchange_button_rect_exchange = drawn_rects.get('exchange_button_rect')
@@ -9166,6 +9215,15 @@ def _handle_mouse_down_exchange_dialog(event, state, drawn_rects):
     x, y = event.pos
 
     if event.button == 1:
+        dialog_width, dialog_height = 400, 200
+        title_bar_height = 40 # A reasonable height for the title bar
+        title_bar_rect = pygame.Rect(dialog_x, dialog_y, dialog_width, title_bar_height)
+
+        if title_bar_rect.collidepoint(x, y):
+            state['exchange_dialog_dragging'] = True
+            state['exchange_dialog_drag_offset'] = (x - dialog_x, y - dialog_y)
+            return state
+
         clicked_tile_in_dialog = False
         for i_tile_rect, rect_tile_item in enumerate(tile_rects_exchange):
             if rect_tile_item.collidepoint(x, y):
@@ -9216,7 +9274,7 @@ def _handle_mouse_down_exchange_dialog(event, state, drawn_rects):
                         luck_factor_exchange = drawn_leave_value_exchange - expected_draw_value_simple_exchange
                         if not is_silent_run_local:
                             drawn_tiles_str_exchange = "".join(sorted(t if t != ' ' else '?' for t in drawn_tiles_exchange))
-                            print(f"  Drew (Exchange): \{drawn_tiles_str_exchange}, Leave Value: \{drawn_leave_value_exchange:.2f}, Luck: \{luck_factor_exchange:+.2f}")
+                            print(f"  Drew (Exchange): \{drawn_tiles_str_exchange}, Leave Value: \{drawn_leave_value_exchange:.2f\}, Luck: \{luck_factor_exchange:+.2f\}")
                     
                     state['move_history'].append({
                         'player': turn, 'move_type': 'exchange', 
@@ -9230,6 +9288,7 @@ def _handle_mouse_down_exchange_dialog(event, state, drawn_rects):
                         'luck_factor': luck_factor_exchange,
                         'tiles_played_from_rack': [], # No tiles played on board
                         'leave': leave_for_history # Use the correctly captured leave
+                    
                     
                     })
                     state['current_replay_turn'] = len(state['move_history'])
@@ -12786,7 +12845,7 @@ def _draw_dialogs_and_overlays(screen, state, drawn_rects):
             drawn_rects['override_rect_ov'] = override_rect_ov_draw
     elif exchanging:
         current_player_rack_for_exchange = state['racks'][state['turn']-1] if 0 <= state['turn']-1 < len(state['racks']) and state['racks'][state['turn']-1] is not None else []
-        tile_rects_draw, exchange_button_rect_draw, cancel_button_rect_draw = draw_exchange_dialog(current_player_rack_for_exchange, state['selected_tiles'])
+        tile_rects_draw, exchange_button_rect_draw, cancel_button_rect_draw = draw_exchange_dialog(current_player_rack_for_exchange, state['selected_tiles'], state['exchange_dialog_x'], state['exchange_dialog_y'])
         drawn_rects['tile_rects'] = tile_rects_draw
         drawn_rects['exchange_button_rect'] = exchange_button_rect_draw
         drawn_rects['cancel_button_rect'] = cancel_button_rect_draw
@@ -14170,6 +14229,10 @@ def reset_per_game_variables():
         'practice_dialog_drag_offset': (0, 0),
         'clock_pause_button_rect': None,
         'clock_options_button_rect': None,
+        'exchange_dialog_x': (WINDOW_WIDTH - 400) // 2,
+        'exchange_dialog_y': (WINDOW_HEIGHT - 200) // 2,
+        'exchange_dialog_dragging': False,
+        'exchange_dialog_drag_offset': (0, 0),
     }
     return reset_values
 
