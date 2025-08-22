@@ -3,16 +3,13 @@
 
 
 #python
-#Scrabble BX
-#Added way to assign a blank letter when typing on board
-
-#Now left/right arrows move back/forward in Replay mode
-
-#Added one vowel/one consonant rule to Duplicate
+#Scrabble BY
+# Added sound when AI plays and move >5 seconds
+# Added up/down arrow through move list in Replay Mode
 
 
 
-#17AUG25
+#22AUG25
 
 
 
@@ -75,7 +72,23 @@ class Gaddag:
 
 # Initialize Pygame
 pygame.init()
+pygame.mixer.init() # Initialize the mixer
+if not pygame.mixer.get_init():
+    print("Warning: Pygame mixer could not be initialized. Sounds will be disabled.")
 main_called = False # Flag to track if main() has been entered
+
+# --- NEW: Load AI turn sound ---
+AI_PLAY_SOUND = None
+if pygame.mixer.get_init(): # Only try to load if mixer is working
+    try:
+        # You will need to provide this sound file.
+        # It should be a .wav or .ogg file in the same directory as your game.
+        AI_PLAY_SOUND = pygame.mixer.Sound("ai_play_sound.wav")
+        print("AI turn notification sound loaded successfully.")
+    except pygame.error as e:
+        print(f"Warning: Could not load 'ai_play_sound.wav'. AI turn sound will be disabled. Error: {e}")
+        print("         To enable this feature, please provide a sound file named 'ai_play_sound.wav'.")
+# --- END NEW ---
 
 # Constants
 GADDAG_STRUCTURE = None
@@ -6684,6 +6697,10 @@ def ai_turn(state):
     MODIFIED: Now includes clock management and heuristic thresholds to adapt
     simulation parameters based on time and board state.
     """
+    # --- NEW: Record start time for turn duration and sound effect ---
+    turn_start_time = time.perf_counter()
+    # --- END NEW ---
+
     # Add a guard clause at the top to prevent any action if the game is already paused for practice.
     if state.get('paused_for_power_tile') or state.get('paused_for_bingo_practice'):
         return state
@@ -6691,6 +6708,9 @@ def ai_turn(state):
     global last_played_highlight_coords, is_solving_endgame
     global USE_AI_SIMULATION, USE_ENDGAME_SOLVER
     global seven_letter_words, eight_letter_words, bbb_7l_max_prob_global, bbb_8l_max_prob_global
+    # --- NEW: Access sound global and mode constant ---
+    global AI_PLAY_SOUND, MODE_HVA
+    # --- END NEW ---
 
     is_silent_batch_run_param = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
     
@@ -6828,6 +6848,7 @@ def ai_turn(state):
             'player': turn, 'move_type': 'place', 'rack': move_rack_before, 'drawn': drawn_tiles,
             'newly_placed': newly_placed, 'tiles_played_from_rack': tiles_consumed,
             'coord': ai_engine.get_coord(details.get('start', (0,0)), details.get('direction', 'right'), is_silent_batch_run_param)
+        
         })
         state['first_play'] = False
         state['consecutive_zero_point_turns'] = 0
@@ -6879,9 +6900,14 @@ def ai_turn(state):
         total_expected_value_of_this_draw = expected_single_draw_value_for_turn * len(drawn_tiles)
         luck_factor = actual_drawn_leave_value - total_expected_value_of_this_draw
     
+    turn_duration = time.perf_counter() - turn_start_time
     details['total_expected_draw_value'] = total_expected_value_of_this_draw
     details['luck_factor'] = luck_factor
-    details['turn_duration'] = 0.0 # Placeholder
+    details['turn_duration'] = turn_duration # Update with actual duration
+
+    # Play sound if AI took a long time in HVA mode
+    if turn_duration > 5 and state.get('game_mode') == MODE_HVA and AI_PLAY_SOUND:
+        AI_PLAY_SOUND.play()
     
     state['move_history'].append(details)
     state['current_replay_turn'] = len(state['move_history'])
@@ -11747,10 +11773,11 @@ def _handle_keydown_event(event, state, drawn_rects):
     if _handle_keydown_dialog_navigation(event, state, drawn_rects):
         return running_inner, return_to_mode_selection, batch_stop_requested, start_new_game_same_mode
 
-    # --- NEW: Handle Replay Navigation with Arrow Keys ---
+    # --- MODIFICATION START: Handle Replay Navigation with Arrow Keys ---
     if state.get('replay_mode') and not (state.get('hinting') or state.get('showing_all_words') or state.get('showing_stats')):
         turn_changed_by_key = False
         new_replay_turn = state['current_replay_turn']
+        is_silent_run = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
 
         if event.key == pygame.K_LEFT:
             if new_replay_turn > 0:
@@ -11761,9 +11788,52 @@ def _handle_keydown_event(event, state, drawn_rects):
                 new_replay_turn += 1
                 turn_changed_by_key = True
         
-        if turn_changed_by_key:
-            is_silent_run = state.get('is_batch_running', False) and not DEV_VISUALIZE_BATCH_ENABLED_SESSION
+        elif event.key in (pygame.K_UP, pygame.K_DOWN) and state.get('analyzer_show', False) and insights_data_for_replay:
+            turn_idx_for_insights = state['current_replay_turn'] - 1 if state['current_replay_turn'] > 0 else 0
             
+            if 0 <= turn_idx_for_insights < len(insights_data_for_replay):
+                moves_for_this_turn = insights_data_for_replay[turn_idx_for_insights]
+                if moves_for_this_turn:
+                    current_selection_key = state.get('analyzer_selected_move_index')
+                    current_move_idx = -1
+                    
+                    if current_selection_key is not None:
+                        selection_turn_idx = current_selection_key // 1000
+                        if selection_turn_idx == turn_idx_for_insights:
+                            current_move_idx = current_selection_key % 1000
+                    
+                    new_move_idx = current_move_idx
+                    if event.key == pygame.K_DOWN:
+                        if current_move_idx == -1:
+                            new_move_idx = 0
+                        else:
+                            new_move_idx = min(len(moves_for_this_turn) - 1, current_move_idx + 1)
+                    elif event.key == pygame.K_UP:
+                        if current_move_idx != -1:
+                            new_move_idx = max(0, current_move_idx - 1)
+                    
+                    if new_move_idx != current_move_idx:
+                        state['analyzer_selected_move_index'] = turn_idx_for_insights * 1000 + new_move_idx
+                        
+                        # Apply preview
+                        state = clear_current_preview(state)
+                        sgs_data_for_preview = state.get('sgs_loaded_game_data')
+                        historical_tiles, historical_blanks, _, _, _, _ = get_sgs_replay_state(
+                            sgs_data_for_preview, turn_idx_for_insights, is_silent_batch_run_param=True
+                        )
+                        state['tiles'] = historical_tiles
+                        state['blanks'] = historical_blanks
+                        
+                        move_to_preview_data = moves_for_this_turn[new_move_idx]
+                        move_for_preview_func = {
+                            'newly_placed': move_to_preview_data.get('newly_placed', []),
+                            'blanks': move_to_preview_data.get('blanks_in_move', set())
+                        }
+                        state = apply_move_as_preview(state, move_for_preview_func)
+            
+            return running_inner, return_to_mode_selection, batch_stop_requested, start_new_game_same_mode
+
+        if turn_changed_by_key:
             state['current_replay_turn'] = new_replay_turn
             state = clear_current_preview(state)
             state['last_played_highlight_coords'] = set()
@@ -11798,7 +11868,7 @@ def _handle_keydown_event(event, state, drawn_rects):
             state['replay_unseen_tiles_for_display'] = Counter(combined_unseen)
             
             return running_inner, return_to_mode_selection, batch_stop_requested, start_new_game_same_mode
-    # --- END NEW SECTION ---
+    # --- MODIFICATION END ---
 
     # 4. Handle typing on the board
     current_player_idx = state['turn'] - 1
