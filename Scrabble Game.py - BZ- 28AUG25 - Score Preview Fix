@@ -3,14 +3,13 @@
 
 
 #python
-#Scrabble BY
-# Added sound when AI plays and move >5 seconds
-# Added up/down arrow through move list in Replay Mode
-# Made Exchange Dialog movable
+#Scrabble BZ
+# Fixed Score Preview
 
 
 
-#22AUG25
+
+#28AUG25
 
 
 
@@ -1970,7 +1969,7 @@ def draw_duplicate_score_tracker(screen, state, drawn_rects):
 def draw_rack(player, rack, scores, turn, player_names, dragged_tile=None, drag_pos=None, display_scores=None, is_visible=True, is_human_game=False):
     """Draw a player's rack with tiles, scores, and buttons."""
     global practice_mode # Access global practice_mode
-    if not rack: return None, None, None
+    if rack is None: return None, None, None
     if display_scores is None: display_scores = scores
     if practice_mode in ['eight_letter', 'duplicate'] and player == 2: return None, None, None
 
@@ -2022,13 +2021,13 @@ def draw_rack(player, rack, scores, turn, player_names, dragged_tile=None, drag_
     player_idx = player - 1
     if player_names is not None and display_scores is not None and \
        0 <= player_idx < len(player_names) and 0 <= player_idx < len(display_scores):
-        player_name_display = player_names[player_idx] if player_names[player_idx] else f'Player {player}'
-        score_text_content = f'{player_name_display} Score: {int(display_scores[player_idx])}'
+        player_name_display = player_names[player_idx] if player_names[player_idx] else f'Player \{player}'
+        score_text_content = f'\{player_name_display} Score: \{int(display_scores[player_idx])}'
         score_text_surface = ui_font.render(score_text_content, True, BLACK)
         score_text_y_position = rack_y - 24 
         screen.blit(score_text_surface, (start_x, score_text_y_position))
     else: 
-        print(f'Warning: Invalid player index {player} or missing score/name data for score display.')
+        print(f'Warning: Invalid player index \{player} or missing score/name data for score display.')
         
     return alpha_button_rect, rand_button_rect, eye_icon_rect
 
