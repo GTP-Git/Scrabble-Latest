@@ -9239,7 +9239,7 @@ def _handle_mouse_down_exchange_dialog(event, state, drawn_rects):
                 if selected_tiles:
                     tiles_to_exchange_list = [racks[turn-1][i_sel] for i_sel in selected_tiles]
                     if not is_silent_run_local:
-                        print(f"Player \{turn} exchanging \{len(tiles_to_exchange_list)} tiles: \{''.join(sorted(tiles_to_exchange_list))}")
+                        print(f"Player {turn} exchanging {len(tiles_to_exchange_list)} tiles: {''.join(sorted(tiles_to_exchange_list))}")
                     
                     move_rack_before_exchange = racks[turn-1][:] if 0 <= turn-1 < len(racks) and racks[turn-1] is not None else []
                     
@@ -9274,7 +9274,7 @@ def _handle_mouse_down_exchange_dialog(event, state, drawn_rects):
                         luck_factor_exchange = drawn_leave_value_exchange - expected_draw_value_simple_exchange
                         if not is_silent_run_local:
                             drawn_tiles_str_exchange = "".join(sorted(t if t != ' ' else '?' for t in drawn_tiles_exchange))
-                            print(f"  Drew (Exchange): \{drawn_tiles_str_exchange}, Leave Value: \{drawn_leave_value_exchange:.2f\}, Luck: \{luck_factor_exchange:+.2f\}")
+                            print(f"  Drew (Exchange): {drawn_tiles_str_exchange}, Leave Value: {drawn_leave_value_exchange:.2f}, Luck: {luck_factor_exchange:+.2f}")
                     
                     state['move_history'].append({
                         'player': turn, 'move_type': 'exchange', 
@@ -9288,8 +9288,6 @@ def _handle_mouse_down_exchange_dialog(event, state, drawn_rects):
                         'luck_factor': luck_factor_exchange,
                         'tiles_played_from_rack': [], # No tiles played on board
                         'leave': leave_for_history # Use the correctly captured leave
-                    
-                    
                     })
                     state['current_replay_turn'] = len(state['move_history'])
                     
